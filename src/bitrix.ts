@@ -895,6 +895,14 @@ export interface TaskAttachment {
 }
 
 export interface TaskDetail {
+  /**
+   * Do KTOREGO zadania naleza te szczegoly.
+   *
+   * Bez tego nie dalo sie odroznic „szczegoly juz sa" od „szczegoly sa, ale
+   * jeszcze poprzedniego zadania" — a z nich bierze sie `chatId`, po ktorym
+   * ciagniemy komentarze. Patrz komentarz przy `Comments` w App.tsx.
+   */
+  taskId: number;
   description: string;
   /** Wspolwykonawcy i obserwatorzy zadania — pola specyficzne dla Bitriksa. */
   accomplices: Person[];
@@ -994,6 +1002,7 @@ export async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
     timeEstimate: Number(t.timeEstimate ?? 0),
     storyPoints: storyPointValue(scrum?.storyPoints),
     chatId: relId(t.chatId),
+    taskId: Number(t.id ?? t.ID),
     attachments,
   };
 }
@@ -1386,11 +1395,19 @@ export function spansMultipleDays(intervals: Interval[]): boolean {
   });
 }
 
-/** Czas jako "3 dni 4 godz. 12 min" — puste jednostki znikaja, zero to "0 min". */
-export function formatDurationPl(ms: number): string {
+/**
+ * Czas jako "3 dni 4 godz. 12 min" — puste jednostki znikaja, zero to "0 min".
+ *
+ * `hoursOnly` wylacza dni i podaje wszystko w godzinach ("25 godz. 10 min").
+ * Do czasu PRZYCIETEGO do godzin pracy: tam „1 dzień 1 godz." klamie, bo dzien
+ * roboczy ma osiem godzin, a nie dwadziescia cztery — czytajac „1 dzień" liczy
+ * sie w glowie osiem i wychodzi trzy razy za malo. W czasie zegarowym dni
+ * znacza dokladnie to, co powinny, wiec tam zostaja.
+ */
+export function formatDurationPl(ms: number, hoursOnly = false): string {
   const totalMin = Math.round(ms / 60000);
-  const days = Math.floor(totalMin / 1440);
-  const hours = Math.floor((totalMin % 1440) / 60);
+  const days = hoursOnly ? 0 : Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin - days * 1440) / 60);
   const mins = totalMin % 60;
 
   const parts: string[] = [];

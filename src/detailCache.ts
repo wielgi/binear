@@ -81,7 +81,7 @@ const details = makeCache<TaskDetail>(
   (d) => Array.isArray(d?.attachments),
 );
 const comments = makeCache<Comment[]>(
-  'binear.comments.v2',
+  'binear.comments.v3',
   // v2: doszlo `files` (zalaczniki komentarza z czatu).
   (list) => Array.isArray(list) && list.every((c) => Array.isArray(c?.files)),
 );
@@ -91,6 +91,13 @@ const comments = makeCache<Comment[]>(
 try {
   localStorage.removeItem('binear.comments.v1');
   localStorage.removeItem('binear.details.v1');
+  /*
+   * `.v2` komentarzy bywa ZATRUTE: przy szybkim przelaczaniu zadan zapisywal sie
+   * tam watek innego zadania (patrz `mine` w panelu szczegolow). Ksztalt danych sie
+   * nie zmienil, ale tresci nie da sie zweryfikowac, wiec jedyne wyjscie to zaczac
+   * od zera — koszt to jedno pobranie przy nastepnym otwarciu.
+   */
+  localStorage.removeItem('binear.comments.v2');
 } catch {
   // tryb prywatny / brak dostepu — nie ma czego sprzatac
 }

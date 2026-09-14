@@ -3159,13 +3159,22 @@ function Comments({
     if (bigTime) askRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [bigTime]);
 
+  /*
+   * `stale` jak przy szczegolach: dwa pobrania tego samego watku (np. po wyslaniu
+   * komentarza w trakcie wczytywania) potrafia wrocic w odwrotnej kolejnosci i
+   * starsza odpowiedz nadpisalaby nowsza — takze w CACHE.
+   */
+  const loadSeq = useRef(0);
+
   const load = useCallback(() => {
     if (!ready) return; // bez chatId pytanie byloby niepelne
+    const seq = ++loadSeq.current;
     const cached = getCachedComments(taskId);
     setComments(cached); // z cache (albo null przy pierwszym otwarciu -> "Wczytywanie…")
     setFailed(null);
     fetchComments(taskId, chatId)
       .then((c) => {
+        if (seq !== loadSeq.current) return;
         setComments(c);
         setCachedComments(taskId, c);
       })
@@ -3175,15 +3184,15 @@ function Comments({
        * przez to awaria pobierania wygladala jak puste zadanie. Gdy mamy cache,
        * zostajemy przy nim zamiast pokazywac blad.
        */
-      .catch((e) => !cached && setFailed(e instanceof Error ? e.message : String(e)));
+      .catch((e) => seq === loadSeq.current && !cached && setFailed(e instanceof Error ? e.message : String(e)));
   }, [ready, taskId, chatId]);
 
   useEffect(load, [load]);
 
   /** Dokleja gotowa linijke z czasem do pola komentarza (nie wysyla). */
-  const insertLine = (ms: number) =>
+  const insertLine = (ms: number, hoursOnly = false) =>
     setDraft((prev) => {
-      const line = `Czas pracy nad zadaniem: ${formatDurationPl(ms)}`;
+      const line = `Czas pracy nad zadaniem: ${formatDurationPl(ms, hoursOnly)}`;
       return prev.trim() ? `${prev.replace(/\s+$/, '')}\n${line}` : line;
     });
 
@@ -3437,11 +3446,11 @@ function Comments({
             <button
               className="btn btn-primary"
               onClick={() => {
-                insertLine(bigTime.workMs);
+                insertLine(bigTime.workMs, true);
                 setBigTime(null);
               }}
             >
-              Przytnij → {formatDurationPl(bigTime.workMs)}
+              Przytnij → {formatDurationPl(bigTime.workMs, true)}
             </button>
             <button
               className="btn"
@@ -3669,7 +3678,31 @@ function DateField({ value, onChange }: { value: string | null; onChange: (date:
         className="dd-date-hidden"
         min={today}
         value={value ? value.slice(0, 10) : ''}
-        onChange={(e) => onChange(e.target.value)}
+        /*
+         * Wysylamy date Z GODZINA I Z JAWNA STREFA, nie sama date.
+         *
+         * Goly „2026-09-18" Bitrix czyta jako polnoc we WLASNEJ strefie (+03:00),
+         * czyli u nas (+02:00) 17.09 o 23:00 — termin ladowal dzien wczesniej,
+         * niz wybrales. Samo dopisanie „T23:00:00" naprawia dzien, ale nie
+         * godzine: Bitrix nadal czyta ja u siebie i pokazuje 22:00.
+         *
+         * Z jawnym przesunieciem chwila jest jednoznaczna — 23:00 znaczy 23:00
+         * po obu stronach. Przesuniecie liczymy DLA WYBRANEGO DNIA, nie dla
+         * dzisiaj, zeby zmiana czasu letniego nie przesunela terminu o godzine.
+         */
+        onChange={(e) => {
+          /* Wyczyszczenie pola to PUSTA wartosc — nie ma dnia, do ktorego dokladac
+             godzine i strefe (`new Date('T23:00:00')` to Invalid Date i NaN-y). */
+          if (!e.target.value) {
+            onChange('');
+            return;
+          }
+          const at = new Date(`${e.target.value}T23:00:00`);
+          const off = -at.getTimezoneOffset();
+          const sign = off < 0 ? '-' : '+';
+          const pad = (n: number) => String(Math.floor(Math.abs(n))).padStart(2, '0');
+          onChange(`${e.target.value}T23:00:00${sign}${pad(off / 60)}:${pad(off % 60)}`);
+        }}
         tabIndex={-1}
         aria-hidden
       />
@@ -3969,6 +4002,9 @@ function DetailPanel({
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
+
+  /* Szczegoly TEGO zadania, a nie jakiekolwiek — patrz `TaskDetail.taskId`. */
+  const mine = detail?.taskId === task.id ? detail : null;
 
   return (
     <aside className="detail" style={{ width }}>
@@ -4518,11 +4554,20 @@ function DetailPanel({
           od tego, ktora odpowiedz przyszla ostatnia. Przy okazji czysci sie
           niedokonczona tresc w polu komentarza.
         */}
+        {/*
+          `chatId` MUSI pochodzic z detalu TEGO zadania.
+          Panel nie jest kluczowany po zadaniu, wiec przy przelaczeniu renderuje sie
+          najpierw z `detail` POPRZEDNIEGO (czyszczenie leci w efekcie, czyli po
+          renderze). `Comments` — kluczowane — montowalo sie wtedy z nowym `taskId`,
+          starym `chatId` i `ready` juz `true`, a `fetchComments` sklada forum ZADANIA
+          z czatem CHAT-ID. Wynik: cudzy watek, zapisany w cache pod nowym id — stad
+          komentarze, ktore nie mijaly po przelaczeniu zadania.
+        */}
         <Comments
           key={task.id}
           taskId={task.id}
-          chatId={detail?.chatId ?? null}
-          ready={detail !== null || detailError}
+          chatId={mine?.chatId ?? null}
+          ready={mine !== null || detailError}
           me={me}
           people={people}
           onError={onError}
@@ -6349,17 +6394,24 @@ export default function App() {
   /** Ikona/awatar pojedynczej wartosci filtra — do „facepile" na chipie (jak w Linearze). */
   const filterValueIcon = useCallback(
     (field: FilterField, value: string): ReactNode => {
-      if (field === 'assignee') {
-        if (Number(value) === UNASSIGNED_ID) return <Avatar name={null} />;
-        const p = people.find((x) => x.id === Number(value));
-        return <Avatar name={p?.name ?? `#${value}`} photo={p?.photo} />;
-      }
-      if (field === 'creator') {
-        const p = creators.find((x) => x.id === Number(value));
-        return <Avatar name={p?.name ?? `#${value}`} photo={p?.photo} />;
-      }
-      if (field === 'observer') {
-        const p = observers.find((x) => x.id === Number(value));
+      if (isPersonField(field)) {
+        /* Konto-zaslepka ma byc pustym krazkiem NAPRAWDE — to jedyny taki przypadek. */
+        if (field === 'assignee' && Number(value) === UNASSIGNED_ID) return <Avatar name={null} />;
+        /*
+         * Szukamy we WSZYSTKICH trzech listach osob, zaczynajac od wlasciwej dla
+         * tego wymiaru. Kazda powstaje z innego pola zadan (odpowiedzialny, autor,
+         * obserwator), wiec ktos moze byc obserwatorem, nie bedac nigdzie
+         * odpowiedzialnym — i odwrotnie. Zdjecie jest to samo niezaleznie od tego,
+         * ktora lista je przyniosla, wiec nie ma powodu odpuszczac.
+         */
+        const id = Number(value);
+        const order =
+          field === 'creator'
+            ? [creators, people, observers]
+            : field === 'observer'
+              ? [observers, people, creators]
+              : [people, creators, observers];
+        const p = order.map((list) => list.find((x) => x.id === id)).find(Boolean);
         return <Avatar name={p?.name ?? `#${value}`} photo={p?.photo} />;
       }
       if (field === 'priority') return <PriorityIcon priority={value} />;
@@ -6417,6 +6469,10 @@ export default function App() {
    * samo w chipie jedno- i wielowartosciowym, zeby pojedyncza wartosc miala to samo
    * tlo co monety w facepile — rozni je tylko podpis obok (tylko przy 1 wartosci).
    */
+  /** Wymiary, ktorych wartoscia jest OSOBA — wszystkie rysuja awatar. */
+  const isPersonField = (f: FilterField) =>
+    f === 'assignee' || f === 'creator' || f === 'observer';
+
   const filterToken = useCallback(
     (field: FilterField, v: string, i: number): ReactNode => {
       const color = filterValueColor(field, v);
@@ -6438,8 +6494,15 @@ export default function App() {
               : {}),
           }}
         >
-          {field === 'assignee' ? (
-            filterValueIcon('assignee', v)
+          {/*
+            KAZDY wymiar osobowy idzie po awatar, nie tylko „assignee".
+            `creator` i `observer` nie lapaly sie na zadna gałąź i spadaly do
+            ostatniej — czyli po ikone PRIORYTETU, ktora dla wartosci nie bedacej
+            priorytetem rysuje pusta podkladke. Stad pusty krazek w chipie przy
+            osobie, ktora w pickerze miala normalne zdjecie.
+          */}
+          {isPersonField(field) ? (
+            filterValueIcon(field, v)
           ) : hasIcon ? (
             filterValueIcon(field, v)
           ) : field === 'tag' || field === 'epic' ? (
