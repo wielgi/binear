@@ -1,5 +1,7 @@
 /** Klient REST Bitrix — leci przez lokalne proxy, token nigdy nie trafia do przegladarki. */
 
+import { describe, logAction, slimParams, taskIdOf, WRITE_METHODS } from './history';
+
 export class BxError extends Error {
   constructor(
     message: string,
@@ -23,8 +25,40 @@ async function post(method: string, params: Record<string, unknown>): Promise<an
   return json;
 }
 
+/*
+ * Jedno przejscie dla wszystkich wywolan — i dlatego jedyne sensowne miejsce na
+ * dziennik. Logowanie przy kazdej funkcji mutujacej z osobna znaczyloby, ze
+ * nastepna dopisana funkcja po cichu do dziennika nie trafia.
+ *
+ * Piszemy TYLKO zapisy (`WRITE_METHODS`) i piszemy je RAZEM Z BLEDAMI: nieudana
+ * proba jest zwykle wazniejsza od udanej, a w dzienniku Bitriksa nie zostawia
+ * po sobie nic.
+ */
 async function call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-  return (await post(method, params)).result as T;
+  if (!WRITE_METHODS.has(method)) return (await post(method, params)).result as T;
+
+  try {
+    const result = (await post(method, params)).result as T;
+    logAction({
+      at: Date.now(),
+      method,
+      taskId: taskIdOf(params),
+      label: describe(method, params),
+      params: slimParams(params),
+      error: null,
+    });
+    return result;
+  } catch (e) {
+    logAction({
+      at: Date.now(),
+      method,
+      taskId: taskIdOf(params),
+      label: describe(method, params),
+      params: slimParams(params),
+      error: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
 }
 
 /** Serializacja do query stringa w formacie Bitriksa: `filter[GROUP_ID]=451&select[0]=ID`. */
@@ -1184,6 +1218,8 @@ export interface HistoryEntry {
   field: string;
   from: string;
   to: string;
+  /** Kto zmienil — API oddaje to w `user`, a przy zmianach z zewnatrz to sedno. */
+  by: string | null;
 }
 
 /**
@@ -1215,6 +1251,7 @@ export async function fetchTaskHistory(taskId: number): Promise<HistoryEntry[]> 
     field: str(h.field ?? h.FIELD),
     from: str(h.value?.from ?? h.value?.FROM ?? h.FROM_VALUE ?? ''),
     to: str(h.value?.to ?? h.value?.TO ?? h.TO_VALUE ?? ''),
+    by: [str(h.user?.name), str(h.user?.lastName)].filter(Boolean).join(' ') || null,
   }));
 }
 

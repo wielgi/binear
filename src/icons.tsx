@@ -574,6 +574,23 @@ export function GripIcon() {
   );
 }
 
+/** Zegar ze wskazowka cofnieta — dziennik akcji binear. */
+export function HistoryIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+      <circle cx="8" cy="8" r="5.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M8 4.6V8l2.4 1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Spinacz — zalacznik komentarza, ktory nie jest obrazkiem. */
 export function ClipIcon() {
   return (

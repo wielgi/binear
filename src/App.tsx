@@ -75,6 +75,7 @@ import {
   Avatar,
   ChevronIcon,
   GroupIcon,
+  HistoryIcon,
   PriorityIcon,
   SearchIcon,
   StageIcon,
@@ -122,6 +123,22 @@ import {
   UNASSIGNED_LABEL,
 } from './taskView';
 import { Picker, type Anchor, type Option } from './Picker';
+import {
+  describe as describeAction,
+  HISTORY_DAYS,
+  onHistoryChange,
+  readHistory,
+  foldEntries,
+  MARK,
+  SEP,
+  diffTasks,
+  logAction,
+  noteAuthor,
+  notePrevious,
+  setTaskNames,
+  type HistoryEntry,
+  type Resolve,
+} from './history';
 import { TaskCode } from './TaskCode';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
@@ -830,8 +847,23 @@ function useBitrixData() {
    * wiec ich zmiana nie ma prawa sama z siebie odswiezac widoku.
    */
   const pinsRef = useRef<Map<number, Pin>>(new Map());
+  /*
+   * Stan zadan, z ktorym porownujemy NASTEPNE pobranie — zrodlo wpisow „zmiana
+   * spoza binear". Osobny od `tasksRef`, bo tamten aktualizuje sie dopiero w
+   * efekcie; tutaj potrzebujemy podmiany dokladnie w chwili porownania.
+   */
+  const seenRef = useRef<Map<number, Record<string, unknown>>>(new Map());
   useEffect(() => {
     tasksRef.current = data.tasks;
+    /*
+     * Dziennik dostaje nazwy zadan, zeby WPISAC je do swoich wpisow. Nie czyta
+     * ich pozniej po id: zadanie bywa skasowane albo chwilowo wypadniete z
+     * `tasks.task.list`, a wpis ma zostac czytelny. Patrz `setTaskNames`.
+     */
+    setTaskNames(
+      new Map(data.tasks.map((t) => [t.id, { code: t.code, title: t.title || t.rawTitle }])),
+    );
+
   }, [data.tasks]);
 
   /** Najswiezsza data zmiany z ostatniego pobrania — prog sondy. */
@@ -960,6 +992,69 @@ function useBitrixData() {
           const progress = s.type === 'FINISH' ? 1 : flow.length < 2 ? 0 : i / (flow.length - 1);
           stageMeta.set(s.id, { color: s.color, progress });
         }
+      }
+
+      /*
+       * ZMIANY Z ZEWNATRZ — czyli te, ktorych binear nie zrobil.
+       *
+       * Wychodza z porownania tego, co mielismy, z tym, co wlasnie przyszlo.
+       * Pierwsze wczytanie pomijamy (nie ma z czym porownywac), pola z pinezka
+       * takze — to nasze wlasne zapisy, ktorych lista jeszcze nie potwierdza.
+       *
+       * AUTORA TU NIE PYTAMY. Kusilo, zeby dociagnac go od razu z dziennika
+       * Bitriksa, ale to jedno wywolanie NA ZADANIE przy kazdym odswiezeniu —
+       * przy fali zmian (zamkniecie sprintu rusza kilkadziesiat zadan) wprost
+       * droga do `QUERY_LIMIT_EXCEEDED`, czyli do wywalenia calej aplikacji po to,
+       * zeby dopisac nazwisko. Nazwisko dociaga panel dziennika, i tylko dla
+       * wpisow, na ktore ktos faktycznie patrzy — patrz `useAuthors`.
+       */
+      if (seenRef.current.size) {
+        const changes = diffTasks(
+          seenRef.current,
+          tasks as unknown as Record<string, unknown>[],
+          /*
+           * `in`, a NIE sprawdzenie wartosci. Pinezka na `deadline: null` albo
+           * `storyPoints: 0` jest prawdziwa pinezka — przy testowaniu wartosci
+           * wypadlaby jako falsz i wlasne wyczyszczenie terminu trafiloby do
+           * dziennika jako CUDZA zmiana. Liczy sie obecnosc pola, nie jego tresc.
+           */
+          (taskId, prop) => {
+            const pin = pinsRef.current.get(taskId);
+            return Boolean(pin) && prop in pin!.fields;
+          },
+        );
+
+        /*
+         * Stan odniesienia podmieniamy OD RAZU, a nie przez `tasksRef` (ten
+         * aktualizuje sie dopiero w efekcie, po renderze). Dwa pobrania pod rzad —
+         * np. reczne odswiezenie w trakcie cichego — porownywalyby sie wtedy z tym
+         * samym starym stanem i zapisaly te sama zmiane dwa razy.
+         */
+        seenRef.current = new Map(
+          tasks.map((t) => [t.id, t as unknown as Record<string, unknown>]),
+        );
+
+        for (const c of changes) {
+          logAction({
+            at: Date.now(),
+            /* Ten sam ksztalt co nasze wpisy — dzieki temu `describe` opisuje je
+               tym samym slownikiem i z ta sama strzalka „z czego na co". */
+            method: 'tasks.task.update',
+            taskId: c.taskId,
+            /* Surowy opis jako zapas — tak samo jak przy naszych wpisach. */
+            label: describeAction('tasks.task.update', { fields: c.fields }),
+            error: null,
+            params: { fields: c.fields },
+            before: c.before,
+            source: 'bitrix',
+          });
+        }
+      } else {
+        /* Pierwsze pobranie: nie ma z czym porownywac, ale trzeba zapamietac punkt
+           odniesienia — inaczej wykrywanie nigdy by nie ruszylo. */
+        seenRef.current = new Map(
+          tasks.map((t) => [t.id, t as unknown as Record<string, unknown>]),
+        );
       }
 
       setData((prev) => {
@@ -1114,6 +1209,12 @@ function useBitrixData() {
       const rollback = Object.fromEntries(
         Object.keys(patch).map((k) => [k, before[k as keyof Task]]),
       ) as Partial<Task>;
+
+      /*
+       * Dziennik dostaje stan SPRZED zmiany — zaraz nalozymy ja optymistycznie
+       * i `data.tasks` bedzie juz niosl nowa wartosc. Patrz `notePrevious`.
+       */
+      notePrevious(id, before as unknown as Record<string, unknown>);
 
       patchTasks(id, patch);
       /*
@@ -3647,6 +3748,7 @@ function DetailPanel({
   onTitle,
   onClose,
   onDelete,
+  onHistory,
   onError,
 }: {
   task: Task;
@@ -3678,6 +3780,8 @@ function DetailPanel({
   onClose: () => void;
   /** Usuniecie zadania — panel sam pyta o potwierdzenie przez App (setConfirm). */
   onDelete: () => void;
+  /** Otwiera dziennik zawezony do tego zadania. */
+  onHistory: (taskId: number) => void;
   onError: (m: string) => void;
 }) {
   // Opis nie jedzie w liscie (bylby kilka MB dla ~1000 zadan) — dociagamy przy otwarciu.
@@ -3872,6 +3976,18 @@ function DetailPanel({
       <div className="detail-head">
         <TaskCode code={task.code ?? `#${task.id}`} copy={task.code ?? String(task.id)} onCopied={() => {}} />
         <div className="detail-head-right">
+          {/*
+            Droga w druga strone niz z dziennika do zadania: stad pytamy „co
+            binear zrobil TEMU zadaniu". Bez tego trzeba bylo otworzyc dziennik
+            i szukac w nim wierszy tego zadania recznie.
+          */}
+          <button
+            className="icon-btn"
+            onClick={() => onHistory(task.id)}
+            title="Co binear zapisał w tym zadaniu"
+          >
+            <HistoryIcon />
+          </button>
           <a
             className="icon-btn"
             href={`${portal ?? ''}/company/personal/user/${task.responsibleId ?? me ?? ''}/tasks/task/view/${task.id}/`}
@@ -4474,6 +4590,7 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ['P'], label: 'Priorytet' },
   { keys: ['S'], label: 'Status (z potwierdzeniem)' },
   { keys: [MOD, 'Enter'], label: 'Wyślij komentarz' },
+  { keys: ['D'], label: 'Dziennik akcji — co binear zapisał do Bitriksa' },
   { keys: ['?'], label: 'Ta ściągawka' },
 ];
 
@@ -4976,6 +5093,601 @@ interface MenuState {
 }
 
 /** Menu kontekstowe — glowna droga do akcji; skroty klawiszowe sa alternatywa. */
+/**
+ * Dziennik akcji — co binear zapisal do Bitriksa.
+ *
+ * Czyta z `localStorage` przez `readHistory`, a nie z jakiegokolwiek stanu
+ * aplikacji: wpisy powstaja w `bitrix.ts`, czesto poza cyklem Reacta, i maja
+ * przezyc przeladowanie strony. `onHistoryChange` odswieza panel od razu, gdy
+ * cos dopisze sie w tle.
+ *
+ * Numer zadania zamieniamy na kod (IT-NNN) TU, przy wyswietlaniu — kod bywa
+ * nadany dopiero po akcji, wiec zapisany w chwili zdarzenia czesto bylby pusty.
+ */
+/**
+ * Dziennik akcji — co binear zapisal do Bitriksa.
+ *
+ * Wpis powstaje w `bitrix.ts`, daleko od Reacta, wiec siedza w nim SUROWE
+ * identyfikatory („etap → 4681"). Dopiero tutaj, gdzie sa slowniki etapow, osob
+ * i statusow, skladamy opis jeszcze raz — ta sama funkcja `describe`, tyle ze z
+ * podpowiadaczem nazw. Zapisany `label` zostaje zapasem: dla starych wpisow
+ * sprzed tej zmiany i dla identyfikatorow, ktorych juz nie ma w slownikach.
+ */
+function History({
+  initialFocus,
+  stageNames,
+  people,
+  labels,
+  sprints,
+  backlogId,
+  stageMeta,
+  onOpen,
+  isLive,
+  onClose,
+}: {
+  /** Zadanie, do ktorego dziennik otwiera sie zawezony — z panelu zadania. */
+  initialFocus: number | null;
+  stageNames: Map<number, string>;
+  people: Person[];
+  labels: FieldEnums;
+  sprints: Sprint[];
+  /** Rejestr to tez byt scruma, ale nie sprint — bez tego wychodzilo „sprint → #229". */
+  backlogId: number | null;
+  stageMeta: Map<number, { color: string | null; progress: number | null }>;
+  /** Otwiera panel zadania. Dziennik sam go nie zna — patrz `isLive`. */
+  onOpen: (taskId: number) => void;
+  /** Czy zadanie wciaz istnieje w projekcie. Do samego POKAZANIA wpisu niepotrzebne. */
+  isLive: (taskId: number) => boolean;
+  onClose: () => void;
+}) {
+  const [items, setItems] = useState<HistoryEntry[]>(() => readHistory());
+  useEffect(() => onHistoryChange(() => setItems(readHistory())), []);
+
+  /*
+   * Zawezenie do jednego zadania — „co binear zrobil TEMU zadaniu".
+   *
+   * Zwykle po to sie tu przychodzi: cos jest nie tak z konkretnym zadaniem i
+   * pytanie brzmi „czy to ja, i kiedy". Filtrujemy po `taskId`, nie po nazwie,
+   * wiec dziala tez dla zadania, ktore juz nie istnieje.
+   */
+  const [focus, setFocus] = useState<number | null>(initialFocus);
+  /*
+   * Szukanie i odsiew nieudanych. Przy oknie TYGODNIOWYM przewijanie przestalo
+   * wystarczac — wpisow bywa kilkaset, a szuka sie zwykle jednego konkretnego
+   * zadania albo jednej rzeczy, ktora sie nie zapisala.
+   */
+  const [query, setQuery] = useState('');
+  const [onlyFailed, setOnlyFailed] = useState(false);
+
+  /*
+   * Zadania skasowane — rozpoznane Z SAMEGO DZIENNIKA, po udanym wpisie
+   * `tasks.task.delete`, a nie po nieobecnosci w liscie zadan.
+   *
+   * Nieobecnosc klamie: zadanie potrafi zniknac z `tasks.task.list` na kilka
+   * minut po zapisie, moze tez byc w innym projekcie. Wpis o usunieciu to fakt,
+   * ktory sami zanotowalismy, i zostaje prawda takze po przeladowaniu strony.
+   */
+  const deleted = useMemo(
+    () =>
+      new Set(
+        items
+          .filter((e) => e.method === 'tasks.task.delete' && !e.error && e.taskId !== null)
+          .map((e) => e.taskId as number),
+      ),
+    [items],
+  );
+  /*
+   * Tozsamosc zawezonego zadania bierzemy ze WSZYSTKICH jego wpisow, nie z
+   * przefiltrowanych: przy wlaczonym szukaniu na ekranie moze nie byc ani
+   * jednego wiersza, a naglowek i tak ma powiedziec, o ktore zadanie chodzi.
+   */
+  const focused = useMemo(() => {
+    if (focus === null) return null;
+    const mine = items.filter((e) => e.taskId === focus);
+    return mine.find((e) => e.title) ?? mine[0] ?? null;
+  }, [focus, items]);
+
+  /*
+   * Nazwy wracaja OZNACZONE, zeby dalo sie je pozniej wyroznic w tekscie.
+   *
+   * `describe` sklada jedno zdanie i zwraca string — jest jeden dla zapisu i dla
+   * wyswietlania, i tak ma zostac (inaczej slownik pol zylby w dwoch miejscach).
+   * Zeby mimo to pokolorowac same nazwy, wkladamy wokol nich znaczniki i
+   * rozbieramy zdanie tuz przed renderem. Znaczniki nie opuszczaja tego
+   * komponentu i nigdy nie trafiaja do `localStorage`.
+   */
+  const resolve = useCallback<Resolve>(
+    (kind, id) => {
+      const n = Number(id);
+      const name =
+        kind === 'stage'
+          ? stageNames.get(n)
+          : kind === 'person'
+            ? people.find((p) => p.id === n)?.name
+            : kind === 'status'
+              ? labels.status[id]
+              : kind === 'priority'
+                ? (labels.priority[id] ?? FALLBACK_PRIORITY[id])
+                : kind === 'sprint'
+                  ? n === backlogId
+                    ? 'Rejestr'
+                    : sprints.find((sp) => sp.id === n)?.name
+                  : undefined;
+      /*
+       * Sama nazwa, BEZ znacznikow — owija je `describe`, i tylko ono.
+       *
+       * Wczesniej znakowal tez ten resolver, bo znaczniki powstaly wlasnie tutaj.
+       * Gdy trafily do `describe` (zeby objac takze pola bez identyfikatora, jak
+       * tagi czy termin), kazda rozpoznana nazwa byla owijana DWA RAZY i
+       * rozpadala sie na dwa czlony: pierwszy z sama ikona, drugi z ikona i
+       * tekstem. Stad podwojne pierscienie i po dwa awatary w jednym wierszu.
+       */
+      return name;
+    },
+    [stageNames, people, labels, sprints, backlogId],
+  );
+
+  /*
+   * Rozbiera oznaczone zdanie na kawalki. Etap dostaje swoj kolor z Bitriksa —
+   * ten sam, ktorym pomalowane sa kolumny tablicy, wiec „W toku" w dzienniku
+   * i „W toku" na tablicy to wzrokowo ta sama rzecz.
+   */
+  const renderWhat = useCallback(
+    (text: string) =>
+      text.split(MARK).map((chunk, i) => {
+        const at = chunk.indexOf(SEP);
+        if (at < 0) return <span key={i}>{chunk}</span>;
+        const [kind, id, name] = chunk.split(SEP);
+
+        /*
+         * Osoba dostaje twarz. Nazwisko czyta sie sekunde, twarz poznaje sie od
+         * razu — a w dzienniku najczestsze pytanie brzmi „kto", nie „jak sie
+         * nazywa". Zdjecie bierzemy z listy osob; gdy kogos juz tam nie ma
+         * (odszedl z firmy), `Avatar` sam rysuje inicjaly z nazwy z wpisu.
+         */
+        if (kind === 'person') {
+          const person = people.find((pp) => pp.id === Number(id));
+          return (
+            <span key={i} className="hist-name hist-name-person">
+              <Avatar name={name} photo={person?.photo} />
+              {name}
+            </span>
+          );
+        }
+
+        /*
+         * Ikona TA SAMA, ktorej aplikacja uzywa w tym znaczeniu gdzie indziej —
+         * kolko statusu z listy, chorągiewka priorytetu, pierscien etapu. Dzieki
+         * temu wpis czyta sie tym samym slownikiem obrazkow co reszta programu,
+         * zamiast uczyc drugiego. Rodzaje bez wlasnej ikony (sprint) zostaja
+         * samym tekstem — dorabianie im znaczka znaczyloby tylko „cos tu jest".
+         */
+        const icon =
+          kind === 'stage' ? (
+            (() => {
+              const meta = stageMeta.get(Number(id));
+              return <StageIcon progress={meta?.progress ?? null} color={meta?.color ?? null} />;
+            })()
+          ) : kind === 'status' ? (
+            <StatusIcon status={id} />
+          ) : kind === 'priority' ? (
+            <PriorityIcon priority={id} />
+          ) : kind === 'deadline' ? (
+            <CalendarIcon />
+          ) : kind === 'tags' ? (
+            <TagIcon />
+          ) : kind === 'title' ? (
+            <PenIcon />
+          ) : kind === 'people' ? (
+            <PersonIcon />
+          ) : kind === 'points' ? (
+            <HashIcon />
+          ) : kind === 'epic' ? (
+            <LayersIcon />
+          ) : kind === 'related' ? (
+            <LinkIcon />
+          ) : kind === 'comment' ? (
+            <CommentIcon />
+          ) : kind === 'check' ? (
+            <CheckIcon />
+          ) : kind === 'delete' ? (
+            <TrashIcon />
+          ) : null;
+
+        const color = kind === 'stage' ? stageMeta.get(Number(id))?.color : null;
+        return (
+          <span
+            key={i}
+            className={`hist-name hist-name-${kind}`}
+            style={color ? ({ '--tint': `#${color}` } as CSSProperties) : undefined}
+          >
+            {icon}
+            {name}
+          </span>
+        );
+      }),
+    [stageMeta, people],
+  );
+
+  /*
+   * ZWIJANIE wejscia do sprintu w jeden wiersz.
+   *
+   * `moveToSprint` robi cztery zapisy: przynaleznosc, karta na tablicy, kolumna
+   * wejsciowa (tam wisi automatyzacja nadajaca IT-NNN) i dopiero kolumna
+   * docelowa. Dla czytajacego to bylo JEDNO przeciagniecie, a dziennik pokazywal
+   * cztery wiersze — czyli slad wywolan REST zamiast zamiaru.
+   *
+   * Warunkiem zwiniecia jest obecnosc `kanban.addTask`, ktore wystepuje WYLACZNIE
+   * w tej sciezce. Celowo NIE zwijamy po samym „ten sam task w oknie kilku
+   * sekund": taka regula sklejalaby tez dwie niezalezne decyzje (zmiane etapu i
+   * zaraz potem priorytetu) w jedna, ktorej nikt nie podjal.
+   *
+   * Nieudana proba NIGDY nie wpada do grupy. Po nia sie tu przychodzi, wiec musi
+   * zostac osobnym wierszem — nawet gdy stoi w srodku serii.
+   */
+  /** Rozwiniete grupy — zwiniecie ma byc skrotem, nigdy ukryciem. */
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
+
+  /*
+   * Podsumowanie wejscia do sprintu: DOKAD trafilo i W KTOREJ kolumnie stanelo.
+   *
+   * Skladamy je z gotowych, oznaczonych kawalkow tych samych wpisow — nazwa
+   * sprintu z `kanban.addTask` (tam jest zawsze), a kolumna z OSTATNIEGO zapisu
+   * etapu w grupie, bo to on mowi, gdzie karta faktycznie stanela. Dzieki temu
+   * podsumowanie niesie te same ikony i kolory co wiersze pod spodem.
+   */
+  const summarize = useCallback(
+    (items: HistoryEntry[]) => {
+      const chunk = (e: HistoryEntry, kind: string) =>
+        (e.params ? describeAction(e.method, e.params, resolve, e.before) : '')
+          .split(MARK)
+          .find((c) => c.startsWith(`${kind}${SEP}`));
+
+      const card = items.find((e) => e.method === 'tasks.api.scrum.kanban.addTask');
+      const sprint = card && chunk(card, 'sprint');
+      /* `items` sa od najnowszego, wiec pierwszy etap w tablicy to ten koncowy. */
+      const lastStage = items.find(
+        (e) => e.method === 'tasks.task.update' && chunk(e, 'stage'),
+      );
+      const stage = (lastStage && chunk(lastStage, 'stage')) ?? (card && chunk(card, 'stage'));
+
+      const wrap = (c: string | undefined) => (c ? `${MARK}${c}${MARK}` : '');
+      if (!sprint) return `wejście do sprintu, kolumna ${wrap(stage)}`;
+      return stage
+        ? `wrzucone do ${wrap(sprint)}, kolumna ${wrap(stage)}`
+        : `wrzucone do ${wrap(sprint)}`;
+    },
+    [resolve],
+  );
+
+  /*
+   * Tekst do szukania: to samo zdanie, ktore widac w wierszu (bez znacznikow),
+   * plus kod i tytul zadania. Szuka sie po tym, co na ekranie — nie po nazwach
+   * metod REST, ktorych nikt nie pamieta.
+   */
+  const haystack = useCallback(
+    (e: HistoryEntry) => {
+      const sentence = e.params
+        ? describeAction(e.method, e.params, resolve, e.before)
+            .split(MARK)
+            .map((c) => (c.includes(SEP) ? c.split(SEP)[2] : c))
+            .join('')
+        : e.label;
+      return `${sentence} ${e.code ?? ''} ${e.title ?? ''} ${e.taskId ?? ''} ${e.error ?? ''}`.toLowerCase();
+    },
+    [resolve],
+  );
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter((e) => {
+      if (focus !== null && e.taskId !== focus) return false;
+      if (onlyFailed && !e.error) return false;
+      if (q && !haystack(e).includes(q)) return false;
+      return true;
+    });
+  }, [items, focus, onlyFailed, query, haystack]);
+
+  /*
+   * Nazwiska do zmian z zewnatrz — dociagane DOPIERO TUTAJ, gdy panel jest
+   * otwarty, i tylko dla zadan, ktore faktycznie widac. Jedno wywolanie na
+   * zadanie, raz: wynik wpisuje sie do dziennika na stale (`noteAuthor`).
+   */
+  const askedRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const missing = [
+      ...new Set(
+        shown
+          .filter((e) => e.source === 'bitrix' && !e.by && e.taskId !== null)
+          .map((e) => e.taskId as number),
+      ),
+    ].filter((id) => !askedRef.current.has(id));
+    if (!missing.length) return;
+
+    let stop = false;
+    void (async () => {
+      /* Po kilka na raz — panel ma sie wypelniac, a nie zalewac portal naraz. */
+      for (const id of missing.slice(0, 10)) {
+        if (stop) return;
+        askedRef.current.add(id);
+        const rows = await fetchTaskHistory(id).catch(() => []);
+        const by = rows[rows.length - 1]?.by;
+        if (by && !stop) noteAuthor(id, by);
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [shown]);
+
+  /* Wejscie do sprintu to jedna pozycja — regula w `foldEntries`. */
+  const rows = useMemo(
+    () =>
+      foldEntries(shown).map((items) => ({
+        key: `${items[0].at}-${items[0].method}-${items.length}`,
+        at: items[0].at,
+        items,
+      })),
+    [shown],
+  );
+
+  /*
+   * Dni jako naglowki, a nie data w kazdym wierszu.
+   *
+   * Wczesniej wpis z wczoraj niosl „10.09 13:33" w kolumnie szerokiej na
+   * „09:58" i napis wchodzil na tresc obok. Data powtarzana przy kilkunastu
+   * wpisach z tego samego dnia to zreszta szum: zmienia sie raz na kilkadziesiat
+   * wierszy, wiec nalezy do naglowka.
+   */
+  const days = useMemo(() => {
+    const key = (at: number) => {
+      const d = new Date(at);
+      return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    };
+    const today = key(Date.now());
+    const yesterday = key(Date.now() - 86_400_000);
+    const out: { label: string; rows: typeof rows }[] = [];
+    for (const r of rows) {
+      const k = key(r.at);
+      const d = new Date(r.at);
+      const label =
+        k === today
+          ? 'Dzisiaj'
+          : k === yesterday
+            ? 'Wczoraj'
+            : `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.rows.push(r);
+      else out.push({ label, rows: [r] });
+    }
+    return out;
+  }, [rows]);
+
+  const time = (at: number) => {
+    const d = new Date(at);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  /* Licznik z calosci (albo z zawezonego zadania) — inaczej wlaczenie filtra
+     zmienialoby liczbe, ktora sama ten filtr wlacza. */
+  const failedAll = useMemo(
+    () => items.filter((e) => e.error && (focus === null || e.taskId === focus)).length,
+    [items, focus],
+  );
+
+  return (
+    <>
+      <div className="palette-backdrop" onClick={onClose} />
+      <div className="palette hist-panel" role="dialog" aria-label="Dziennik akcji">
+        {/*
+          Naglowek mowi, CO to za lista i jak daleko siega — bez tego „ostatnie
+          sto wpisow" trzeba bylo doczytac ze stopki pod przewinieciem. Nieudane
+          proby wymienia osobno, bo to one sa powodem, dla ktorego ktos tu
+          zaglada.
+        */}
+        <header className="hist-head">
+          {focus === null ? (
+            <>
+              <h2>Dziennik akcji</h2>
+              <p>
+                Każdy zapis, który binear wysłał do Bitriksa w ciągu ostatnich{' '}
+                {HISTORY_DAYS} dni, najnowsze u góry. Odczytów nie zapisujemy. Kliknij zadanie
+                w wierszu, żeby zobaczyć wyłącznie jego historię.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="hist-focus">
+                <button className="hist-back" onClick={() => setFocus(null)} title="Wróć do całości">
+                  <ChevronIcon open={false} />
+                  Cały dziennik
+                </button>
+                {/* Otwarcie zadania to JEDYNE miejsce, gdzie dziennik potrzebuje
+                    zywego zadania — samo pokazanie wpisow dziala i bez niego. */}
+                {deleted.has(focus) || !isLive(focus) ? (
+                  <span
+                    className="hist-gone"
+                    title={
+                      deleted.has(focus)
+                        ? 'binear usunął to zadanie — wpisy zostają'
+                        : 'Zadania nie ma w tym projekcie'
+                    }
+                  >
+                    {deleted.has(focus) ? 'zadanie usunięte' : 'zadania nie ma w projekcie'}
+                  </span>
+                ) : (
+                  <button
+                    className="hist-open"
+                    onClick={() => {
+                      onOpen(focus);
+                      onClose();
+                    }}
+                  >
+                    Otwórz zadanie
+                  </button>
+                )}
+              </div>
+              <h2>
+                <span className="hist-focus-code">{focused?.code ?? `#${focus}`}</span>
+                {focused?.title && <span className="hist-focus-title">{focused.title}</span>}
+              </h2>
+              <p>
+                {shown.length === 1 ? '1 zapis' : `${shown.length} zapisów`} binear w tym zadaniu.
+              </p>
+            </>
+          )}
+        </header>
+
+        {/*
+          Szukanie po TYM, CO WIDAC w wierszu — zdaniu, kodzie i tytule zadania.
+          Licznik nieudanych jest przelacznikiem, a nie tylko liczba: po nie sie
+          tu przychodzi, wiec ma byc jednym klikiem, nie przewijaniem.
+        */}
+        <div className="hist-tools">
+          <SearchIcon />
+          <input
+            className="hist-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Szukaj w dzienniku…"
+            aria-label="Szukaj w dzienniku"
+          />
+          {query && (
+            <button className="hist-x" onClick={() => setQuery('')} title="Wyczyść">
+              <CloseIcon />
+            </button>
+          )}
+          <button
+            className={`hist-fails${onlyFailed ? ' hist-fails-on' : ''}`}
+            onClick={() => setOnlyFailed((v) => !v)}
+            disabled={!onlyFailed && failedAll === 0}
+            title={
+              failedAll === 0
+                ? 'Wszystko, co binear wysłał, zostało zapisane'
+                : onlyFailed
+                  ? 'Pokaż wszystkie zapisy'
+                  : 'Pokaż tylko te zapisy, których Bitrix nie przyjął'
+            }
+          >
+            {/* „Nieudanych" samo w sobie nie mowi czego — przycisk ma nazywac
+                SWOJE dzialanie, a liczba jest dopiskiem. */}
+            Tylko nieudane ({failedAll})
+          </button>
+        </div>
+
+        <div className="palette-list">
+          {shown.length === 0 ? (
+            <div className="hist-empty">
+              {/* Pusty WYNIK to co innego niz pusty dziennik — inaczej filtr wyglada
+                  jak zepsuta aplikacja. */}
+              {query || onlyFailed || focus !== null
+                ? 'Nic nie pasuje do tego, czego szukasz.'
+                : 'Nic jeszcze nie zapisano. Trafia tu każda zmiana, którą binear wysyła do Bitriksa — razem z próbami nieudanymi.'}
+            </div>
+          ) : (
+            days.map((day) => (
+              <section key={day.label} className="hist-day">
+                <h3 className="hist-day-head">{day.label}</h3>
+                {day.rows.map((row) => {
+                  const lead = row.items[0];
+                  const grouped = row.items.length > 1;
+                  const expanded = openGroups.has(row.key);
+
+                  /* Nazwy tylko wtedy, gdy wpis niesie parametry — stare ich nie maja. */
+                  const sentence = (e: HistoryEntry) =>
+                    e.params ? describeAction(e.method, e.params, resolve, e.before) : e.label;
+
+                  return (
+                    <div key={row.key} className="hist-row">
+                      <div
+                        className={`hist${lead.error ? ' hist-fail' : ''}${
+                          lead.source === 'bitrix' ? ' hist-out' : ''
+                        }`}
+                      >
+                        <span className="hist-time">{time(row.at)}</span>
+                        <div className="hist-body">
+                          <span className="hist-what">
+                            {grouped ? renderWhat(summarize(row.items)) : renderWhat(sentence(lead))}
+                          </span>
+                          {/*
+                            Kod i tytul Z WPISU, nie z listy zadan — zadania moze juz nie byc.
+                            Klikniecie zaweza dziennik do tego jednego zadania; w trybie
+                            zawezonym wiersz go nie powtarza, bo wszystkie sa te same.
+                          */}
+                          <span className="hist-meta">
+                            {focus === null && lead.taskId !== null && (
+                              <button
+                                className={`hist-on${deleted.has(lead.taskId) ? ' hist-on-dead' : ''}`}
+                                title={`${lead.method} — pokaż historię tego zadania`}
+                                onClick={() => setFocus(lead.taskId)}
+                              >
+                                <span className="hist-code">{lead.code ?? `#${lead.taskId}`}</span>
+                                {lead.title && <span className="hist-title">{lead.title}</span>}
+                                {deleted.has(lead.taskId) && (
+                                  <span className="hist-dead">usunięte</span>
+                                )}
+                              </button>
+                            )}
+                            {/*
+                              Zmiana spoza binear — inaczej dziennik sugerowalby, ze to
+                              MY ja zrobilismy, a to najgorsze, co audyt moze powiedziec.
+                            */}
+                            {lead.source === 'bitrix' && (
+                              <span className="hist-out-tag" title="Zmiana spoza binear">
+                                {lead.by ?? 'poza binear'}
+                              </span>
+                            )}
+                            {/* Zwiniete zawsze da sie rozwinac — skrot nie moze niczego ukryc. */}
+                            {grouped && (
+                              <button
+                                className="hist-more"
+                                onClick={() =>
+                                  setOpenGroups((prev) => {
+                                    const next = new Set(prev);
+                                    if (!next.delete(row.key)) next.add(row.key);
+                                    return next;
+                                  })
+                                }
+                              >
+                                <ChevronIcon open={expanded} />
+                                {row.items.length} zapisy
+                              </button>
+                            )}
+                          </span>
+                          {lead.error && (
+                            <span className="hist-err">nie udało się: {lead.error}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {grouped && expanded && (
+                        <div className="hist-sub">
+                          {row.items
+                            .slice()
+                            .reverse()
+                            .map((e: HistoryEntry, k: number) => (
+                              <div key={`${e.at}-${k}`} className="hist hist-step">
+                                <span className="hist-time">{time(e.at)}</span>
+                                <div className="hist-body">
+                                  <span className="hist-what">{renderWhat(sentence(e))}</span>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </section>
+            ))
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+
 function ContextMenu({
   task,
   stageName,
@@ -5234,6 +5946,10 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>(saved.viewMode);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  /* Dziennik akcji — osobno od `helpOpen`, bo to dwa rozne panele. */
+  const [histOpen, setHistOpen] = useState(false);
+  /** Zadanie, do ktorego dziennik ma byc zawezony po otwarciu (`null` = caly). */
+  const [histFocus, setHistFocus] = useState<number | null>(null);
   // Motyw i kroj stoja poza SETTINGS_KEY, bo czyta je tez skrypt w <head>.
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [font, setFont] = useState<Font>(loadFont);
@@ -6472,6 +7188,14 @@ export default function App() {
          * tekst przy pustym juz filtrze.
          */
         clearAllFilters();
+      } else if (e.key.toLowerCase() === 'd') {
+        /*
+         * Dziennik. „D" jak dziennik — wolne, a reszta liter z tego rzedu jest
+         * juz zajeta przez wybieraki pola (M, A, P, S).
+         */
+        e.preventDefault();
+        setHistFocus(null);
+        setHistOpen(true);
       } else if (e.key === '?') {
         e.preventDefault();
         setHelpOpen(true);
@@ -7401,6 +8125,16 @@ export default function App() {
               sam klawisz "?", ktory trzeba znac — stad jawny przycisk. */}
           <button
             className="icon-btn"
+            onClick={() => {
+              setHistFocus(null);
+              setHistOpen(true);
+            }}
+            title="Dziennik akcji — co binear zapisał do Bitriksa (D)"
+          >
+            <HistoryIcon />
+          </button>
+          <button
+            className="icon-btn"
             onClick={() => setHelpOpen(true)}
             title="Skróty klawiszowe (?)"
           >
@@ -7791,6 +8525,10 @@ export default function App() {
             )
           }
           onClose={() => setOpenId(null)}
+          onHistory={(id) => {
+            setHistFocus(id);
+            setHistOpen(true);
+          }}
           onDelete={() =>
             setConfirm({
               title: `Usunąć zadanie „${openTask.title || openTask.rawTitle}"?`,
@@ -8076,6 +8814,27 @@ export default function App() {
       )}
 
       {helpOpen && <Shortcuts onClose={() => setHelpOpen(false)} />}
+      {histOpen && (
+        <History
+          initialFocus={histFocus}
+          stageNames={stageNames}
+          people={people}
+          labels={labels}
+          /* Tylko aktywny sprint: pelna lista sprintow przychodzi z widokiem
+             planowania, ktory jeszcze nie jest zacommitowany. Pozostale pokaza
+             sie jako `#id` — czyli „szukalismy i nie ma". */
+          sprints={activeSprint ? [activeSprint] : []}
+          backlogId={backlogId}
+          stageMeta={stageMeta}
+          onOpen={setOpenId}
+          isLive={(id) => tasks.some((t) => t.id === id)}
+          onClose={() => {
+            setHistOpen(false);
+            setHistFocus(null);
+          }}
+        />
+      )}
+
 
       <UpdateBanner />
 
