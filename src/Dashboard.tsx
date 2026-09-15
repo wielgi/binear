@@ -9,9 +9,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { fetchSprints, fetchSprintTasks, type Sprint, type SprintTask } from './bitrix';
-import { summarize, taskDone, type SprintSummary } from './sprintStats';
-import { BurndownChart, Legend, type Series } from './Charts';
+import { fetchSprints, fetchSprintTasks, type Sprint, type SprintTask, type Stage } from './bitrix';
+import { doneBeforeSprint, stageBreakdown, summarize, taskDone, type SprintSummary } from './sprintStats';
+import { BurndownChart, Legend, ScopeBar, StageStrip, type Series } from './Charts';
 import { Avatar, CheckIcon, ChevronIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 
@@ -22,6 +22,30 @@ import { Picker, type Anchor } from './Picker';
  * portalu; pobieranie szesciu "na zapas" potrafilo dobic limit zapytan.
  */
 const SPRINT_SPAN = 1;
+
+/*
+ * Ustawienia wykresu (JAK liczymy, nie co pokazujemy) trzymane osobno od ustawien
+ * listy: to inny ekran i inny zestaw decyzji, a zapisane widoki nie maja po co ich
+ * przenosic. Blad odczytu = wartosci domyslne; to tylko preferencja.
+ */
+const DASH_KEY = 'binear.dash.v1';
+
+function readFlag(name: 'review' | 'added', fallback: boolean): boolean {
+  try {
+    const v = JSON.parse(localStorage.getItem(DASH_KEY) || '{}')[name];
+    return typeof v === 'boolean' ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeFlags(flags: Record<string, boolean>) {
+  try {
+    localStorage.setItem(DASH_KEY, JSON.stringify(flags));
+  } catch {
+    // tryb prywatny / brak miejsca — ustawienie po prostu nie przezyje odswiezenia
+  }
+}
 
 export function Dashboard({
   groupId,
@@ -42,6 +66,9 @@ export function Dashboard({
    * pokazywaloby liczby jednego sprintu pod naglowkiem innego.
    */
   const [tasksBySprint, setTasksBySprint] = useState<Record<number, SprintTask[]>>({});
+  /* Kolumny tablicy per sprint — do podzialki zakresu na etapy. Ida z tego samego
+     pobrania co zadania, wiec nie kosztuja osobnego wywolania. */
+  const [stagesBySprint, setStagesBySprint] = useState<Record<number, Stage[]>>({});
   /** Zaznaczone osoby; PUSTA lista = caly zespol jedna linia. */
   const [persons, setPersons] = useState<number[]>([]);
   /*
@@ -51,7 +78,25 @@ export function Dashboard({
    * czyli "Wdrożone"), stad przelacznik. Nazewnictwo bierzemy WPROST z kolumny
    * na tablicy — zespol mowi o tym etapie jej nazwa, nie "recenzja".
    */
-  const [countReview, setCountReview] = useState(true);
+  const [countReview, setCountReview] = useState(() => readFlag('review', true));
+
+  /*
+   * Czy zadania DOSYPANE w trakcie sprintu wchodza na wykres dopiero w dniu, w ktorym
+   * doszly. Domyslnie TAK: doliczone od pierwszego dnia zanizaja wsteczne dni, bo
+   * mierza wczorajsza prace wobec zakresu, ktorego wczoraj jeszcze nie bylo.
+   *
+   * Rozpoznajemy je po `MOVE_TO_SPRINT` z dziennika — Bitrix nie zapisuje przy nim
+   * numeru sprintu, wiec sprint bierze sie z tego, w czyje okno wpada znacznik czasu.
+   * Przenoszenie ogona miedzy sprintami nie zostawia wpisu, wiec ogon liczy sie
+   * od pierwszego dnia — i slusznie, bo faktycznie w tym sprincie od niego byl.
+   */
+  const [countAdded, setCountAdded] = useState(() => readFlag('added', true));
+
+  /* Oba przelaczniki przezywaja przeladowanie — inaczej po kazdym wejsciu na wykres
+     trzeba je ustawiac od nowa, a to sa ustawienia "jak liczymy", nie chwilowy filtr. */
+  useEffect(() => {
+    writeFlags({ review: countReview, added: countAdded });
+  }, [countReview, countAdded]);
 
   useEffect(() => {
     if (groupId === null) return;
@@ -73,9 +118,10 @@ export function Dashboard({
         // rownolegly wystrzal na 6 sprintow potrafi wejsc w limit zapytan portalu.
         const out: SprintSummary[] = [];
         for (const s of usable) {
-          const rows = await fetchSprintTasks(s.id);
+          const { tasks: rows, stages } = await fetchSprintTasks(s.id);
           if (cancelled) return;
           setTasksBySprint((m) => ({ ...m, [s.id]: rows }));
+          setStagesBySprint((m) => ({ ...m, [s.id]: stages }));
           out.push(summarize(s, rows));
           // Oddajemy po kazdym sprincie, zeby wykres rosl w oczach zamiast
           // trzymac pusty ekran przez kilkanascie sekund.
@@ -101,35 +147,52 @@ export function Dashboard({
 
   // Zadania TEGO sprintu, ktory pokazuje naglowek — nie ostatniego pobranego.
   const tasks = tasksBySprint[base.sprint.id] ?? [];
+  const stages = stagesBySprint[base.sprint.id] ?? [];
 
   /*
-   * Osoby wyliczamy Z ZADAN SPRINTU, nie z calego projektu: w selektorze maja byc
-   * tylko ci, ktorzy naprawde cos w tym sprincie maja. Kolejnosc wg wkladu (SP),
-   * zeby najbardziej obciazeni byli na gorze.
+   * ZAKRES SPRINTU dla calego zespolu: zadania sprintu bez zaszlosci, czyli bez
+   * pracy gotowej juz przed pierwszym dniem. Ta sama definicja, co w `summarize`
+   * i w slupku — dzieki temu liczby przy nazwiskach sumuja sie do liczb nad
+   * wykresem, zamiast byc o zaszlosci wieksze.
+   */
+  const sprintScope = tasks.filter((t) => !doneBeforeSprint(base.sprint, t, countReview));
+
+  /*
+   * Osoby wyliczamy Z ZADAN SPRINTU, nie z calego projektu: w selektorze i w
+   * tabeli maja byc tylko ci, ktorzy naprawde cos w tym sprincie maja.
+   * Kolejnosc wg wkladu (SP), zeby najbardziej obciazeni byli na gorze.
    */
   const byId = new Map(roster.map((p) => [p.id, p]));
-  const people = [...
-    tasks.reduce((m, t) => {
-      if (!t.responsibleId) return m;
-      const known = byId.get(t.responsibleId);
-      const cur =
-        m.get(t.responsibleId) ??
-        {
-          id: t.responsibleId,
-          // Imie i ZDJECIE bierzemy z listy projektu; zadanie sprintu zna tylko imie.
-          name: known?.name ?? t.responsibleName ?? `#${t.responsibleId}`,
-          photo: known?.photo ?? null,
-          sp: 0,
-          left: 0,
-        };
-      cur.sp += t.storyPoints ?? 0;
-      // Do zrobienia WEDLUG biezacego przelacznika — ta sama definicja, co wykres.
-      if (!taskDone(t, countReview)) cur.left += t.storyPoints ?? 0;
-      return m.set(t.responsibleId, cur);
-    }, new Map<number, { id: number; name: string; photo: string | null; sp: number; left: number }>()).values(),
+  const byPerson = new Map<number, SprintTask[]>();
+  for (const t of sprintScope) {
+    if (!t.responsibleId) continue;
+    const bucket = byPerson.get(t.responsibleId);
+    if (bucket) bucket.push(t);
+    else byPerson.set(t.responsibleId, [t]);
+  }
+
+  const people = [...byPerson.entries()]
+    .map(([id, own]) => {
+      const known = byId.get(id);
+      const sp = own.reduce((a, t) => a + (t.storyPoints ?? 0), 0);
+      // "Zrobione" WEDLUG biezacego przelacznika — ta sama definicja, co wykres.
+      const done = own.reduce((a, t) => (taskDone(t, countReview) ? a + (t.storyPoints ?? 0) : a), 0);
+      return {
+        id,
+        // Imie i ZDJECIE bierzemy z listy projektu; zadanie sprintu zna tylko imie.
+        name: known?.name ?? own[0].responsibleName ?? `#${id}`,
+        photo: known?.photo ?? null,
+        sp,
+        done,
+        left: sp - done,
+        count: own.length,
+        /* Wlasna podzialka na etapy — ten sam rachunek, co duzy slupek obok. */
+        segments: stageBreakdown(own, stages),
+      };
+    })
     // Sortujemy po CALOSCI, nie po reszcie: inaczej lista przeskakiwalaby przy
     // kazdym przelaczeniu, a szuka sie w niej po nazwisku, nie po liczbie.
-  ].sort((a, b) => b.sp - a.sp || a.name.localeCompare(b.name, 'pl'));
+    .sort((a, b) => b.sp - a.sp || a.name.localeCompare(b.name, 'pl'));
 
   // Wybor osoby przelicza sprint LOKALNIE — te same zadania, wezsze wejscie.
   /*
@@ -141,7 +204,18 @@ export function Dashboard({
   const shown = chosen.length
     ? tasks.filter((t) => t.responsibleId !== null && persons.includes(t.responsibleId))
     : tasks;
-  const current = summarize(base.sprint, shown, Date.now(), countReview);
+  const current = summarize(base.sprint, shown, Date.now(), countReview, countAdded);
+
+  /*
+   * Zakres slupka: zadania TEGO sprintu bez zaszlosci — bez pracy, ktora byla
+   * gotowa juz przed pierwszym dniem. Wykres odejmuje ja od punktu „Planowanie",
+   * wiec slupek musi odjac ja tak samo; inaczej stalby obok linii i pokazywal
+   * wieksza calosc niz ta, ktora linia spala. Przelacznik „Wliczaj do
+   * zatwierdzenia" zmienia, co znaczy „gotowe", wiec przesuwa i tu, i tam —
+   * zadanie oddane do akceptacji przed sprintem po prostu znika ze slupka,
+   * a jego calosc maleje.
+   */
+  const scope = shown.filter((t) => !doneBeforeSprint(base.sprint, t, countReview));
 
   const series: Series[] = chosen.length
     ? chosen.map((p) => ({
@@ -155,9 +229,11 @@ export function Dashboard({
           tasks.filter((t) => t.responsibleId === p.id),
           Date.now(),
           countReview,
+          countAdded,
         ).burndown,
       }))
     : [{ key: 'all', label: 'Cały zespół', color: 'var(--accent)', points: current.burndown }];
+
 
   return (
     <div className="dash">
@@ -171,27 +247,85 @@ export function Dashboard({
             )}
           </span>
 
-          {/* Filtr osoby po PRAWEJ — zawezenie widoku, nie tytul, wiec nie miesza
-              sie z nazwa sprintu po lewej. */}
-          {/* Pigulka, nie <input type=checkbox>: natywny kwadracik rysuje system
-              operacyjny, wiec obok wlasnych kontrolek tej karty wygladal jak
-              wklejka. Ta ma ten sam ksztalt i wysokosc co filtr osoby obok. */}
+          {/*
+            Kontrolki po PRAWEJ — zawezaja widok, wiec nie mieszaja sie z nazwa
+            sprintu po lewej.
+
+            Wlasny przelacznik, nie <input type=checkbox>: natywny kwadracik
+            rysuje system operacyjny i obok reszty wygladal jak wklejka. Ksztalt
+            jest ten sam, co „Widok: Własny ›" w pasku zakresu i co kontrolki
+            planowania — jeden jezyk kontrolek w calej aplikacji.
+          */}
           <button
-            className={`chip-toggle${countReview ? ' chip-toggle-on' : ''}`}
+            className={`views-btn tog${countReview ? ' tog-on' : ''}`}
             onClick={() => setCountReview((v) => !v)}
+            /*
+             * Podpowiedz mowi, CO SIE STANIE, a nie jak sie nazywa ustawienie.
+             * Bez tego pierwsze pytanie brzmi "czemu spadlo takze Zaplanowane?" —
+             * i nie da sie na nie odpowiedziec z samej nazwy przelacznika.
+             */
             title={
               countReview
-                ? 'Zadania z „Do zatwierdzenia / PR” liczą się jako zrobione'
-                : 'Liczy się tylko kolumna „Wdrożone” (jak w Bitriksie)'
+                ? [
+                    'Zadanie czekające na akceptację liczy się jako zrobione.',
+                    '',
+                    'Oddane do zatwierdzenia W TRAKCIE sprintu:',
+                    '  linia spada tego dnia, „Zaplanowane” bez zmian.',
+                    '',
+                    'Oddane JESZCZE PRZED sprintem:',
+                    '  nikt nie robił tego w tym sprincie, więc linia nie spada —',
+                    '  zaczyna się niżej i „Zaplanowane” jest mniejsze.',
+                    '',
+                    'Zadanie zostaje w sprincie i na liście. Zmienia się tylko to,',
+                    'czy liczy się jako praca jeszcze do zrobienia.',
+                  ].join('\n')
+                : [
+                    'Liczy się tylko kolumna „Wdrożone” — tak jak w Bitriksie.',
+                    '',
+                    'Zadanie czekające na akceptację jest wciąż niezrobione:',
+                    'zostaje w „Zostało” i trzyma linię wysoko, choć pracy przy nim',
+                    'już nie ma.',
+                  ].join('\n')
             }
           >
-            {/* Ptaszek jest ZAWSZE w drzewie, tylko niewidoczny w stanie wylaczonym —
-                warunkowe renderowanie zmienialo szerokosc przycisku, wiec przy
-                kliknieciu skakal on sam i przesuwal filtr osoby obok. */}
-            <span className={`chip-toggle-mark${countReview ? '' : ' chip-toggle-mark-off'}`}>
+            {/* Kwadrat jest ZAWSZE widoczny — pusty obrys, gdy wylaczone. Dawniej
+                ptaszek znikal, a pudelko zostawalo puste; szerokosc sie zgadzala,
+                ale stan „wylaczony" nie mial wlasnego znaku. */}
+            <span className="tog-box">
               <CheckIcon />
             </span>
             Wliczaj do zatwierdzenia
+          </button>
+
+          <button
+            className={`views-btn tog${countAdded ? ' tog-on' : ''}`}
+            onClick={() => setCountAdded((v) => !v)}
+            title={
+              countAdded
+                ? [
+                    'Zadanie dodane w trakcie sprintu wchodzi na wykres w dniu,',
+                    'w którym doszło — linia idzie wtedy w GÓRĘ.',
+                    '',
+                    'Dzięki temu wcześniejsze dni są mierzone tym, co wtedy',
+                    'faktycznie było do zrobienia.',
+                    '',
+                    'Ogon przenoszony z poprzedniego sprintu liczy się od dnia',
+                    'pierwszego — bo rzeczywiście był w sprincie od startu.',
+                  ].join('\n')
+                : [
+                    'Wszystko liczy się od pierwszego dnia, także zadania dodane',
+                    'później.',
+                    '',
+                    'Wykres nie skacze w górę, ale wcześniejsze dni wyglądają',
+                    'gorzej: mierzą wczorajszą pracę zakresem, którego wczoraj',
+                    'jeszcze nie było.',
+                  ].join('\n')
+            }
+          >
+            <span className="tog-box">
+              <CheckIcon />
+            </span>
+            Dosypane od dnia dodania
           </button>
 
           {people.length > 1 && (
@@ -213,7 +347,16 @@ export function Dashboard({
           {/* Kreska dzieli dwie JEDNOSTKI: po lewej story pointy, po prawej sztuki
               zadan. Bez niej "94 SP" i "60" czytaja sie jak jeden ciag liczb. */}
           <span className="dash-sep" aria-hidden />
-          <Stat label="Zadania" value={String(current.taskCount)} />
+          <Stat
+            label="Zadania"
+            value={String(current.taskCount)}
+            hint={
+              'Zadania, z których składa się praca TEGO sprintu.\n\n' +
+              'Nie liczy tych, które były gotowe już przed jego startem — na liście\n' +
+              'sprintu nadal je widać, bo ta odpowiada na inne pytanie: co jest\n' +
+              'w sprincie, a nie ile w nim było do zrobienia.'
+            }
+          />
           {current.unestimated > 0 && (
             <Stat
               label="Bez oszacowania"
@@ -223,29 +366,123 @@ export function Dashboard({
           )}
         </div>
 
-        <BurndownChart series={series} />
-        <Legend
-          items={
-            chosen.length
-              ? chosen.map((p) => ({ color: personColor(p.name), label: p.name }))
-              : [
-                  { cls: 'legend-ideal', label: 'Linia idealna' },
-                  { cls: 'legend-real', label: 'Rzeczywista' },
-                ]
-          }
-        />
+        {/*
+          Podzialka zakresu na etapy stoi PRZY LEWEJ KRAWEDZI wykresu, na jego
+          pelna wysokosc: to zdjecie stanu NA TERAZ, wiec czyta sie je razem
+          z linia — „tyle zostalo" i „tak to jest rozlozone" w jednym spojrzeniu.
+
+          Slupek slucha filtru osoby (te same `shown`) i przelacznika „Wliczaj do
+          zatwierdzenia": kolory pokazuja kolumny, a kreska — gdzie ten przelacznik
+          stawia granice gotowosci. „Dosypane od dnia dodania" go nie dotyczy, bo
+          mowi o CZASIE wejscia pracy, a slupek zadnego czasu nie pokazuje.
+        */}
+        <div className="dash-plot">
+          <ScopeBar
+            segments={stageBreakdown(scope, stages)}
+            /* Granica gotowosci liczona z TEGO SAMEGO zbioru co slupek, czyli
+               z pracy TEGO sprintu. Zaszlosci juz z niego wypadly, wiec kreska
+               pokazuje, ile spalono od pierwszego dnia — tyle samo, ile zjechala
+               linia obok. Reszta slupka rowna sie koncowi linii. */
+            done={scope.reduce((a, t) => (taskDone(t, countReview) ? a + (t.storyPoints ?? 0) : a), 0)}
+          />
+
+          <div className="dash-plot-main">
+            <BurndownChart series={series} />
+            <Legend
+              items={
+                chosen.length
+                  ? chosen.map((p) => ({ color: personColor(p.name), label: p.name }))
+                  : [
+                      { cls: 'legend-ideal', label: 'Linia idealna' },
+                      { cls: 'legend-real', label: 'Rzeczywista' },
+                    ]
+              }
+            />
+
+            {/*
+              Brakujaca linia planu wymaga jednego zdania, nie domyslania sie.
+              Pokazujemy je RAZ, przy legendzie — a nie przy kazdym dniu w
+              odczycie, gdzie powtarzalo sie jak komunikat bledu. Od razu mowi
+              tez, czym to przelaczyc.
+            */}
+          </div>
+        </div>
       </section>
 
 
       {/*
-        Ograniczenie jest wpisane w ekran, a nie schowane w kodzie: story pointy
-        nie maja historii w Bitriksie (dziennik zmian zadania ich nie zapisuje),
-        wiec kazdy dzien liczy sie DZISIEJSZYM oszacowaniem. Przeszacowanie w
-        trakcie sprintu zmienia tez przeszle punkty i nie da sie tego wykryc.
+        Osoby (issue #1) — per-user staty jako WLASNA karta pod wykresem.
+        Klikniecie wiersza robi dokladnie to, co selektor w naglowku, wiec
+        tabela i wykres steruja soba nawzajem: patrzysz, kto ile ma, klikasz
+        i od razu widzisz jego linie.
+
+        Liczby licza sie z tego samego zakresu sprintu co wszystko inne, wiec
+        kolumna „Zaplanowane" sumuje sie do liczby nad wykresem.
+      */}
+      {people.length > 0 && (
+        <section className="dash-card">
+          <header className="dash-head">
+            <h2>Osoby</h2>
+            <span className="dash-sub">
+              {persons.length ? 'Klik zdejmuje zaznaczenie' : 'Klik filtruje wykres wyżej'}
+            </span>
+          </header>
+
+          <div className="dash-people">
+            {people.map((p) => (
+              <button
+                key={p.id}
+                className={`person-row${persons.includes(p.id) ? ' person-row-on' : ''}`}
+                /* Ctrl/Shift jak wszedzie indziej: doklada do porownania zamiast
+                   podmieniac wybor. Ta sama umowa co w selektorze i na liscie. */
+                onClick={(e) => {
+                  const add = e.ctrlKey || e.metaKey || e.shiftKey;
+                  setPersons((cur) => {
+                    if (add) {
+                      return cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id];
+                    }
+                    return cur.length === 1 && cur[0] === p.id ? [] : [p.id];
+                  });
+                }}
+              >
+                <Avatar name={p.name} photo={p.photo} />
+                <span className="person-row-name">{p.name}</span>
+
+                {/* „zrobione z calosci" — sama calosc nie reaguje na przelacznik,
+                    a sama reszta gubi skale (6 SP u kogos, kto ma 76). */}
+                <span className="person-row-sp">
+                  <b>{p.done}</b> / {p.sp} SP
+                </span>
+
+                <StageStrip segments={p.segments} done={p.done} />
+
+                <span className="person-row-count">
+                  {p.count} {p.count === 1 ? 'zadanie' : 'zadań'}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/*
+        Dwa ograniczenia wpisane w EKRAN, a nie schowane w kodzie — ale JEDNYM
+        ciagiem, nie dwoma akapitami. To drobny druk pod wykresem: rozbity na
+        bloki zaczyna wygladac jak sekcja, ktora trzeba przeczytac, a ma byc
+        przypisem, na ktory sie zerka.
+
+        1. ZAKRES: karta liczy prace tego sprintu, wiec pomija zadania gotowe juz
+           przed jego startem. Bez tego zdania liczby nie zgadzaja sie z lista
+           sprintu i nie wiadomo dlaczego — a to pierwsze pytanie, jakie pada.
+        2. STORY POINTY nie maja historii w Bitriksie, wiec kazdy dzien liczy sie
+           DZISIEJSZYM oszacowaniem; przeszacowanie w trakcie sprintu zmienia tez
+           przeszle punkty i nie da sie tego wykryc.
       */}
       <p className="dash-note">
-        Spalanie liczone z dzisiejszych story pointów — Bitrix nie zapisuje ich historii,
-        więc zmiana oszacowania w trakcie sprintu przesuwa także wcześniejsze dni.
+        Liczby dotyczą pracy <b>tego</b> sprintu — zadania gotowe przed jego startem nie
+        wchodzą do żadnej z nich, choć na liście sprintu nadal je widać. Spalanie liczone
+        z dzisiejszych story pointów: Bitrix nie zapisuje ich historii, więc zmiana
+        oszacowania przesuwa także wcześniejsze dni.
       </p>
     </div>
   );

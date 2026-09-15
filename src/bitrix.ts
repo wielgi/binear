@@ -219,6 +219,19 @@ export const FALLBACK_PRIORITY: Record<string, string> = {
 /** Zakonczone znikaja z widokow innych niz "Wszystkie". Odlozone (6) zostaja — to wstrzymanie, nie koniec. */
 export const CLOSED_STATUSES = new Set(['5']);
 
+/**
+ * Status "oddane do akceptacji" (Bitrix: 4, „Czeka na kontrolę").
+ *
+ * NIE jest zamknieciem — `CLOSED_STATUSES` go nie obejmuje, wiec „Pokaż
+ * zakończone" tych zadan nie dotyczy. Przy planowaniu to jednak praca, ktorej
+ * juz nikt nie bedzie robil: czeka na cudza akceptacje. Stad osobny przelacznik.
+ *
+ * Status ustawia sama automatyzacja kolumny „Do zatwierdzenia / PR" (sprawdzone
+ * 2026-09-10: wszystkie 25 zadan w tej kolumnie mialy status 4), wiec wystarczy
+ * on za rozpoznanie — i dziala takze poza sprintem, gdzie kolumn nie ma.
+ */
+export const REVIEW_STATUSES = new Set(['4']);
+
 export interface FieldEnums {
   status: Record<string, string>;
   priority: Record<string, string>;
@@ -654,6 +667,16 @@ export interface SprintTask {
    * zrobionej spalaloby sie o tydzien za pozno — suma dobra, dzien zly.
    */
   reviewAt: string | null;
+  /**
+   * Kiedy zadanie trafilo DO TEGO sprintu — albo `null`, gdy bylo w nim od poczatku.
+   *
+   * Bitrix loguje `MOVE_TO_SPRINT` z data, ale BEZ numeru sprintu (`from`/`to` sa
+   * puste), wiec sprint rozpoznajemy po tym, w czyje okno wpada znacznik czasu.
+   * Przeniesienia z sprintu na sprint (przenoszenie ogona) NIE zostawiaja wpisu,
+   * wiec zadania przeniesione dostaja `null` i licza sie od dnia pierwszego —
+   * co jest poprawne, bo faktycznie byly w sprincie od jego startu.
+   */
+  addedAt: string | null;
   /** Kto odpowiada — wykres da sie zawezic do jednej osoby. */
   responsibleId: number | null;
   responsibleName: string | null;
@@ -667,6 +690,28 @@ export interface SprintTask {
    * uczciwsze: praca czekajaca na akceptacje nie jest dostarczona.
    */
   done: boolean;
+  /**
+   * Kolumna tablicy, w ktorej zadanie STOI TERAZ — do podzialki per etap.
+   *
+   * Same `done` na to nie wystarcza: mowi tylko „czy w FINISH", czyli skleja
+   * „Nowe", „W toku" i „Do zatwierdzenia" w jedno „jeszcze nie". Etapy sa
+   * wlasnoscia SPRINTU (kazdy ma swoj komplet o tych samych nazwach), wiec to id
+   * ma sens wylacznie razem ze `stages` z tego samego pobrania.
+   */
+  stageId: number | null;
+}
+
+/**
+ * Wynik jednego pobrania sprintu: zadania ORAZ kolumny jego tablicy.
+ *
+ * Etapy jada razem z zadaniami, bo i tak byly juz pobierane (do rozpoznania
+ * kolumny FINISH) i po prostu ladowaly w koszu. Osobne `fetchStages` z pulpitu
+ * kosztowaloby drugie wywolanie po dokladnie te same dane.
+ */
+export interface SprintData {
+  tasks: SprintTask[];
+  /** Kolumny tablicy TEGO sprintu, w kolejnosci z tablicy (`sort`). */
+  stages: Stage[];
 }
 
 /**
@@ -681,7 +726,7 @@ export interface SprintTask {
  * gratis z lista. Cena jest taka, ze zadanie domkniete i ponownie otwarte pokaze
  * tylko OSTATNIE domkniecie — na wykresie spalania to rzadki przypadek brzegowy.
  */
-export async function fetchSprintTasks(sprintId: number): Promise<SprintTask[]> {
+export async function fetchSprintTasks(sprintId: number): Promise<SprintData> {
   /*
    * STRONICOWANIE JEST OBOWIAZKOWE. `tasks.task.list` oddaje najwyzej 50 pozycji
    * na strone, a sprint spokojnie miewa ich wiecej (Sprint 65 = 63). Bez petli
@@ -703,7 +748,7 @@ export async function fetchSprintTasks(sprintId: number): Promise<SprintTask[]> 
   }
 
   const ids = tasks.map((t) => Number(t.id)).filter(Number.isFinite);
-  if (!ids.length) return [];
+  if (!ids.length) return { tasks: [], stages: [] };
 
   const meta = await fetchScrumMeta(ids);
 
@@ -714,8 +759,9 @@ export async function fetchSprintTasks(sprintId: number): Promise<SprintTask[]> 
    * dodatkowy round-trip). Blad pojedynczego zadania nie moze wywalic wykresu,
    * wiec przy braku wpisu zostaje `closedAt`.
    */
-  const closedIds = tasks.filter((t) => t.closedDate ?? t.CLOSED_DATE).map((t) => Number(t.id));
+  const closedIds = ids;
   const reviewAt = new Map<number, string>();
+  const movedAt = new Map<number, string>();
   if (closedIds.length) {
     /*
      * Kazde zadanie osobnym batchem-jednoelementowym? Nie — ale `callBatch` rzuca
@@ -741,18 +787,24 @@ export async function fetchSprintTasks(sprintId: number): Promise<SprintTask[]> 
         .filter(Boolean)
         .sort()[0];
       if (first) reviewAt.set(closedIds[i], first);
+
+      /* Ostatnie wejscie do sprintu — wczesniejsze dotycza sprintow sprzed tego. */
+      const moved = rows
+        .filter((r) => str(r?.field) === 'MOVE_TO_SPRINT')
+        .map((r) => str(r.createdDate))
+        .filter(Boolean)
+        .sort()
+        .pop();
+      if (moved) movedAt.set(closedIds[i], moved);
     });
   }
 
   // Etapy TEGO sprintu — kazdy sprint ma wlasny komplet o tych samych nazwach,
   // wiec „gotowe" trzeba rozstrzygnac po typie kolumny, nie po jej nazwie czy id.
-  const finish = new Set(
-    (await fetchStages([sprintId]).catch(() => []))
-      .filter((st) => st.type === 'FINISH')
-      .map((st) => st.id),
-  );
+  const stages = (await fetchStages([sprintId]).catch(() => [])).sort((a, b) => a.sort - b.sort);
+  const finish = new Set(stages.filter((st) => st.type === 'FINISH').map((st) => st.id));
 
-  return tasks.map((t) => ({
+  const rows = tasks.map((t) => ({
     id: Number(t.id),
     storyPoints: meta.get(Number(t.id))?.storyPoints ?? null,
     // Te same trzy warianty klucza co w `normalizeTask` — `tasks.task.list` oddaje
@@ -761,10 +813,14 @@ export async function fetchSprintTasks(sprintId: number): Promise<SprintTask[]> 
     // odpowiedzi, i wtedy CICHO gasi cala liste osob na wykresie.
     closedAt: str(t.closedDate ?? t.CLOSED_DATE) || null,
     reviewAt: reviewAt.get(Number(t.id)) ?? null,
+    addedAt: movedAt.get(Number(t.id)) ?? null,
     responsibleId: relId(t.responsibleId ?? t.RESPONSIBLE_ID ?? t.responsible?.id),
     responsibleName: str(t.responsible?.name ?? t.responsibleName) || null,
     done: finish.has(relId(t.stageId ?? t.STAGE_ID) ?? -1),
+    stageId: relId(t.stageId ?? t.STAGE_ID),
   }));
+
+  return { tasks: rows, stages };
 }
 
 /**
