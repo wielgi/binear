@@ -2,7 +2,7 @@ import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Epic, Stage, Task } from './bitrix';
 import { Avatar, CommentIcon, LinkIcon, ParentIcon, PriorityIcon, SubtaskIcon, tagHue } from './icons';
-import { shortDate, isUnassigned, sumPoints } from './taskView';
+import { shortDate, isUnassigned, sumPoints, tasksWord } from './taskView';
 import { colDropId, dragId } from './dnd';
 import { TaskCode } from './TaskCode';
 
@@ -196,7 +196,9 @@ function BoardColumn({
       <header className="col-head">
         <span className="col-dot" style={{ background: color ? `#${color}` : 'var(--fg-dim)' }} />
         <span className="col-title">{title}</span>
-        <span className="col-count">{tasks.length}</span>
+        <span className="col-count" title={`${tasks.length} ${tasksWord(tasks.length)} w kolumnie`}>
+          {tasks.length}
+        </span>
         {sp !== null && (
           <span className="head-sp" title="Suma story points w kolumnie">
             {sp} SP

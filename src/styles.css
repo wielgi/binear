@@ -80,6 +80,12 @@
   --accent-amber: #f0bf00; /* --color-yellow */
   --accent-green: #27a644; /* --color-green  */
   --accent-orange: #fc7840; /* --color-orange */
+  /*
+   * Czerwien bledow i dzialan nieodwracalnych. Kod odwolywal sie do `--danger`
+   * od dawna, ale tokenu nikt nie zdefiniowal — dzialal wiec zawsze zapasowy
+   * `#e5534b`, przepisany recznie w osmiu miejscach.
+   */
+  --danger: #e5534b;
 
   --shadow-pop: 0 12px 32px #00000070;
 
@@ -818,9 +824,14 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--s2);
+  /* Odstep ikona-podpis mniejszy niz kiedys: przy czterech zakladkach „Planowanie"
+     nie miescilo sie w 300 px panelu i lamalo wiersz. */
+  gap: var(--s1);
   flex: 1;
+  min-width: 0;
   height: 28px;
+  font-size: var(--t-micro);
+  white-space: nowrap;
   color: var(--fg-muted);
   border-radius: var(--radius);
   transition: background 120ms ease, color 120ms ease;
@@ -1207,8 +1218,8 @@ input[type='search']::-webkit-search-decoration {
 
 /* Kosz w naglowku panelu — czerwony dopiero na hover, zeby nie krzyczal. */
 .icon-btn-danger:hover {
-  background: color-mix(in srgb, var(--danger, #e5534b) 14%, transparent);
-  color: var(--danger, #e5534b);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
 }
 
 /* ── Pasek zakresu ──────────────────────────────────────────────────────── */
@@ -1419,16 +1430,6 @@ input[type='search']::-webkit-search-decoration {
   margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
-}
-
-/* Przelacznik bez znaczenia w biezacym ustawieniu — widoczny, ale wyciszony. */
-.toggle-off {
-  color: var(--fg-dim);
-  cursor: default;
-}
-
-.toggle-off input {
-  cursor: default;
 }
 
 /* ── Filtry (styl Linear) ─────────────────────────────────────────────────── */
@@ -1655,13 +1656,6 @@ input[type='search']::-webkit-search-decoration {
   height: 13px;
 }
 
-/* Pelna moneta w kolorze wartosci (priorytet) wypelniajaca token. */
-.filter-chip-coin {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-}
-
 /* Rdzen tagu na podbarwionej monecie — maly pelny krazek jak kropka tagu w wierszu,
    tyle ze wysrodkowany na tokenie facepile (moneta zaslania sasiada, rdzen niesie kolor). */
 .filter-chip-tagcore {
@@ -1793,7 +1787,9 @@ input[type='search']::-webkit-search-decoration {
   border-radius: var(--s1);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  cursor: help;
+  /* Bez `cursor: help`: zeton siedzi w KLIKALNYM naglowku, wiec strzalka ze
+     znakiem zapytania przeskakiwala posrodku rzadu rączek i wygladala jak blad.
+     Podpowiedz dziala tak samo bez niej — `title` nie potrzebuje kursora. */
 }
 
 .chev {
@@ -2301,7 +2297,7 @@ input[type='search']::-webkit-search-decoration {
   padding: var(--s2);
   overflow: auto;
   font-size: var(--t-mini);
-  color: var(--danger, #e5534b);
+  color: var(--danger);
   background: var(--bg-base);
   border-radius: var(--radius);
   white-space: pre-wrap;
@@ -2397,11 +2393,6 @@ input[type='search']::-webkit-search-decoration {
   border-radius: 50%;
 }
 
-.tag-clear {
-  color: var(--fg);
-  background: var(--accent-tint);
-}
-
 .tag-x {
   display: inline-flex;
   align-items: center;
@@ -2454,10 +2445,6 @@ input[type='search']::-webkit-search-decoration {
   margin-top: var(--s2);
 }
 
-.dd-wrap {
-  flex-wrap: wrap;
-}
-
 /* Pole drugorzedne w panelu — obecne, ale nie konkuruje wzrokiem z etapem. */
 .dd-dim {
   color: var(--fg-dim);
@@ -2507,11 +2494,11 @@ input[type='search']::-webkit-search-decoration {
 
 .btn-danger {
   color: #fff;
-  background: var(--danger, #e5534b);
+  background: var(--danger);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger, #e5534b) 85%, black);
+  background: color-mix(in srgb, var(--danger) 85%, black);
 }
 
 .row-more {
@@ -3457,7 +3444,7 @@ a.mention:hover {
 }
 
 .relation-x:hover {
-  color: var(--danger, #e5534b);
+  color: var(--danger);
 }
 
 .relation-x > svg {
@@ -3653,6 +3640,8 @@ a.mention:hover {
 }
 
 .person {
+  /* Kotwica dla krzyzyka nakladanego na awatar. */
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
@@ -3734,10 +3723,134 @@ a.mention:hover {
   font-size: 13px;
 }
 
+/*
+ * Zakres godzin pracy: JEDNA os z dwoma uchwytami. Natywny `input[type=range]`
+ * ma tylko jeden, wiec sa dwa nalozone na siebie — tlo i wypelnienie rysuje
+ * kontener z `--a`/`--b`, a same inputy sa przezroczyste i przepuszczaja
+ * klikniecia wszedzie POZA uchwytami. Bez tego gorny input przykrywalby dolny
+ * i jeden z uchwytow bylby nie do zlapania.
+ */
+.wt-range-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s2) 0;
+}
+
+.wt-range-val {
+  flex: 0 0 auto;
+  font-size: var(--t-mini);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+}
+
+.wt-range {
+  position: relative;
+  flex: 1 1 auto;
+  height: 20px;
+}
+
+/* Sciezka i wypelniony kawalek miedzy uchwytami. */
+.wt-range::before,
+.wt-range::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  height: 3px;
+  border-radius: 2px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.wt-range::before {
+  left: 0;
+  right: 0;
+  z-index: 0;
+  background: var(--border);
+}
+
+.wt-range::after {
+  left: var(--a);
+  right: calc(100% - var(--b));
+  z-index: 1;
+  background: var(--accent, currentColor);
+  opacity: 0.75;
+}
+
+.wt-range input {
+  position: absolute;
+  inset: 0;
+  /*
+   * NAD linia. `::after` jest ostatnim dzieckiem kontenera, wiec bez tego maluje
+   * sie po inputach i wypelniony odcinek przechodzil PRZEZ uchwyty.
+   */
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: none;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.wt-range input:focus {
+  outline: none;
+}
+
+.wt-range input::-webkit-slider-thumb {
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong, var(--border));
+  background: var(--bg, #fff);
+  cursor: grab;
+}
+
+.wt-range input::-moz-range-thumb {
+  pointer-events: auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong, var(--border));
+  background: var(--bg, #fff);
+  cursor: grab;
+}
+
+/* Firefox rysuje wlasna sciezke — gasimy ja, bo swoja mamy w kontenerze. */
+.wt-range input::-moz-range-track {
+  background: transparent;
+}
+
+.wt-range input:focus-visible::-webkit-slider-thumb,
+.wt-range input:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 1px;
+}
+
 .worktime-ask-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s2);
+}
+
+/* Pusty element o pelnej szerokosci — wymusza zawijanie w konkretnym miejscu. */
+.wt-break {
+  flex: 0 0 100%;
+  height: 0;
+  /* Gap policzylby sie dwa razy: raz przed przerwa, raz za nia. */
+  margin-top: calc(-1 * var(--s2));
+}
+
+/*
+ * Wlasna linia, przy PRAWEJ krawedzi. Rezygnacja siada tam, gdzie oko konczy
+ * czytanie panelu, i ma stale miejsce — nie wedruje za dlugoscia przyciskow obok.
+ */
+.wt-cancel {
+  margin-left: auto;
 }
 
 .btn {
@@ -3808,7 +3921,7 @@ a.mention:hover {
 }
 
 .view-del:hover {
-  color: var(--danger, #e5534b);
+  color: var(--danger);
 }
 
 /* Pole „Zapisz bieżący widok…" na gorze menu, nad lista widokow. */
@@ -3882,7 +3995,7 @@ a.mention:hover {
 
 .update-banner-problem {
   margin-top: var(--s1);
-  color: var(--danger, #e5534b);
+  color: var(--danger);
   font-size: 12px;
   word-break: break-word;
 }
@@ -4137,6 +4250,8 @@ a.mention:hover {
 .chart {
   display: block;
   overflow: visible;
+  /* Kursor sygnalizuje, ze wykres da sie badac. */
+  cursor: crosshair;
 }
 
 .chart-empty {
@@ -4255,6 +4370,467 @@ a.mention:hover {
   );
 }
 
+/* --- Slupek zakresu: z czego skladaja sie story pointy sprintu ------------ */
+
+/* Slupek i wykres w jednym rzedzie — slupek trzyma swoja szerokosc, wykres
+   zabiera reszte (`min-width: 0`, inaczej SVG rozpycha rzad i nie da sie go
+   scisnac). */
+.dash-plot {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s4);
+  margin-top: var(--s3);
+}
+
+.dash-plot-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.scope {
+  position: relative;
+  display: flex;
+  gap: var(--s2);
+  /* Ta sama wysokosc co wykres spalania (`H` w Charts.tsx) — slupek ma sie
+     konczyc tam, gdzie os X, a nie „gdzies obok". */
+  height: 280px;
+  flex: 0 0 auto;
+}
+
+/*
+ * Kawalki stykaja sie BEZ przerw — to jedna calosc podzielona na czesci, a nie
+ * kilka osobnych slupkow. Rozdziela je 1px szpary w kolorze karty, zeby dwa
+ * podobne odcienie kolumn nie zlaly sie w jeden blok.
+ */
+.scope-bar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 18px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-hover);
+}
+
+/*
+ * Welon na czesci JESZCZE NIE ZROBIONEJ — od granicy gotowosci do gory slupka.
+ *
+ * Zaznaczamy „gotowe" od drugiej strony: zamiast malowac wynik, przygaszamy
+ * reszte. Dzieki temu dolna czesc zostaje w pelnym kolorze i to ONA rzuca sie
+ * w oczy, a podzialka na etapy nadal jest czytelna — welon zmienia jasnosc,
+ * nie odcien.
+ *
+ * `--bg-panel`, nie `transparent`: przezroczystosc to czarny z alfa 0, wiec
+ * przygaszanie nim PRZYCIEMNIA i w jasnym motywie wychodzi brud. Mieszanie
+ * z tlem karty dziala tak samo w kazdym motywie.
+ */
+.scope-pending {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--bg-panel) 62%, transparent);
+}
+
+/*
+ * Granica gotowosci — najmocniejszy znak na slupku, bo niesie WYNIK.
+ *
+ * Wystaje po 4 px na obie strony, wiec czyta sie jak znacznik przylozony do
+ * skali, a nie jak styk dwoch kolumn. Obwodka z tla karty odcina ja od koloru
+ * etapu, na ktory akurat wypadnie — kolory ustawia zespol i bywaja jasne.
+ *
+ * Stoi POZA `.scope-bar` (ten obcina zawartosc), a procent liczy sie wzglednie
+ * do `.scope`, ktory ma dokladnie te sama wysokosc co slupek.
+ */
+.scope-done {
+  position: absolute;
+  left: -4px;
+  width: 26px;
+  height: 3px;
+  z-index: 2;
+  border-radius: 2px;
+  background: var(--fg);
+  box-shadow: 0 0 0 1.5px var(--bg-panel);
+}
+
+/* Kolumna podpisow ma te same proporcje co slupek, wiec kazdy podpis wypada na
+   wysokosci swojego kawalka. Podpisy stoja na TLE KARTY, nie na kolorze — kolory
+   kolumn ustawia zespol i bywaja jasne, wiec zaden jeden kolor tekstu nie
+   utrzymalby na nich kontrastu. */
+.scope-labels {
+  display: flex;
+  flex-direction: column;
+  /* Szerokosc to RZUT POZIOMY przechylonego podpisu, nie jego dlugosc — dlatego
+     kolumna jest wezsza niz najdluzsza nazwa etapu. */
+  width: 96px;
+  flex: 0 0 auto;
+  /* Przechylony wiersz wychodzi poza swoj wiersz w pionie — bez tego obcinalby
+     sie na granicy sasiedniego kawalka. */
+  overflow: visible;
+}
+
+.scope-label {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.25;
+  /* Przechyl liczymy od LEWEJ krawedzi, przy slupku: tam podpis styka sie ze
+     swoim kawalkiem, wiec ten punkt musi zostac na jego wysokosci. Reszta
+     wiersza moze isc w gore — miejsca w pionie jest wiecej niz w poziomie. */
+  transform: rotate(-16deg);
+  transform-origin: left center;
+  white-space: nowrap;
+  /*
+   * Przechylony tekst Chrome rysuje BEZ hintingu, a domyslne dopasowanie do
+   * siatki pikseli przesuwa wtedy kazda litere o ulamek w inna strone — napis
+   * wyglada, jakby literom chwialy sie podstawy. `geometricPrecision` wylacza to
+   * dopasowanie i stawia glify dokladnie tam, gdzie wypadaja z obrotu, a
+   * `antialiased` zdejmuje wygladzanie podpikselowe (i tak martwe na obrocie),
+   * ktore na skosie zostawialo kolorowe obwodki.
+   */
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+}
+
+.scope-label-val {
+  font-size: var(--t-mini);
+  font-weight: var(--w-semibold);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.scope-label-name {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+/* Przelacznik widoku w pasku gornym — same ikony, bo pasek jest waski.
+   Podpisy zostaja w panelu widoku i w podpowiedziach. */
+.mode-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 2px;
+  gap: 2px;
+  background: var(--bg-base);
+  border-radius: var(--s2);
+}
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  color: var(--fg-dim);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.mode-btn:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.mode-btn-on {
+  color: var(--fg);
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+/* --- Widok planowania ------------------------------------------------------ */
+
+/*
+ * Dwie kolumny: rejestr i prawa strona ze sprintami. Prawa dzieli sie w pionie,
+ * dzieki czemu oba sprinty sa widoczne naraz i przelozenie ogona z konczacego
+ * sie sprintu do nastepnego to jeden gest, a nie przelaczanie zakladek.
+ */
+/* Pasek planowania + dwie kolumny pod nim. */
+/*
+ * Pasek jest podzielony TAK SAMO jak kolumny pod nim: `gap` rowny szerokosci
+ * uchwytu, obie polowki na tych samych ulamkach `flex-grow`. Dzieki temu
+ * sortowanie stoi nad rejestrem, a filtry nad sprintami — i zjezdzaja razem z
+ * uchwytem, gdy uzytkownik przesuwa podzial.
+ *
+ * Wczesniej wszystkie trzy pigulki laduly przy prawej krawedzi (nosily styl
+ * naglowka karty, z `margin-left: auto`) i nie bylo z czego wyczytac,
+ * ze filtry dotycza wylacznie prawej strony.
+ */
+/*
+ * Kontrolki mowia TYM SAMYM jezykiem, co pasek zakresu tuz nad nimi
+ * („Widok: Własny ›"): bez ramki, przygaszone, 24 px, podswietlenie dopiero pod
+ * kursorem. Wczesniej byly to pigulki z naglowkow kart, gdzie
+ * maja obok siebie tytul i liczby. Puszczone samopas w osobnym wierszu
+ * wygladaly jak wklejone z innego ekranu.
+ */
+/* `.views-btn` ma wlasny `padding`, wiec zeby to TRESC przycisku (a nie jego
+   pudelko) trafila w linie tytulu, pudelko cofa sie o dokladnie ten padding. */
+/*
+ * Wartosc sortowania jest jedynym miejscem w pasku, ktore niesie tresc, wiec
+ * jako jedyna dostaje pelny kolor — reszta (ikona, „Sortuj:", strzalka) to
+ * obudowa. Bez tego caly przycisk czytal sie jednakowo szaro.
+ */
+/*
+ * Przelacznik dwustanowy w jezyku paska zakresu: bez ramki, przygaszony, a caly
+ * stan niesie kwadrat z lewej. Uzywaja go i panele planowania, i naglowki kart
+ * z wykresami — to ta sama kontrolka, wiec i klasa jest wspolna.
+ *
+ * Kwadrat jest w rozmiarze tekstu obok: ma czytac sie jako STAN, a nie jako
+ * druga ikona przycisku.
+ */
+.tog-box {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: transparent;
+}
+
+.tog-on .tog-box {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.tog-on {
+  color: var(--fg-secondary);
+}
+
+/*
+ * Naglowek karty rownia do LINII BAZOWEJ (tytul i podtytul), wiec kontrolka
+ * bez tego siadalaby nizej niz tekst obok. Pierwsza z nich odpycha reszte w
+ * prawo — po lewej zostaje sam tytul sprintu.
+ */
+.dash-head .views-btn,
+.dash-head .person-btn {
+  align-self: center;
+}
+
+.dash-head > .tog:first-of-type {
+  margin-left: auto;
+}
+
+/* Przecinek ma sie kleic do poprzedniego poziomu, nie wisiec w powietrzu. */
+/* „potem" przygaszone — to spojnik, nie nazwa wymiaru. */
+/*
+ * Flex, nie grid: szerokosc kolumn ustawia uzytkownik uchwytem, a `flex-grow`
+ * przyjmuje ulamek wprost. W gridzie trzeba by przepisywac `grid-template-columns`
+ * przy kazdym ruchu myszy.
+ */
+/*
+ * Panele DZIELA sie wysokoscia po rowno (`flex: 1 1 0`), zamiast rosnac z
+ * trescia. Zwiniety oddaje swoja czesc pozostalym — patrz `.plan-pane-shut`.
+ */
+/* Cel upuszczania podswietlamy dopiero, gdy cos naprawde jest w reku — samo
+   najechanie myszą nie ma nic zapowiadac. */
+/* Liczby lecą na prawo — jedna kolumna dla wszystkich paneli, da sie porownac
+   wzrokiem bez czytania kazdej z osobna. */
+/* Pary "liczba + jednostka" rozsuniete, nie sklejone kropka. */
+/* Jednostka trzyma sie swojej liczby i nie lamie sie na koniec wiersza. */
+/* Braki — to samo pomaranczowe co bledy w dzienniku: "cos tu jest nie tak". */
+/* --- odniesienie do ostatnio dowiezionego --- */
+
+/* Kreska na 100% — czyli tam, gdzie sprint dorownuje ostatnio dowiezionemu. */
+/* --- rozklad obciazenia --- */
+
+/*
+ * BEZ `overflow: hidden`. Kiedys bylo — do zaokraglenia koncow — i obcinalo
+ * dwie rzeczy naraz: podpis pod kursorem (stoi NAD paskiem) oraz powiekszone
+ * pole chwytu kawalkow. Zaokraglenie robia teraz same kawalki, skrajne.
+ */
+/*
+ * Pole najechania siegajace poza pasek. Sam pasek ma 4 px — trafienie w niego
+ * mysza jest przypadkiem, a to on ma odpowiadac na pytanie "czyje to SP".
+ */
+/*
+ * Odczyt pod kursorem — ta sama zasada co na wykresie spalania: przygaszona
+ * nazwa i mocna liczba, bo szuka sie tu wartosci, a nie podpisu.
+ *
+ * Wisi NAD paskiem: pasek ma 4 px i siedzi tuz pod naglowkiem, wiec podpis pod
+ * nim wchodzilby na pierwszy wiersz listy.
+ */
+/* --- wiersze --- */
+
+/*
+ * Uchwyt podzialu miedzy sprintami. Cienki, ale z wiekszym polem chwytu przez
+ * pseudo-element — 4 px da sie trafic tylko przypadkiem.
+ */
+/*
+ * Uchwyty podzialu. Oba schodza sie w jednym punkcie: pionowy biegnie tuz przy
+ * lewej krawedzi kolumny ze sprintami, a poziomy zaczyna sie dokladnie tam,
+ * gdzie on stoi. Wczesniej rozdzielal je odstep siatki i linie sie mijaly.
+ */
+/* Sama kreska — cienka, rysowana w srodku szerszego pola chwytu. */
+/* Pole chwytu wieksze niz kreska — w 2 px trafia sie tylko przypadkiem. */
+/*
+ * Poziomy uchwyt siedzi WEWNATRZ prawej kolumny, a pionowy tuz przed nia — sama
+ * kreska musi wiec siegnac kawalek w lewo, poza swoje pudelko, zeby obie linie
+ * spotkaly sie w jednym punkcie zamiast mijac o kilka pikseli.
+ */
+/*
+ * Kropki chwytu na tle karty, zeby kreska za nimi nie przeswitywala.
+ *
+ * `GripIcon` rysuje domino 2x3 — wysokie. Na kresce POZIOMEJ ma lezec, wiec
+ * obracamy je o cwierc obrotu; na PIONOWEJ zostaje jak jest. Wczesniej bylo
+ * odwrotnie i oba stały w poprzek swojej kreski.
+ */
+/*
+ * Pionowy uchwyt lezy NAD poziomym. W skrzyzowaniu obie linie i oba chwyty
+ * wypadaja w jednym punkcie; bez tego pozioma kreska przechodzila przez kropki
+ * pionowego uchwytu, bo jej panel stoi w drzewie pozniej. Teraz to pionowy
+ * przerywa poziomy — jeden chwyt jest wtedy jednoznacznie "ten na wierzchu".
+ */
+/*
+ * Na kresce pionowej tlo kropek siega tez w GORE i w DOL — kreska ma sie urwac
+ * kawalek przed ikona i podjac za nia. Bez tego przechodzi tuz przy kropkach
+ * i chwyt zlewa sie z linia zamiast na niej siedziec.
+ */
+/* Zwiniety panel to sam naglowek — nie zabiera juz miejsca sasiadowi. */
+/* --- okno "uzupelnij braki" --- */
+
+/* Oba wyjscia rownorzedne: pominiecie nie jest schowanym linkiem, bo czasem
+   naprawde chodzi o szybko i brudno. */
+/* --- Osoby: per-user staty sprintu (issue #1) ----------------------------- */
+
+/*
+ * `dash-people`, nie `people`: ta druga nazwa jest juz zajeta przez liste
+ * obserwatorow i wspolwykonawcow w panelu zadania, a arkusz jest jeden. Reguly
+ * stad stoja NIZEJ, wiec wygrywaly — `flex-direction: column` ustawialo tam
+ * awatary w pionie zamiast w rzedzie.
+ */
+.dash-people {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--s2);
+}
+
+/*
+ * Wiersz jest PRZYCISKIEM, bo klik filtruje wykres — a nie tabela do czytania.
+ * Stad `text-align: left` i wlasny reset: przegladarka srodkuje tresc przycisku
+ * i nadaje mu wlasna typografie.
+ */
+.person-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  /*
+   * Wiersz NIE rozciaga sie na cala karte. Przy szerokim ekranie nazwisko
+   * zostawalo przy lewej krawedzi, a jego liczby leciały o 1300 px w prawo —
+   * zeby je sparowac, trzeba bylo wodzic palcem po ekranie. Karta moze byc
+   * szeroka, wiersz ma byc czytelny.
+   */
+  max-width: 760px;
+  padding: var(--s2) var(--s2);
+  text-align: left;
+  font: inherit;
+  color: var(--fg-secondary);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.person-row:hover {
+  background: var(--bg-hover);
+}
+
+/* Zaznaczona osoba = ta, ktorej linia jest na wykresie. Akcent po lewej wiaze
+   wiersz z jego linia, a nie tylko podswietla go „jakos". */
+.person-row-on {
+  background: var(--accent-tint);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.person-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-small);
+}
+
+/* Liczby w jednej kolumnie: staly odstep + cyfry o rownej szerokosci, zeby
+   dalo sie je porownac w pionie bez czytania kazdej z osobna. */
+.person-row-sp {
+  flex: 0 0 auto;
+  width: 92px;
+  text-align: right;
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.person-row-sp b {
+  color: var(--fg);
+  font-weight: var(--w-semibold);
+}
+
+.person-row-count {
+  flex: 0 0 auto;
+  width: 88px;
+  text-align: right;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Miniatura podzialki na etapy — te same kolory kolumn co duzy slupek. */
+.stage-strip {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  width: 120px;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-hover);
+}
+
+.stage-strip-seg {
+  min-width: 2px;
+  box-shadow: 1px 0 0 var(--bg-panel);
+}
+
+.stage-strip-seg:last-child {
+  box-shadow: none;
+}
+
+/* Welon na czesci jeszcze nie zrobionej — ta sama umowa co w duzym slupku,
+   tylko po LEWEJ, bo pasek biegnie poziomo. */
+.stage-strip-pending {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--bg-panel) 62%, transparent);
+}
+
+/* Granica gotowosci. Cienka, bo pasek ma 8 px — tu wystarczy kreska, calego
+   znacznika z duzego slupka nie ma gdzie postawic. */
+.stage-strip-done {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  z-index: 2;
+  border-radius: 1px;
+  background: var(--fg);
+  box-shadow: 0 0 0 1px var(--bg-panel);
+}
+
 /* Ograniczenie danych stoi pod wykresami, nie w tooltipie — ma byc przeczytane. */
 .dash-note {
   margin: 0;
@@ -4262,6 +4838,12 @@ a.mention:hover {
   font-size: var(--t-micro);
   color: var(--fg-dim);
   max-width: 70ch;
+}
+
+/* Wyroznienie w przypisie — o stopien jasniej, nie biela: to nadal drobny druk. */
+.dash-note b {
+  color: var(--fg-muted);
+  font-weight: var(--w-semibold);
 }
 
 /* Moneta story pointa na chipie filtra — cyfra zamiast ikony, jak w .row-sp. */
@@ -4301,12 +4883,6 @@ a.mention:hover {
   min-width: 0;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-
-.range-hint {
-  padding: var(--s1) var(--s1) 0;
-  font-size: var(--t-micro);
-  color: var(--fg-dim);
 }
 
 /* Zakres na chipie czyta sie jak liczba, nie jak etykieta kategorii. */
@@ -4470,43 +5046,29 @@ a.mention:hover {
   stroke-width: 2;
 }
 
-/* Odczyt siedzi u GORY wykresu, nie przy kropce: nie skacze pionowo razem
-   z linia i nigdy nie zaslania samych danych. */
-/* Kursor sygnalizuje, ze wykres da sie badac. */
-.chart {
-  cursor: crosshair;
-}
-
 /* ── Filtr osoby na wykresie ─────────────────────────────────────────────── */
 
-.person-wrap {
-  position: relative;
-}
-
-.person-btn,
-.person-opt {
+.person-btn {
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
   font: inherit;
   font-size: var(--t-micro);
   color: var(--fg-secondary);
+  /* Stoi w jednym rzedzie z przelacznikami karty, wiec i wyglada tak samo:
+     bez ramki i wypelnienia, ktore odcinaly go od reszty naglowka. */
   background: none;
   border: none;
-  cursor: pointer;
-}
-
-.person-btn {
-  height: 28px;
+  height: 24px;
   padding: 0 var(--s2);
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: var(--s1);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
 
 .person-btn:hover {
   color: var(--fg);
-  border-color: var(--border-strong);
+  background: var(--bg-active);
 }
 
 /* Kropka zastepuje awatar przy "Caly zespol" — to samo miejsce w rzedzie,
@@ -4521,110 +5083,6 @@ a.mention:hover {
 
 .person-name {
   white-space: nowrap;
-}
-
-.person-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 31;
-  min-width: 240px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: var(--s1);
-  background: var(--bg-panel);
-  border-radius: var(--s2);
-  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
-}
-
-.person-opt {
-  width: 100%;
-  padding: var(--s1) var(--s2);
-  border-radius: var(--s1);
-  text-align: left;
-}
-
-.person-opt:hover {
-  color: var(--fg);
-  background: var(--bg-hover);
-}
-
-.person-opt-on {
-  color: var(--fg);
-}
-
-.person-check {
-  flex: 0 0 14px;
-  display: inline-flex;
-  color: var(--accent);
-}
-
-/* Story pointy dosuniete do prawej — kolumna liczb czyta sie sama. */
-.person-sp {
-  margin-left: auto;
-  color: var(--fg-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Przelacznik "Wliczaj do zatwierdzenia" - pigulka o ksztalcie filtra osoby. */
-.chip-toggle {
-  margin-left: auto;
-  /* Naglowek karty wyrownuje po LINII BAZOWEJ (dla tytulu i podtytulu), ale
-     kontrolki musza stac srodkiem: przycisk osoby ma awatar, wiec jego baseline
-     wypada gdzie indziej niz czystego tekstu i pigulka siadala nizej. */
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s1);
-  height: 28px;
-  padding: 0 var(--s2);
-  font: inherit;
-  font-size: var(--t-micro);
-  /* WYLACZONY to nadal aktywna kontrolka, a nie wyszarzony przycisk. Przy
-     --fg-dim wygladal na zablokowany obok sasiedniego filtra osoby; roznice
-     miedzy stanami niesie akcent i ptaszek, nie gasniecie napisu. */
-  color: var(--fg-secondary);
-  background: var(--bg-hover);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--s1);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.chip-toggle:hover {
-  color: var(--fg);
-  background: var(--bg-active);
-}
-
-/* Wlaczony niesie akcent - to jedyny stan, ktory zmienia liczby na karcie. */
-.chip-toggle-on {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-/*
- * Miejsce na ptaszek rezerwujemy ZAWSZE i dokladnie tyle, ile ikona ma naprawde
- * (11px) - przy 12px z warunkowym renderowaniem przycisk zmienial szerokosc przy
- * kazdym kliknieciu i przycinal ikone.
- */
-.chip-toggle-mark {
-  flex: 0 0 11px;
-  width: 11px;
-  height: 11px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-
-.chip-toggle-mark-off {
-  visibility: hidden;
-}
-
-.person-wrap {
-  margin-left: var(--s3);
-  align-self: center;
 }
 
 /* --- Dziennik akcji ------------------------------------------------------- */
@@ -4661,7 +5119,6 @@ a.mention:hover {
   color: var(--fg-dim);
   max-width: 60ch;
 }
-
 
 /*
  * Dzien jako naglowek, a nie data w kazdym wierszu. Kolumna czasu miescila
@@ -4870,6 +5327,48 @@ a.mention:hover {
 }
 
 /* Licznik nieudanych JEST przyciskiem — po nie sie tu przychodzi. */
+/*
+ * Przelacznik zrodla: trzy przyciski sklejone w jedna kontrolke, zeby czytaly sie
+ * jako JEDEN wybor, a nie trzy niezalezne guziki obok siebie.
+ */
+.hist-src {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.hist-src-btn {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hist-src-btn + .hist-src-btn {
+  border-left: 1px solid var(--border);
+}
+
+.hist-src-btn:hover:not(:disabled):not(.hist-src-on) {
+  color: var(--fg);
+}
+
+.hist-src-on {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+/* Zero wpisow danego rodzaju to nie jest wybor do podjecia. */
+.hist-src-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .hist-fails {
   flex: 0 0 auto;
   height: 22px;
@@ -4901,23 +5400,77 @@ a.mention:hover {
 }
 
 /*
- * Zmiana SPOZA binear. Kreska z lewej jak przy bledzie, ale w innym kolorze:
- * oba znacza „ten wiersz nie jest zwyklym zapisem", tylko z innego powodu.
- * Bez tego dziennik sugerowalby, ze to MY to zrobilismy — a to najgorsze, co
- * audyt moze powiedziec.
+ * Zmiana SPOZA binear jest WYCISZONA, a nie ozdobiona.
+ *
+ * Wczesniej byla to kreska z lewej, potem autor z przodu — oba DODAWALY cos do
+ * wiersza, przez co cudzy zapis rzucal sie w oczy bardziej niz nasz wlasny. A
+ * dziennik jest nasz: to nasze zapisy maja byc ostre, a cudze tlem.
+ *
+ * Po najechaniu wraca pelny kontrast — wyciszenie ma porzadkowac przegladanie,
+ * a nie utrudniac czytanie tego, na co patrzysz.
  */
 .hist-out {
-  box-shadow: inset 2px 0 0 var(--fg-dim);
+  opacity: 0.52;
+  /*
+   * Czern, a nie kolor motywu: wiersz ma byc WGLEBIONY wzgledem sasiadow i ma to
+   * dzialac tak samo w obu motywach. Kolor z palety rozjasnilby go na ciemnym tle,
+   * czyli zrobil dokladnie odwrotnie.
+   *
+   * Samo przygaszenie odrozniało za slabo — przy przewijaniu wiersze zlewaly sie
+   * w jedna kolumne. Tlo daje granice, ktorej opacity nie daje, i robi to NIE
+   * podnoszac kontrastu tresci: cudzy zapis dalej jest cichszy od naszego.
+   */
+  background: rgba(0, 0, 0, 0.17);
+  border-radius: 4px;
+  transition:
+    opacity 90ms ease-out,
+    background 90ms ease-out;
+}
+
+/*
+ * Podswietlenie NIE kasuje odroznienia. Wczesniej `.hist-pick:hover` (jasne tlo
+ * dla kazdego klikalnego wiersza) stalo w pliku nizej i wygrywalo, wiec obcy
+ * wiersz pod kursorem wygladal dokladnie jak nasz — czyli tracil oznaczenie
+ * akurat w chwili, gdy sie na niego patrzy. Stad zlozony selektor: wyzsza
+ * swoistosc, a nie kolejnosc, decyduje o tym, ktory wiersz to czyj zapis.
+ */
+.hist-out:hover,
+.hist-out:focus-within,
+.hist-out.hist-pick:hover {
+  /* Pelna czytelnosc tresci, ale tlo ZOSTAJE ciemne — i ciemniejsze niz w spoczynku. */
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.26);
+}
+
+/*
+ * Autor bez ramki i bez tla. Obwodka robila z niego KONTROLKE, a to zwykly
+ * dopisek — tym bardziej ze rozroznianie wiersza wzielo juz na siebie wyciszenie.
+ */
+/* Zdanie i autor w jednej linii — autor dociskany do prawej krawedzi. */
+.hist-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
 }
 
 .hist-out-tag {
   flex: 0 0 auto;
-  padding: 0 5px;
+  margin-left: auto;
   font-size: 10px;
   color: var(--fg-muted);
-  border: 1px solid var(--border);
-  border-radius: 3px;
   white-space: nowrap;
+}
+
+/* Caly wiersz zaweza dziennik do swojego zadania — stad kursor na calosci. */
+.hist-pick {
+  cursor: pointer;
+}
+
+.hist-pick:hover {
+  /* Szarosc polprzezroczysta, nie kolor z palety: rozjasnia na ciemnym motywie i
+     przyciemnia na jasnym, wiec „pod kursorem" znaczy to samo w obu. */
+  background: rgba(127, 127, 127, 0.13);
 }
 
 /* Wiersz dziennika razem z rozwinieciem — grupa musi trzymac sie jako calosc. */
@@ -5025,11 +5578,6 @@ a.mention:hover {
   border-radius: 3px;
 }
 
-/* Wpis bez zadania (np. blad zbiorczy) — kreska, ale juz nie do klikniecia. */
-.hist-on-none {
-  cursor: default;
-}
-
 /* Pasek nad tytulem zawezenia: powrot po lewej, wyjscie do zadania po prawej. */
 .hist-focus {
   display: flex;
@@ -5127,527 +5675,6 @@ a.mention:hover {
   max-width: 52ch;
 }
 
-
-
-.scope-picker-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  /* Stala szerokosc — przycisk i obaj sasiedzi (100%) sa dokladnie tak samo szerocy.
-     Zwiezly zakres dat (sprintRange) + naturalna (nie 4ch) szerokosc licznika ponizej
-     pozwalaja zmiescic „Sprint NN + daty + licznik" w wezszym pasku. */
-  width: 198px;
-}
-
-.scope-picker-wrap .segment-count {
-  min-width: 0;
-}
-
-.scope-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
-  width: 100%;
-  height: 28px;
-  padding: 0 var(--s2) 0 var(--s3);
-  color: var(--fg);
-  background: var(--bg-panel);
-  border-radius: var(--s2);
-  white-space: nowrap;
-  transition: background 120ms ease;
-}
-
-.scope-picker:hover,
-.scope-picker-open {
-  background: var(--bg-active);
-}
-
-.scope-picker-label {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: var(--w-medium);
-}
-
-.scope-picker > .segment-count {
-  margin-left: auto;
-}
-
-.scope-picker > .chev {
-  color: var(--fg-dim);
-}
-
-.scope-picker-wrap.scope-open .scope-picker {
-  position: relative;
-  z-index: 31;
-}
-
-.scope-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 30;
-  min-width: 100%;
-  width: max-content;
-  display: flex;
-  flex-direction: column;
-  padding: var(--s1);
-  background: var(--bg-panel);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
-}
-
-.scope-opt {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  width: 100%;
-  min-height: 32px;
-  padding: 0 var(--s2);
-  color: var(--fg-muted);
-  border-radius: var(--radius);
-  white-space: nowrap;
-}
-
-.scope-opt:hover {
-  color: var(--fg);
-  background: var(--bg-hover);
-}
-
-.scope-opt-on {
-  color: var(--fg);
-}
-
-.scope-opt-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 14px;
-  width: 14px;
-  color: var(--accent);
-}
-
-.scope-opt-check > svg {
-  width: 14px;
-  height: 14px;
-}
-
-.scope-opt .segment-count {
-  margin-left: auto;
-}
-
-.dash {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s4);
-  padding: var(--s4);
-}
-
-.dash-empty {
-  padding: var(--s6) var(--s4);
-  color: var(--fg-muted);
-}
-
-.dash-card {
-  border: 1px solid var(--border);
-  border-radius: var(--s2);
-  background: var(--bg-panel);
-  padding: var(--s4);
-}
-
-.dash-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s2);
-  margin-bottom: var(--s3);
-}
-
-.dash-head h2 {
-  margin: 0;
-  font-size: var(--t-small);
-  font-weight: var(--w-medium);
-  color: var(--fg);
-}
-
-.dash-sub {
-  font-size: var(--t-micro);
-  color: var(--fg-dim);
-}
-
-.dash-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s5);
-  margin-bottom: var(--s4);
-}
-
-.dash-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.dash-stat-value {
-  font-size: var(--t-large);
-  font-weight: var(--w-medium);
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-
-.dash-stat-label {
-  font-size: var(--t-micro);
-  color: var(--fg-dim);
-}
-
-.chart-box {
-  width: 100%;
-}
-
-.chart {
-  display: block;
-  overflow: visible;
-}
-
-.chart-empty {
-  padding: var(--s5) 0;
-  color: var(--fg-dim);
-  font-size: var(--t-micro);
-}
-
-.chart-grid line {
-  stroke: var(--border);
-  stroke-width: 1;
-  /* Siatka jest odniesieniem, nie trescia — ma byc widoczna dopiero, gdy jej
-     poszukasz. Pelna krycie na szerokim wykresie robilo z niej krate. */
-  opacity: 0.7;
-}
-
-.chart-grid text,
-.chart-x {
-  fill: var(--fg-dim);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.chart-legend {
-  display: flex;
-  gap: var(--s4);
-  margin-top: var(--s2);
-  font-size: var(--t-micro);
-  color: var(--fg-dim);
-}
-
-.chart-legend .legend-mark[style] {
-  height: 3px;
-  width: 14px;
-}
-
-.dash-plot {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s4);
-  margin-top: var(--s3);
-}
-
-.dash-plot-main {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.scope {
-  position: relative;
-  display: flex;
-  gap: var(--s2);
-  /* Ta sama wysokosc co wykres spalania (`H` w Charts.tsx) — slupek ma sie
-     konczyc tam, gdzie os X, a nie „gdzies obok". */
-  height: 280px;
-  flex: 0 0 auto;
-}
-
-.scope-bar {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 18px;
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--bg-hover);
-}
-
-.scope-pending {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: color-mix(in oklab, var(--bg-panel) 62%, transparent);
-}
-
-.scope-done {
-  position: absolute;
-  left: -4px;
-  width: 26px;
-  height: 3px;
-  z-index: 2;
-  border-radius: 2px;
-  background: var(--fg);
-  box-shadow: 0 0 0 1.5px var(--bg-panel);
-}
-
-.scope-labels {
-  display: flex;
-  flex-direction: column;
-  /* Szerokosc to RZUT POZIOMY przechylonego podpisu, nie jego dlugosc — dlatego
-     kolumna jest wezsza niz najdluzsza nazwa etapu. */
-  width: 96px;
-  flex: 0 0 auto;
-  /* Przechylony wiersz wychodzi poza swoj wiersz w pionie — bez tego obcinalby
-     sie na granicy sasiedniego kawalka. */
-  overflow: visible;
-}
-
-.scope-label {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  line-height: 1.25;
-  /* Przechyl liczymy od LEWEJ krawedzi, przy slupku: tam podpis styka sie ze
-     swoim kawalkiem, wiec ten punkt musi zostac na jego wysokosci. Reszta
-     wiersza moze isc w gore — miejsca w pionie jest wiecej niz w poziomie. */
-  transform: rotate(-16deg);
-  transform-origin: left center;
-  white-space: nowrap;
-  /*
-   * Przechylony tekst Chrome rysuje BEZ hintingu, a domyslne dopasowanie do
-   * siatki pikseli przesuwa wtedy kazda litere o ulamek w inna strone — napis
-   * wyglada, jakby literom chwialy sie podstawy. `geometricPrecision` wylacza to
-   * dopasowanie i stawia glify dokladnie tam, gdzie wypadaja z obrotu, a
-   * `antialiased` zdejmuje wygladzanie podpikselowe (i tak martwe na obrocie),
-   * ktore na skosie zostawialo kolorowe obwodki.
-   */
-  text-rendering: geometricPrecision;
-  -webkit-font-smoothing: antialiased;
-}
-
-.scope-label-val {
-  font-size: var(--t-mini);
-  font-weight: var(--w-semibold);
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-
-.scope-label-name {
-  font-size: var(--t-micro);
-  color: var(--fg-dim);
-  white-space: nowrap;
-}
-
-.tog-box {
-  flex: 0 0 12px;
-  width: 12px;
-  height: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: transparent;
-}
-
-.tog-on .tog-box {
-  color: var(--bg);
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.tog-on {
-  color: var(--fg-secondary);
-}
-
-.dash-head .views-btn,
-.dash-head .person-btn {
-  align-self: center;
-}
-
-.dash-head > .tog:first-of-type {
-  margin-left: auto;
-}
-
-.dash-people {
-  display: flex;
-  flex-direction: column;
-  margin-top: var(--s2);
-}
-
-.person-row {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  width: 100%;
-  /*
-   * Wiersz NIE rozciaga sie na cala karte. Przy szerokim ekranie nazwisko
-   * zostawalo przy lewej krawedzi, a jego liczby leciały o 1300 px w prawo —
-   * zeby je sparowac, trzeba bylo wodzic palcem po ekranie. Karta moze byc
-   * szeroka, wiersz ma byc czytelny.
-   */
-  max-width: 760px;
-  padding: var(--s2) var(--s2);
-  text-align: left;
-  font: inherit;
-  color: var(--fg-secondary);
-  background: none;
-  border: 0;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.person-row:hover {
-  background: var(--bg-hover);
-}
-
-.person-row-on {
-  background: var(--accent-tint);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.person-row-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--t-small);
-}
-
-.person-row-sp {
-  flex: 0 0 auto;
-  width: 92px;
-  text-align: right;
-  font-size: var(--t-mini);
-  color: var(--fg-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.person-row-sp b {
-  color: var(--fg);
-  font-weight: var(--w-semibold);
-}
-
-.person-row-count {
-  flex: 0 0 auto;
-  width: 88px;
-  text-align: right;
-  font-size: var(--t-micro);
-  color: var(--fg-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.stage-strip {
-  position: relative;
-  display: flex;
-  flex: 0 0 auto;
-  width: 120px;
-  height: 8px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--bg-hover);
-}
-
-.stage-strip-seg {
-  min-width: 2px;
-  box-shadow: 1px 0 0 var(--bg-panel);
-}
-
-.stage-strip-seg:last-child {
-  box-shadow: none;
-}
-
-.stage-strip-pending {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: color-mix(in oklab, var(--bg-panel) 62%, transparent);
-}
-
-.stage-strip-done {
-  position: absolute;
-  top: -1px;
-  bottom: -1px;
-  width: 2px;
-  z-index: 2;
-  border-radius: 1px;
-  background: var(--fg);
-  box-shadow: 0 0 0 1px var(--bg-panel);
-}
-
-.dash-note {
-  margin: 0;
-  padding: 0 var(--s1);
-  font-size: var(--t-micro);
-  color: var(--fg-dim);
-  max-width: 70ch;
-}
-
-.dash-note b {
-  color: var(--fg-muted);
-  font-weight: var(--w-semibold);
-}
-
-.chart {
-  cursor: crosshair;
-}
-
-.chart-span {
-  fill: none;
-  /* Mocniejsza od siatki: to ona niesie „dokad siega dzien", a przy `--border`
-     ginela pod wykresem razem z liniami pomocniczymi. */
-  stroke: var(--border-strong);
-  stroke-width: 1.25;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.chart-hours-major {
-  fill: none;
-  stroke: var(--border-strong);
-  stroke-width: 2.75;
-  stroke-linecap: round;
-}
-
-.chart-hours {
-  fill: none;
-  stroke: var(--border-strong);
-  /* Grubsze od klamry, bo sa od niej DUZO krotsze — przy rownej grubosci
-     3-pikselowa kreska ginie obok kilkusetpikselowej belki. Hierarchie niesie
-     dlugosc, wiec grubosc moze isc w druga strone. */
-  stroke-width: 1.5;
-  stroke-linecap: round;
-}
-
-.chart-date {
-  fill: var(--fg-dim);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.85;
-}
-
-.dash-sep {
-  align-self: stretch;
-  width: 1px;
-  margin: 2px calc(var(--s5) - var(--s4));
-  background: var(--border);
-  opacity: 0.6;
-}
-
 /* Facepile w przycisku osob: awatar musi wypelnic caly krazek stosu. */
 .person-btn .filter-chip-stack .filter-chip-vicon .avatar {
   width: 100%;
@@ -5683,6 +5710,9 @@ a.mention:hover {
  * bez liczenia szerokosci tekstu.
  */
 /*
+ * Odczyt siedzi u GORY wykresu, nie przy kropce: nie skacze pionowo razem z linia
+ * i nigdy nie zaslania samych danych.
+ *
  * Wieksze niz podpisy osi z rozmyslu. Zanim viewBox zaczal odpowiadac pikselom
  * 1:1, caly wykres byl rozciagany okolo dwukrotnie i te 11px wygladalo jak 22px.
  * Po naprawie tekst wrocil do prawdziwego rozmiaru i zrobil sie za drobny na
@@ -5703,22 +5733,54 @@ a.mention:hover {
   stroke-linejoin: round;
 }
 
-/* Sama wartosc o stopien wyzej niz podpisy obok — to ona jest tu odpowiedzia. */
-.hover-value {
-  font-size: var(--t-regular);
-}
-
 .hover-label {
   fill: var(--fg-dim);
 }
 
+/* Sama wartosc o stopien wyzej niz podpisy obok — to ona jest tu odpowiedzia. */
 .hover-value {
-  fill: var(--fg);
+  font-size: var(--t-regular);
   font-weight: var(--w-medium);
+  fill: var(--fg);
 }
 
 .hover-plan {
   fill: var(--fg-dim);
+}
+
+/*
+ * Klamra pod odcinkiem dnia — pokazuje, DOKAD siega dzien, od granicy do
+ * granicy. Cichsza od siatki: to doprecyzowanie podpisu, nie druga siatka.
+ */
+.chart-span {
+  fill: none;
+  /* Mocniejsza od siatki: to ona niesie „dokad siega dzien", a przy `--border`
+     ginela pod wykresem razem z liniami pomocniczymi. */
+  stroke: var(--border-strong);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Podzialka godzinowa — najciszej z calej osi. Ma dawac wyczucie tempa dnia,
+   a nie konkurowac z granicami dni tuz obok. */
+/* Godziny co DWIE i poludnie — grubsze i dluzsze od reszty podzialki. To one
+   niosa „gdzie w dniu jestes", drobne sa tylko wypelnieniem miedzy nimi. */
+.chart-hours-major {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 2.75;
+  stroke-linecap: round;
+}
+
+.chart-hours {
+  fill: none;
+  stroke: var(--border-strong);
+  /* Grubsze od klamry, bo sa od niej DUZO krotsze — przy rownej grubosci
+     3-pikselowa kreska ginie obok kilkusetpikselowej belki. Hierarchie niesie
+     dlugosc, wiec grubosc moze isc w druga strone. */
+  stroke-width: 1.5;
+  stroke-linecap: round;
 }
 
 /* Data pod numerem dnia - cichsza od samego podpisu, to tylko doprecyzowanie. */
@@ -5756,6 +5818,8 @@ a.mention:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   line-height: 0;
+  /* Miniatura dziala jak przycisk powiekszenia, wiec i kursor taki. */
+  cursor: zoom-in;
 }
 
 .comment-img img {
@@ -5925,11 +5989,6 @@ a.mention:hover {
   rotate: -90deg;
 }
 
-/* Miniatura zachowuje sie teraz jak przycisk powiekszenia, wiec i kursor taki. */
-.comment-img {
-  cursor: zoom-in;
-}
-
 /* Obrazek wstawiony w OPIS zadania. Szerokosc panelu jest mala i zmienna, wiec
    atrybuty width/height z Bitriksa sluza tylko rezerwacji proporcji — o realnym
    rozmiarze decyduje panel, zeby zrzut ekranu nie rozpychal go w bok. */
@@ -6047,11 +6106,6 @@ a.mention:hover {
   color: var(--fg-dim);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-}
-
-/* Kotwica dla krzyzyka nakladanego na awatar. */
-.person {
-  position: relative;
 }
 
 /*

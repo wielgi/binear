@@ -63,6 +63,7 @@ import {
   type Task,
   type TaskDetail,
   isRateLimitError,
+  type Interval,
 } from './bitrix';
 import {
   getCachedComments,
@@ -121,6 +122,7 @@ import {
   isUnassigned,
   setUnassignedId,
   sumPoints,
+  tasksWord,
   UNASSIGNED_ID,
   UNASSIGNED_LABEL,
 } from './taskView';
@@ -462,6 +464,16 @@ interface Settings {
   shownEmpty: string[];
   /** Szerokosc panelu szczegolow w px — ustawiana chwytem na jego lewej krawedzi. */
   detailWidth: number;
+  /*
+   * ZWINIECIA — grup i zadan z podzadaniami. Zwiniecie to decyzja „tego teraz nie
+   * chce ogladac", czyli dokladnie to samo co reszta ustawien widoku, a nie stan
+   * chwilowy. Bez zapisu kazde odswiezenie rozwijalo wszystko z powrotem.
+   *
+   * Klucze grup zaleza od WYMIARU grupowania, wiec kazdy wymiar pamieta swoje
+   * wlasne zwiniecia i powrot do poprzedniego widoku je odtwarza.
+   */
+  collapsed: string[];
+  collapsedTasks: number[];
 }
 
 const DETAIL_MIN = 360;
@@ -482,6 +494,8 @@ const DEFAULT_SETTINGS: Settings = {
   showEmpty: false,
   shownEmpty: [],
   detailWidth: 520,
+  collapsed: [],
+  collapsedTasks: [],
 };
 
 /**
@@ -1831,7 +1845,9 @@ function RangeMenu({
   onClose: () => void;
 }) {
   const width = 268;
-  const left = Math.min(anchor.left, window.innerWidth - width - 12);
+  /* Docisk z OBU stron: kotwica bywa blisko lewej krawedzi, a samo `min`
+     chronilo tylko prawa i panel wychodzil poza ekran. */
+  const left = Math.max(12, Math.min(anchor.left, window.innerWidth - width - 12));
   const top = Math.min(anchor.bottom + 4, window.innerHeight - 190);
 
   /*
@@ -2054,7 +2070,7 @@ function ViewsMenu({
   const [dragOver, setDragOver] = useState<number | null>(null);
 
   const width = 260;
-  const left = Math.min(anchor.left + 32, window.innerWidth - width - 12);
+  const left = Math.max(12, Math.min(anchor.left + 32, window.innerWidth - width - 12));
   const top = anchor.bottom + 4;
 
   // Biezacy uklad juz odpowiada zapisanemu widokowi (activeId). Zapisywanie go pod
@@ -3186,7 +3202,17 @@ function Comments({
    * Gdy czas przekracza 24 h, nie wstawiamy od razu — pytamy, czy przyciac do godzin
    * pracy. Trzymamy oba warianty (pelny i przyciety), zeby wybor byl natychmiastowy.
    */
-  const [bigTime, setBigTime] = useState<{ rawMs: number; workMs: number } | null>(null);
+  const [bigTime, setBigTime] = useState<{ rawMs: number; intervals: Interval[] } | null>(null);
+  /*
+   * Godziny pracy trzymamy w STANIE, a nie w stalej: 8-16 to dobry domysl, ale
+   * nie regula firmy. Odcinki zostaja w `bigTime`, zeby przesuniecie uchwytu
+   * przeliczalo wynik od razu — bez ponownego pytania Bitriksa o dziennik.
+   */
+  const [work, setWork] = useState<[number, number]>([WORK_START_HOUR, WORK_END_HOUR]);
+  const workMs = useMemo(
+    () => (bigTime ? clampWorkingMs(bigTime.intervals, work[0], work[1]) : 0),
+    [bigTime, work],
+  );
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /*
    * Wzmianka `@`. `at` to pozycja malpy w tekscie, `query` — to, co po niej
@@ -3284,7 +3310,7 @@ function Comments({
       const intervals = inProgressIntervals(history, Date.now());
       const rawMs = sumIntervalsMs(intervals);
       if (spansMultipleDays(intervals)) {
-        setBigTime({ rawMs, workMs: clampWorkingMs(intervals) });
+        setBigTime({ rawMs, intervals });
       } else {
         insertLine(rawMs);
       }
@@ -3509,18 +3535,57 @@ function Comments({
       {bigTime && (
         <div className="worktime-ask" ref={askRef}>
           <p>
-            Zadanie było „w toku" przez kilka dni. Przyciąć do godzin pracy (
-            {WORK_START_HOUR}:00–{WORK_END_HOUR}:00, bez weekendów)?
+            Zadanie było „w toku" przez kilka dni. Przyciąć do godzin pracy (bez
+            weekendów)?
           </p>
+          {/*
+            Dwa uchwyty na jednej osi, a nie dwa osobne suwaki: godziny pracy to
+            JEDEN zakres, wiec ma wygladac jak jeden. Natywny `range` ma tylko
+            jeden uchwyt, stad dwa nalozone inputy — tlo rysuje kontener, a klikac
+            da sie wylacznie uchwyty (`pointer-events`).
+          */}
+          <div className="wt-range-row">
+            <span className="wt-range-val">{String(work[0]).padStart(2, '0')}:00</span>
+            <div
+              className="wt-range"
+              style={
+                {
+                  '--a': `${(work[0] / 24) * 100}%`,
+                  '--b': `${(work[1] / 24) * 100}%`,
+                } as React.CSSProperties
+              }
+            >
+              <input
+                type="range"
+                min={0}
+                max={24}
+                step={1}
+                value={work[0]}
+                aria-label="Początek godzin pracy"
+                /* Uchwyty nie moga sie minac ani zejsc do zera dlugosci. */
+                onChange={(e) => setWork(([, b]) => [Math.min(Number(e.target.value), b - 1), b])}
+              />
+              <input
+                type="range"
+                min={0}
+                max={24}
+                step={1}
+                value={work[1]}
+                aria-label="Koniec godzin pracy"
+                onChange={(e) => setWork(([a]) => [a, Math.max(Number(e.target.value), a + 1)])}
+              />
+            </div>
+            <span className="wt-range-val">{String(work[1]).padStart(2, '0')}:00</span>
+          </div>
           <div className="worktime-ask-actions">
             <button
               className="btn btn-primary"
               onClick={() => {
-                insertLine(bigTime.workMs, true);
+                insertLine(workMs, true);
                 setBigTime(null);
               }}
             >
-              Przytnij → {formatDurationPl(bigTime.workMs, true)}
+              Przytnij → {formatDurationPl(workMs, true)}
             </button>
             <button
               className="btn"
@@ -3531,7 +3596,14 @@ function Comments({
             >
               Pełny → {formatDurationPl(bigTime.rawMs)}
             </button>
-            <button className="btn" onClick={() => setBigTime(null)}>
+            {/*
+              Twarde przejscie do nowej linii. Przy samym `flex-wrap` „Anuluj"
+              lądował raz obok „Pelny", raz pod nim — zaleznie od szerokosci
+              panelu i od tego, jak dlugi wyszedl czas na przyciskach. Rezygnacja
+              nie jest trzecim rownorzednym wyborem i nie ma skakac po ekranie.
+            */}
+            <span className="wt-break" aria-hidden="true" />
+            <button className="btn wt-cancel" onClick={() => setBigTime(null)}>
               Anuluj
             </button>
           </div>
@@ -4920,7 +4992,7 @@ function ViewMenu({
       : 'Puste grupy';
 
   // `height` sluzy tylko do tego, by panel nie wyjechal pod dolna krawedz ekranu.
-  const left = Math.min(anchor.left, window.innerWidth - width - 12);
+  const left = Math.max(12, Math.min(anchor.left, window.innerWidth - width - 12));
   const top = Math.min(anchor.top, Math.max(12, window.innerHeight - height - 12));
 
   // Flyout siada z lewej strony menu; gdy tam ciasno — z prawej.
@@ -5994,7 +6066,7 @@ function ContextMenu({
 
   const width = 248;
   const height = 40 + MENU_ITEMS.length * 30 + 34;
-  const left = Math.min(anchor.left, window.innerWidth - width - 12);
+  const left = Math.max(12, Math.min(anchor.left, window.innerWidth - width - 12));
   const top = Math.min(anchor.top, window.innerHeight - height - 12);
 
   return (
@@ -6363,8 +6435,10 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [collapsedTasks, setCollapsedTasks] = useState<Set<number>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(saved.collapsed));
+  const [collapsedTasks, setCollapsedTasks] = useState<Set<number>>(
+    () => new Set(saved.collapsedTasks),
+  );
   /** Zaznaczenie wielokrotne + kotwica dla zakresu Shift. */
   const [marked, setMarked] = useState<Set<number>>(new Set());
   const [markAnchor, setMarkAnchor] = useState<number | null>(null);
@@ -7089,13 +7163,15 @@ export default function App() {
       showEmpty,
       shownEmpty,
       detailWidth,
+      collapsed: [...collapsed],
+      collapsedTasks: [...collapsedTasks],
     };
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, listTint, showEmpty, shownEmpty, detailWidth]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, listTint, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -8365,6 +8441,33 @@ export default function App() {
           {/* `key` na projekcie: zmiana projektu ma czyscic filtr, a tekst
               siedzi teraz w SearchBoksie — przemontowanie jest tanszym
               sposobem na to niz przepychanie wartosci w dol. */}
+          {/*
+            Przelacznik widoku ZAWSZE na wierzchu. Ten sam wybor jest w panelu
+            widoku (zakladki z podpisami), ale tam trzeba go najpierw otworzyc —
+            a zmiana widoku to najczestsza rzecz, jaka sie tu robi. Tutaj same
+            ikony: pasek jest waski, a podpisy i tak sa w panelu i pod cyframi.
+          */}
+          <span className="mode-group" role="group" aria-label="Widok">
+            {(
+              [
+                { key: 'list', icon: <ListIcon />, label: 'Lista (1)' },
+                { key: 'board', icon: <BoardIcon />, label: 'Tablica (2)' },
+                { key: 'charts', icon: <ChartIcon />, label: 'Wykresy (3)' },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.key}
+                className={`mode-btn${viewMode === m.key ? ' mode-btn-on' : ''}`}
+                title={m.label}
+                aria-label={m.label}
+                aria-pressed={viewMode === m.key}
+                onClick={() => setViewMode(m.key)}
+              >
+                {m.icon}
+              </button>
+            ))}
+          </span>
+
           <SearchBox key={groupId ?? 'none'} ref={searchRef} onChange={setQuery} />
           <span className="count">
             {loading ? 'ładowanie…' : `${filtered.length} z ${tasks.length}`}
@@ -8380,9 +8483,9 @@ export default function App() {
               setViewMenu({ left: r.left - 150, top: r.bottom + 4, bottom: r.bottom + 4 });
             }}
           >
-            {/* Ikona niesie biezacy widok — po usunieciu przelacznika z paska
-                to jedyne miejsce, w ktorym widac, czy jestes na liscie czy tablicy. */}
-            {viewMode === 'board' ? <BoardIcon /> : viewMode === 'charts' ? <ChartIcon /> : <ListIcon />}
+            {/* Bez ikony widoku: biezacy tryb pokazuje przelacznik w pasku, a ten
+                przycisk mowi o GRUPOWANIU. Dwa wskazniki tego samego stanu w jednym
+                rzedzie tylko kaza sprawdzac, ktory z nich jest aktualny. */}
             <span className="display-label">Grupuj:</span>
             {GROUPS.find((g) => g.key === groupBy)?.label ?? '—'}
             {subGroupBy && (
@@ -8664,7 +8767,9 @@ export default function App() {
                 <div className="group-head" onClick={() => toggleGroup(g.key)}>
                   <ChevronIcon open={!isCollapsed} />
                   <span className="group-label">{g.label}</span>
-                  <span className="group-count">{g.tasks.length}</span>
+                  <span className="group-count" title={`${g.tasks.length} ${tasksWord(g.tasks.length)} w grupie`}>
+                    {g.tasks.length}
+                  </span>
                   <GroupPoints tasks={g.tasks} />
                 </div>
                 {/*
@@ -8697,7 +8802,12 @@ export default function App() {
                           <div className="subgroup-head" onClick={() => toggleGroup(sKey)}>
                             <ChevronIcon open={!subCollapsed} />
                             <span className="subgroup-label">{sub.label}</span>
-                            <span className="group-count">{sub.tasks.length}</span>
+                            <span
+                              className="group-count"
+                              title={`${sub.tasks.length} ${tasksWord(sub.tasks.length)} w podgrupie`}
+                            >
+                              {sub.tasks.length}
+                            </span>
                             <GroupPoints tasks={sub.tasks} />
                           </div>
                         )}

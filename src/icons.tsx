@@ -181,16 +181,21 @@ export function ListIcon() {
 }
 
 export function BoardIcon() {
+  /*
+   * Trzy SLUPKI PIONOWE, nie siatka kafelkow. Ikona stoi w jednym rzedzie z
+   * lista (poziome kreski) i wykresem — przy siatce wszystkie trzy czytaly sie
+   * jak „jakies prostokaty"; przy obroconych o 90 stopni kreskach listy roznica
+   * miedzy „wiersze" a „kolumny" widac od razu, bez wpatrywania sie.
+   */
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-      {[1, 6, 11].map((y) =>
-        [1, 9].map((x) => (
-          <rect key={`${x}-${y}`} x={x} y={y} width="6" height="4" rx="1.2" fill="currentColor" />
-        )),
-      )}
+      {[2, 7, 12].map((x) => (
+        <rect key={x} x={x} y="1" width="2" height="14" rx="1" fill="currentColor" />
+      ))}
     </svg>
   );
 }
+
 
 /** Wykresy sprintu — slupki rosnace, czytelne w 16px bez zadnych detali. */
 export function ChartIcon() {
