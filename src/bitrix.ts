@@ -11,18 +11,131 @@ export class BxError extends Error {
   }
 }
 
-async function post(method: string, params: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`/api/bx/${method}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(params),
-  });
+/*
+ * PRZEPUSTNICA. Bitrix liczy zapytania „cieknacym wiadrem": kazde podnosi licznik
+ * o jeden, a licznik spada o `RATE` co sekunde. Po przekroczeniu pojemnosci
+ * oddaje 503 i `QUERY_LIMIT_EXCEEDED`.
+ *
+ * Liczby z dokumentacji (apidocs.bitrix24.com/limits.html): pojemnosc 50 i
+ * odplyw 2/s na planach innych niz Enterprise, 250 i 5/s na Enterprise.
+ * Bierzemy nizsze — przekroczenie kosztuje wiecej niz chwila czekania.
+ *
+ * `BURST` celowo mniejszy od pojemnosci: wiadro jest WSPOLNE dla calego portalu,
+ * wiec obok nas leja do niego inne integracje. Zostawiamy im zapas.
+ */
+const RATE = 2;
+/*
+ * Pojemnosc wiadra po stronie portalu to 50. Bralem 20 „na zapas dla innych" i to
+ * byl zly kompromis: jednorazowe otwarcie wykresow to ~36 zapytan, wiec po 20
+ * pierwszych reszta szla po 2 na sekunde i ekran wstawal kilkanascie sekund
+ * dluzej. Wiadro ISTNIEJE po to, zeby pochlaniac takie zrywy — a gdyby jednak
+ * zabraklo, mamy teraz ciche ponowienie i wspolna pauze, wiec przekroczenie nie
+ * jest juz awaria, tylko chwila czekania.
+ */
+const BURST = 40;
 
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json?.error) {
+let tokens = BURST;
+let refilledAt = Date.now();
+/* Pobranie zetonu musi byc SZEREGOWE, inaczej dwa rownolegle zapytania wezma ten sam. */
+let gate: Promise<void> = Promise.resolve();
+
+/*
+ * Do kiedy CALY ruch stoi. Ustawiane po odmowie z limitu — i to jest istotna
+ * roznica wzgledem samego oproznienia wiadra: odmowa dotyczy portalu, nie tego
+ * jednego zapytania, wiec wstrzymanie tez musi byc wspolne. Inaczej zapytanie,
+ * ktore oberwalo, grzecznie czeka, a dwadziescia obok niego dalej dobija portal
+ * i przedluza odmowe.
+ */
+let pausedUntil = 0;
+
+function refill(): void {
+  const now = Date.now();
+  tokens = Math.min(BURST, tokens + ((now - refilledAt) / 1000) * RATE);
+  refilledAt = now;
+}
+
+function takeToken(): Promise<void> {
+  const mine = gate.then(async () => {
+    /* Znacznik jest BEZWZGLEDNY, wiec kolejka nie mnozy czekania: pierwszy czeka
+       calosc, kolejne widza juz przeszlosc i ida dalej. */
+    const pause = pausedUntil - Date.now();
+    if (pause > 0) await new Promise((r) => setTimeout(r, pause));
+
+    refill();
+    if (tokens < 1) {
+      /* Ile brakuje do jednego zetonu przy stalym odplywie. */
+      await new Promise((r) => setTimeout(r, Math.ceil(((1 - tokens) / RATE) * 1000)));
+      refill();
+    }
+    tokens -= 1;
+  });
+  gate = mine.catch(() => {});
+  return mine;
+}
+
+/** Czy to odmowa z powodu limitu, a nie prawdziwy blad. */
+function isRateLimit(status: number, error: unknown): boolean {
+  return status === 503 || str(error).toUpperCase() === 'QUERY_LIMIT_EXCEEDED';
+}
+
+/**
+ * Czy to odmowa z powodu limitu zapytan. Dla wolajacego to NIE jest blad zadania
+ * — nic sie nie zepsulo i nie ma czego naprawiac, portal poprosil tylko o chwile.
+ * Ekran bledu zostaje dla rzeczy, z ktorymi uzytkownik moze cokolwiek zrobic.
+ */
+export function isRateLimitError(e: unknown): boolean {
+  const text = e instanceof Error ? e.message : String(e);
+  return text.toUpperCase().includes('QUERY_LIMIT_EXCEEDED') || text.includes('HTTP 503');
+}
+
+/*
+ * Po odmowie z limitu zapytanie NIE PRZEPADA — czeka i idzie jeszcze raz, tym
+ * samym `fetch`em z tymi samymi parametrami. Nie ma tu wiec licznika prob:
+ * odmowa z limitu nie jest bledem zadania i nie ma powodu, zeby po pieciu
+ * podejsciach nagle sie nim stala. Zwlaszcza przy ZAPISIE — porzucona zmiana to
+ * zmiana, ktora uzytkownik uwaza za zrobiona, a ktorej w Bitriksie nie ma.
+ *
+ * Odstepy rosna (1s, 2s, 4s, 8s, 16s) i zatrzymuja sie na `BACKOFF_MAX`, zeby
+ * odzyskanie nie czekalo dluzej, niz musi.
+ *
+ * `RATE_BUDGET` to jedyny bezpiecznik: gdyby portal odmawial godzinami, wiszace
+ * w nieskonczonosc zapytanie byloby gorsze od uczciwego bledu. Pol godziny to
+ * DUZO wiecej niz jakikolwiek zaobserwowany zator — jesli sie skonczy, to znaczy,
+ * ze problem nie jest juz chwilowy i uzytkownik ma prawo o nim wiedziec.
+ */
+const BACKOFF_MAX = 30_000;
+const RATE_BUDGET = 30 * 60_000;
+
+async function post(method: string, params: Record<string, unknown>): Promise<any> {
+  const startedAt = Date.now();
+
+  for (let attempt = 0; ; attempt++) {
+    await takeToken();
+
+    const res = await fetch(`/api/bx/${method}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && !json?.error) return json;
+
+    if (isRateLimit(res.status, json?.error) && Date.now() - startedAt < RATE_BUDGET) {
+      /*
+       * Wstrzymujemy caly ruch i oproznamy wlasne wiadro. Samego czekania tu nie
+       * ma — odsiedzi je `takeToken` na gorze petli, razem z kazdym innym
+       * zapytaniem, ktore w tym czasie przyjdzie.
+       */
+      const wait = Math.min(1000 * 2 ** attempt, BACKOFF_MAX);
+      pausedUntil = Math.max(pausedUntil, Date.now() + wait);
+      tokens = 0;
+      refilledAt = Date.now();
+      continue;
+    }
+
     throw new BxError(json?.error || `HTTP ${res.status}`, json?.error_description);
   }
-  return json;
 }
 
 /*
@@ -35,7 +148,7 @@ async function post(method: string, params: Record<string, unknown>): Promise<an
  * po sobie nic.
  */
 async function call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-  if (!WRITE_METHODS.has(method)) return (await post(method, params)).result as T;
+  if (!WRITE_METHODS.has(method)) return coalesce<T>(method, params);
 
   try {
     const result = (await post(method, params)).result as T;
@@ -82,31 +195,116 @@ export interface BatchCmd {
   params: Record<string, unknown>;
 }
 
+const numOrUndef = (v: unknown): number | undefined =>
+  v === undefined || v === null ? undefined : Number(v);
+
+/** Ile wywolan miesci sie w jednym `batch` — twardy limit Bitriksa. */
+const MAX_BATCH = 50;
+
+interface BatchSlot {
+  result: any;
+  error: { error?: string; error_description?: string } | null;
+  /* Koperta stronicowania — batch oddaje ja per polecenie, w `result_total`/`result_next`. */
+  total: number | undefined;
+  next: number | undefined;
+}
+
 /**
- * `batch` pakuje do 50 wywolan w jedno zapytanie HTTP. Grupa IT SCRUM ma ~1000 zadan,
- * czyli 20 stron po 50 — sekwencyjnie to ~10 s, batchem dwa round-tripy.
+ * Jedno zapytanie HTTP = jedno wywolanie `batch`, choc w srodku jest ich do 50.
+ * Wazne: dla wiadra limitow portalu batch liczy sie JAKO JEDNO zapytanie, wiec to
+ * najtansza droga na zbicie ruchu.
+ *
+ * Bledy NIE lecą tu wyjatkiem — kazde wywolanie dostaje wlasna komorke. Inaczej
+ * jedno zadanie bez dostepu przewracaloby 49 zdrowych obok niego.
  */
+async function runBatch(cmds: BatchCmd[]): Promise<BatchSlot[]> {
+  const cmd: Record<string, string> = {};
+  cmds.forEach((c, i) => {
+    cmd[String(i)] = `${c.method}?${toQuery(c.params).join('&')}`;
+  });
+
+  const json = await post('batch', { halt: 0, cmd });
+  const payload = json.result ?? {};
+
+  return cmds.map((_, i) => ({
+    result: payload.result?.[String(i)],
+    error: payload.result_error?.[String(i)] ?? null,
+    total: numOrUndef(payload.result_total?.[i]),
+    next: numOrUndef(payload.result_next?.[i]),
+  }));
+}
+
+/** Jawne pakowanie znanej z gory listy wywolan. Blad ktoregokolwiek przerywa calosc. */
 async function callBatch(cmds: BatchCmd[]): Promise<any[]> {
   const results: any[] = [];
 
-  for (let i = 0; i < cmds.length; i += 50) {
-    const chunk = cmds.slice(i, i + 50);
-    const cmd: Record<string, string> = {};
-    chunk.forEach((c, idx) => {
-      cmd[String(idx)] = `${c.method}?${toQuery(c.params).join('&')}`;
-    });
-
-    const json = await post('batch', { halt: 0, cmd });
-    const payload = json.result ?? {};
-    const errors = payload.result_error ?? {};
-
-    chunk.forEach((_, idx) => {
-      const err = errors[String(idx)];
-      if (err) throw new BxError(err.error ?? 'batch error', err.error_description);
-      results.push(payload.result?.[String(idx)]);
-    });
+  for (let i = 0; i < cmds.length; i += MAX_BATCH) {
+    const chunk = cmds.slice(i, i + MAX_BATCH);
+    for (const slot of await runBatch(chunk)) {
+      if (slot.error) throw new BxError(slot.error.error ?? 'batch error', slot.error.error_description);
+      results.push(slot.result);
+    }
   }
   return results;
+}
+
+/*
+ * Koalescencja odczytow. Wszystko, co wystartuje w tym samym ticku — czyli caly
+ * `Promise.all([...])` na starcie, komplet zapytan panelu szczegolow, sonda —
+ * schodzi do JEDNEGO zapytania HTTP zamiast kilkunastu.
+ *
+ * `setTimeout(0)`, a nie mikrozadanie: mikrozadanie odpaliloby sie w srodku
+ * lancucha `await`-ow i zlapaloby tylko czesc paczki.
+ *
+ * Zapisy tedy NIE ida — ich kolejnosc bywa istotna (wejscie do sprintu), a
+ * pakowanie zmienialoby ja w sposob trudny do przesledzenia.
+ */
+interface Waiting {
+  cmd: BatchCmd;
+  ok: (v: any) => void;
+  fail: (e: unknown) => void;
+}
+
+let waiting: Waiting[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushBatch(): void {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+
+  const batch = waiting.splice(0, MAX_BATCH);
+  if (!batch.length) return;
+  if (waiting.length) flushTimer = setTimeout(flushBatch, 0);
+
+  runBatch(batch.map((w) => w.cmd)).then(
+    (slots) =>
+      batch.forEach((w, i) => {
+        const slot = slots[i];
+        if (slot?.error) w.fail(new BxError(slot.error.error ?? 'batch error', slot.error.error_description));
+        else w.ok({ result: slot?.result, total: slot?.total, next: slot?.next });
+      }),
+    (e) => batch.forEach((w) => w.fail(e)),
+  );
+}
+
+interface Envelope<T> {
+  result: T;
+  total: number | undefined;
+  next: number | undefined;
+}
+
+function coalesceRaw<T>(method: string, params: Record<string, unknown>): Promise<Envelope<T>> {
+  return new Promise<Envelope<T>>((ok, fail) => {
+    waiting.push({ cmd: { method, params }, ok, fail });
+    if (waiting.length >= MAX_BATCH) flushBatch();
+    else if (flushTimer === null) flushTimer = setTimeout(flushBatch, 0);
+  });
+}
+
+async function coalesce<T>(method: string, params: Record<string, unknown>): Promise<T> {
+  return (await coalesceRaw<T>(method, params)).result;
 }
 
 // ─── Typy ────────────────────────────────────────────────────────────────────
@@ -382,7 +580,7 @@ export async function fetchTasks(groupId: number): Promise<Task[]> {
   };
 
   // Pierwsza strona daje tez `total`, z ktorego wyliczamy reszte stron.
-  const first = await post('tasks.task.list', { ...params, start: 0 });
+  const first = await coalesceRaw<{ tasks?: any[] }>('tasks.task.list', { ...params, start: 0 });
   const tasks: any[] = first.result?.tasks ?? [];
   const total: number = Number(first.total ?? tasks.length);
 
@@ -844,7 +1042,7 @@ export async function fetchProjects(): Promise<Project[]> {
     // Metoda jest z rodziny legacy i te nie deklaruja `total` — idziemy po `next`,
     // dopoki cos oddaje. Licznik obrotow jest bezpiecznikiem, nie limitem danych.
     for (let start = 0, page = 0; page < 20; page++) {
-      const json = await post('sonet_group.user.groups', { start });
+      const json = await coalesceRaw<any[]>('sonet_group.user.groups', { start });
       const chunk: any[] = json.result ?? [];
       raw.push(...chunk);
 
@@ -1598,6 +1796,16 @@ export async function moveToSprint(
   stageId?: number,
 ): Promise<void> {
   /*
+   * Wejscie do sprintu idzie PRZEZ KOLEJKE — patrz `queued`. Rownolegle wejscia
+   * dostawaly ten sam numer IT, bo regula liczy go z listy, ktora nie nadaza za
+   * zapisami. Powrot do backlogu numeru nie dotyczy, ale i tak nie ma go po co
+   * wyprzedzac w kolejce.
+   */
+  return queued(() => enterSprint(taskId, entityId, stageId));
+}
+
+async function enterSprint(taskId: number, entityId: number, stageId?: number): Promise<void> {
+  /*
    * 1. PRZYNALEZNOSC do sprintu. Sama w sobie nie robi nic wiecej: nie nadaje
    *    etapu (`STAGE_ID` zostaje 0), nie stawia karty na tablicy i nie odpala
    *    zadnych regul.
@@ -1652,8 +1860,7 @@ export async function moveToSprint(
    */
   await moveToStage(taskId, entryId);
 
-  /* Upuszczone na kolumne wejsciowa — nie ma dokad przestawiac. */
-  if (entryId === stageId) return;
+
 
   /*
    * 4. DOCELOWA kolumna. Czekamy najpierw, az regula dopisze numer: przestawienie
@@ -1664,7 +1871,26 @@ export async function moveToSprint(
    *    Brak numeru po tym czasie NIE blokuje przeniesienia: uzytkownik prosil
    *    o konkretna kolumne i ma ja dostac, choćby numer mial nie przyjsc.
    */
-  await waitForCode(taskId);
+  /*
+   * Na numer czekamy ZAWSZE, takze gdy kolumna docelowa jest ta sama co
+   * wejsciowa. Wczesniej bylo tu wyjscie „nie ma dokad przestawiac" — i przez
+   * nie kolejka zwalniala sie, zanim numer byl widoczny dla listy. Czyli
+   * dokladnie w najczestszym przypadku (kilka zadan wrzuconych do „Nowe /
+   * Oczekujace") duplikaty pojawialyby sie dalej.
+   */
+  const code = await waitForCode(taskId);
+
+  /*
+   * Zanim oddamy kolejke nastepnemu zadaniu, upewniamy sie, ze lista WIDZI juz
+   * ten numer — inaczej nastepne policzy to samo `max` i dostanie duplikat.
+   * Gdy numer nie przyszedl wcale, nie ma na co czekac: przeniesienie i tak ma
+   * sie odbyc, a brak numeru widac potem w tytule.
+   */
+  if (code) await waitForListed(code);
+
+  /* Upuszczone wprost na kolumne wejsciowa — nie ma dokad przestawiac. */
+  if (entryId === stageId) return;
+
   await moveToStage(taskId, stageId);
 }
 
@@ -1675,16 +1901,64 @@ export async function moveToSprint(
  * `tasks.task.list`, ktore po wejsciu do sprintu potrafi nie widziec zadania przez
  * dobrych kilka minut (sprawdzone 2026-09-10: filtr po samym ID zwracal pustke).
  */
-async function waitForCode(taskId: number, budgetMs = 6000, stepMs = 700): Promise<boolean> {
+async function waitForCode(taskId: number, budgetMs = 6000, stepMs = 700): Promise<string | null> {
   const until = Date.now() + budgetMs;
   while (Date.now() < until) {
     await new Promise((r) => setTimeout(r, stepMs));
     const title = await call<any>('tasks.task.get', { taskId, select: ['ID', 'TITLE'] })
       .then((r) => str(r?.task?.title))
       .catch(() => '');
-    if (/\bIT-\d+/.test(title)) return true;
+    const m = title.match(/\bIT-\d+/);
+    if (m) return m[0];
+  }
+  return null;
+}
+
+/**
+ * Czeka, az `tasks.task.list` ZOBACZY nadany numer.
+ *
+ * To nie jest ostroznosc na wyrost, tylko warunek konieczny dla NASTEPNEGO
+ * zadania: regula liczy numer jako `max(IT-NNN w tytulach) + 1` wlasnie przez
+ * `tasks.task.list`, a ta metoda po zapisie bywa o kilka minut z tylu. Dopoki
+ * nowy numer nie jest dla niej widoczny, kolejne wejscie policzy to samo `max`
+ * i dostanie TEN SAM numer (sprawdzone na zywo: szesc zadan przeniesionych
+ * jednym gestem, wszystkie `IT-910`).
+ */
+async function waitForListed(code: string, budgetMs = 60_000, stepMs = 2000): Promise<boolean> {
+  const until = Date.now() + budgetMs;
+  while (Date.now() < until) {
+    const seen = await call<any>('tasks.task.list', { filter: { '%TITLE': code }, select: ['ID'] })
+      .then((r) => (r?.tasks ?? []).length > 0)
+      .catch(() => false);
+    if (seen) return true;
+    await new Promise((r) => setTimeout(r, stepMs));
   }
   return false;
+}
+
+/*
+ * KOLEJKA wejsc do sprintu.
+ *
+ * Wejscie odpala regule nadajaca numer, a ta liczy go z listy, ktora nie nadaza
+ * za zapisami. Rownolegle wejscia — a tak dziala kazde zaznaczenie kilku zadan
+ * i kazde przeciagniecie grupy — pytaja wiec o to samo `max` i dostaja ten sam
+ * numer.
+ *
+ * Kolejka ustawia je jedno za drugim i przepuszcza nastepne dopiero wtedy, gdy
+ * numer poprzedniego jest juz widoczny dla listy. Wolniej, ale numer jest
+ * jedyna rzecza, ktora ta operacja ma naprawde wyprodukowac — a duplikatu nie
+ * da sie naprawic inaczej niz recznie, zadanie po zadaniu.
+ */
+let sprintEntryQueue: Promise<unknown> = Promise.resolve();
+
+function queued<T>(fn: () => Promise<T>): Promise<T> {
+  const run = sprintEntryQueue.then(fn, fn);
+  /* Blad jednego wejscia nie moze zablokowac kolejki dla nastepnych. */
+  sprintEntryQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 /**

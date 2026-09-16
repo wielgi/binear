@@ -114,19 +114,27 @@ export function Dashboard({
           return;
         }
 
-        // Sekwencyjnie, nie rownolegle: kazdy sprint to i tak kilka batchy, a
-        // rownolegly wystrzal na 6 sprintow potrafi wejsc w limit zapytan portalu.
-        const out: SprintSummary[] = [];
-        for (const s of usable) {
-          const { tasks: rows, stages } = await fetchSprintTasks(s.id);
-          if (cancelled) return;
-          setTasksBySprint((m) => ({ ...m, [s.id]: rows }));
-          setStagesBySprint((m) => ({ ...m, [s.id]: stages }));
-          out.push(summarize(s, rows));
-          // Oddajemy po kazdym sprincie, zeby wykres rosl w oczach zamiast
-          // trzymac pusty ekran przez kilkanascie sekund.
-          setSummaries([...out]);
-        }
+        /*
+         * RÓWNOLEGLE. Wczesniej bylo sekwencyjnie, bo rownolegly wystrzal na szesc
+         * sprintow wchodzil w limit zapytan portalu — ale tego pilnuje teraz
+         * przepustnica w `bitrix.ts`, ktora i tak przepuszcza tylko tyle, ile
+         * portal zniesie. Zostawala wiec sama wada: ~36 zapytan jedno po drugim,
+         * czyli suma round-tripow zamiast ich maksimum, i kilkanascie sekund
+         * pustego ekranu.
+         */
+        const out: (SprintSummary | undefined)[] = new Array(usable.length);
+        await Promise.all(
+          usable.map(async (s, i) => {
+            const { tasks: rows, stages } = await fetchSprintTasks(s.id);
+            if (cancelled) return;
+            setTasksBySprint((m) => ({ ...m, [s.id]: rows }));
+            setStagesBySprint((m) => ({ ...m, [s.id]: stages }));
+            out[i] = summarize(s, rows);
+            /* Oddajemy po kazdym sprincie, zeby wykres rosl w oczach. `filter`
+               trzyma kolejnosc sprintow niezaleznie od kolejnosci odpowiedzi. */
+            setSummaries(out.filter((x): x is SprintSummary => x !== undefined));
+          }),
+        );
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }

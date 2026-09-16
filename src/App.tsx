@@ -61,6 +61,7 @@ import {
   type Stage,
   type Task,
   type TaskDetail,
+  isRateLimitError,
 } from './bitrix';
 import {
   getCachedComments,
@@ -730,6 +731,10 @@ interface Toast {
  */
 const POLL_MS = 30_000;
 
+/* Ile czekamy przed ponowieniem po odmowie z limitu. Wiadro portalu leje sie
+   2 zapytania na sekunde, wiec pare sekund wystarcza, zeby bylo z czego brac. */
+const RATE_RETRY_MS = 5000;
+
 /**
  * Po tylu milisekundach bez ruchu myszy i klawisza uznajemy, ze nikogo nie ma,
  * i przestajemy pytac. Pieć minut, bo krotszy prog gasilby sonde przy czytaniu
@@ -884,6 +889,10 @@ function useBitrixData() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   }, []);
 
+  /* Ponowienie po limicie zapytan — jeden oczekujacy timer, nie kolejka. */
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadRef = useRef<(silent?: boolean) => void>(() => {});
+
   /**
    * `silent` = odswiezenie w tle (sonda zmian, powrot do karty). Nie zapala
    * spinnera i nie zamienia widoku na ekran bledu — chwilowy brak sieci ma
@@ -894,6 +903,11 @@ function useBitrixData() {
     // wygladaloby na przycisk, ktory nie dziala.
     if (silent && busyRef.current) return;
     busyRef.current = true;
+    let retrying = false;
+    if (retryRef.current !== null) {
+      clearTimeout(retryRef.current);
+      retryRef.current = null;
+    }
     if (!silent) {
       setLoading(true);
       setError(null);
@@ -1112,16 +1126,44 @@ function useBitrixData() {
         /* Brak story pointow nie moze wywalic widoku — zostaja po prostu puste. */
       });
     } catch (e) {
+      /*
+       * Limit zapytan nie trafia na ekran bledu. `post` ponawia juz sam przez
+       * jakies pol minuty; jesli mimo to tu doszlo, portal jest chwilowo zajety i
+       * jedyne sensowne zachowanie to sprobowac znowu — bez straszenia czerwonym
+       * komunikatem, bo nie ma w nim zadnej informacji do wykorzystania.
+       *
+       * Przy pierwszym uruchomieniu nie ma jeszcze czego pokazac, wiec spinner
+       * zostaje zapalony — wyglada to na dluzsze ladowanie, czyli na to, czym jest.
+       */
+      if (isRateLimitError(e)) {
+        retrying = true;
+        retryRef.current = setTimeout(() => loadRef.current(silent), RATE_RETRY_MS);
+        return;
+      }
       if (!silent) setError(e instanceof Error ? e.message : String(e));
     } finally {
       busyRef.current = false;
-      if (!silent) setLoading(false);
+      /* Przy ponowieniu spinner ZOSTAJE zapalony — to wciaz to samo ladowanie,
+         tylko dluzsze. Zgaszenie go pokazaloby pusty widok jako gotowy. */
+      if (!silent && !retrying) setLoading(false);
     }
   }, [project]);
 
   useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
+
+  useEffect(() => {
     void load();
   }, [load]);
+
+  /* Timer nie moze przezyc odmontowania — inaczej odpalilby pobranie w nicosc. */
+  useEffect(
+    () => () => {
+      if (retryRef.current !== null) clearTimeout(retryRef.current);
+    },
+    [],
+  );
 
   /*
    * Sonda zmian. Co POLL_MS pytamy Bitriksa wylacznie o to, czy w grupie cokolwiek
