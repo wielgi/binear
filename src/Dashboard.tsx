@@ -14,6 +14,7 @@ import { doneBeforeSprint, stageBreakdown, summarize, taskDone, type SprintSumma
 import { BurndownChart, Legend, ScopeBar, StageStrip, type Series } from './Charts';
 import { Avatar, CheckIcon, ChevronIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
+import { isUnassigned, tasksWord, UNASSIGNED_LABEL } from './taskView';
 
 /*
  * Ile ostatnich sprintow pobieramy. Wykres jest JEDEN - spalanie biezacego
@@ -187,9 +188,15 @@ export function Dashboard({
       const done = own.reduce((a, t) => (taskDone(t, countReview) ? a + (t.storyPoints ?? 0) : a), 0);
       return {
         id,
+        /*
+         * Tu grupujemy po OSOBIE ODPOWIEDZIALNEJ, wiec konto-zaslepka znaczy
+         * „nikt tego nie prowadzi" i tak ma sie nazywac — inaczej niz przy autorze
+         * czy uczestniku, gdzie jest zwyklym kontem i pokazujemy jego nazwisko.
+         */
+        unassigned: isUnassigned(id),
         // Imie i ZDJECIE bierzemy z listy projektu; zadanie sprintu zna tylko imie.
-        name: known?.name ?? own[0].responsibleName ?? `#${id}`,
-        photo: known?.photo ?? null,
+        name: isUnassigned(id) ? UNASSIGNED_LABEL : (known?.name ?? own[0].responsibleName ?? `#${id}`),
+        photo: isUnassigned(id) ? null : (known?.photo ?? null),
         sp,
         done,
         left: sp - done,
@@ -453,7 +460,7 @@ export function Dashboard({
                   });
                 }}
               >
-                <Avatar name={p.name} photo={p.photo} />
+                <Avatar name={p.unassigned ? null : p.name} photo={p.photo} />
                 <span className="person-row-name">{p.name}</span>
 
                 {/* „zrobione z calosci" — sama calosc nie reaguje na przelacznik,
@@ -465,7 +472,7 @@ export function Dashboard({
                 <StageStrip segments={p.segments} done={p.done} />
 
                 <span className="person-row-count">
-                  {p.count} {p.count === 1 ? 'zadanie' : 'zadań'}
+                  {p.count} {tasksWord(p.count)}
                 </span>
               </button>
             ))}
@@ -513,7 +520,7 @@ function PersonPicker({
   value,
   onPick,
 }: {
-  people: { id: number; name: string; photo: string | null; sp: number; left: number }[];
+  people: { id: number; name: string; photo: string | null; sp: number; left: number; unassigned: boolean }[];
   value: number[];
   onPick: (ids: number[]) => void;
 }) {
@@ -558,7 +565,7 @@ function PersonPicker({
             <span className="filter-chip-stack">
               {shownFaces.map((p, i) => (
                 <span className="filter-chip-vicon" key={p.id} style={{ zIndex: FACES - i }}>
-                  <Avatar name={p.name} photo={p.photo} />
+                  <Avatar name={p.unassigned ? null : p.name} photo={p.photo} />
                 </span>
               ))}
             </span>

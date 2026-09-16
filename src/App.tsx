@@ -18,6 +18,7 @@ import {
   addComment,
   fetchComments,
   fetchActiveSprint,
+  fetchSprints,
   fetchBacklogId,
   fetchChangedSince,
   fetchConfig,
@@ -139,6 +140,7 @@ import {
   setTaskNames,
   type HistoryEntry,
   type Resolve,
+  noteMine,
 } from './history';
 import { TaskCode } from './TaskCode';
 import { Board } from './Board';
@@ -587,20 +589,16 @@ function viewFingerprint(v: Omit<SavedView, 'id' | 'name'>): string {
  * (id 251) pokazujemy WSZEDZIE jako "Nieprzypisane" — tak samo jak przy osobie
  * odpowiedzialnej — zeby nie raz bylo osoba, a raz zaslepka.
  */
-function PersonInline({
-  id,
-  name,
-  photo,
-}: {
-  id: number | null;
-  name: string | null;
-  photo?: string | null;
-}) {
-  const unassigned = isUnassigned(id);
+function PersonInline({ name, photo }: { name: string | null; photo?: string | null }) {
+  /*
+   * BEZ „Nieprzypisane". Ten komponent rysuje AUTORA i UCZESTNIKOW, a nie osobe
+   * odpowiedzialna — a konto-zaslepka z `.env` to normalne konto, ktore po prostu
+   * pelni role „nikt tego nie prowadzi". Jako autor jest konkretna osoba i ma sie
+   * nazywac po imieniu. „Nieprzypisane" znaczy cos wylacznie przy przypisaniu.
+   */
   return (
     <>
-      <Avatar name={unassigned ? null : name} photo={unassigned ? undefined : photo} />{' '}
-      {unassigned ? UNASSIGNED_LABEL : name}
+      <Avatar name={name} photo={photo} /> {name}
     </>
   );
 }
@@ -689,6 +687,11 @@ interface Data {
   labels: FieldEnums;
   activeSprint: Sprint | null;
   /**
+   * WSZYSTKIE sprinty grupy. Dziennik nazywa po nich zapisy („sprint → Sprint 66")
+   * zamiast pokazywac goly identyfikator.
+   */
+  sprints: Sprint[];
+  /**
    * Backlog projektu jako BYT scruma, nie jako "brak sprintu" — bez jego id nie
    * ma dokad odeslac zadania ze sprintu. `null` w projekcie bez scruma.
    */
@@ -712,6 +715,7 @@ const EMPTY: Data = {
   stageMeta: new Map(),
   labels: { status: FALLBACK_STATUS, priority: FALLBACK_PRIORITY },
   activeSprint: null,
+  sprints: [],
   backlogId: null,
   config: null,
   projects: [],
@@ -928,13 +932,17 @@ function useBitrixData() {
       // Recznie wybrany projekt bije ten z .env — patrz src/project.ts.
       const groupId = project ?? Number(config.groupId);
 
-      const [tasks, labels, activeSprint, projects, backlogId, epics] = await Promise.all([
+      const [tasks, labels, activeSprint, projects, backlogId, epics, allSprints] =
+        await Promise.all([
         fetchTasks(groupId),
         fetchFieldEnums(),
         fetchActiveSprint(groupId),
         fetchProjects(),
         fetchBacklogId(groupId),
         fetchEpics(groupId),
+        /* Lista sprintow do nazw w dzienniku. Blad nie moze wywalic startu:
+           bez niej dziennik pokaze `#379` zamiast nazwy i nic wiecej. */
+        fetchSprints(groupId).catch(() => [] as Sprint[]),
       ]);
 
       /*
@@ -1092,6 +1100,7 @@ function useBitrixData() {
           stageMeta,
           labels,
           activeSprint,
+          sprints: allSprints,
           backlogId,
           config,
           projects,
@@ -1257,6 +1266,12 @@ function useBitrixData() {
        * i `data.tasks` bedzie juz niosl nowa wartosc. Patrz `notePrevious`.
        */
       notePrevious(id, before as unknown as Record<string, unknown>);
+      /*
+       * Zapisujemy TO, CO ZAPISUJEMY — dziennik potrzebuje tego, zeby nie ogłosic
+       * naszej wlasnej zmiany jako cudzej, gdy lista nadgoni po wygasnieciu
+       * pinezki. Patrz `noteMine`.
+       */
+      noteMine(id, patch as unknown as Record<string, unknown>);
 
       patchTasks(id, patch);
       /*
@@ -2576,21 +2591,35 @@ function TagStrip({
 
 /** Tag Bitriksa. Odcien wyliczany z nazwy, wiec dla danego tagu stale ten sam. */
 function Tag({ name, onPick }: { name: string; onPick?: (name: string) => void }) {
+  const body = (
+    <>
+      <span className="tag-dot" style={{ background: tagHue(name) }} />
+      {name}
+    </>
+  );
+  /*
+   * Bez akcji to NIE jest przycisk. Wczesniej zawsze byl — a w panelu szczegolow
+   * tagi siedza wewnatrz klikalnego pola (`FieldButton`), wiec wychodzil
+   * `<button>` w `<button>`: nieprawidlowy HTML, przy ktorym przegladarka potrafi
+   * wyciagnac wewnetrzny element na zewnatrz i klik trafia nie tam, gdzie trzeba.
+   */
+  if (!onPick) {
+    return (
+      <span className="tag" title={name}>
+        {body}
+      </span>
+    );
+  }
   return (
     <button
       className="tag"
-      title={onPick ? `Filtruj po tagu: ${name}` : name}
-      onClick={
-        onPick
-          ? (e) => {
-              e.stopPropagation(); // klik w tag nie ma otwierac zadania
-              onPick(name);
-            }
-          : undefined
-      }
+      title={`Filtruj po tagu: ${name}`}
+      onClick={(e) => {
+        e.stopPropagation(); // klik w tag nie ma otwierac zadania
+        onPick(name);
+      }}
     >
-      <span className="tag-dot" style={{ background: tagHue(name) }} />
-      {name}
+      {body}
     </button>
   );
 }
@@ -3311,13 +3340,12 @@ function Comments({
       {comments?.length === 0 && <p className="desc-dim">Brak komentarzy.</p>}
 
       {comments?.map((c) => {
-        // Konto-zaslepka jako autor komentarza tez idzie jako "Nieprzypisane".
-        const unassigned = isUnassigned(c.authorId);
         return (
         <article key={`${c.source}:${c.id}`} className="comment">
           <div className="comment-head">
-            <Avatar name={unassigned ? null : c.authorName} photo={unassigned ? undefined : c.authorPhoto} />
-            <strong>{unassigned ? UNASSIGNED_LABEL : c.authorName}</strong>
+            {/* Autor komentarza to zawsze konkretna osoba — patrz `PersonInline`. */}
+            <Avatar name={c.authorName} photo={c.authorPhoto} />
+            <strong>{c.authorName}</strong>
             <span className="row-meta">{dateTime(c.date)}</span>
           </div>
           {c.text && <div className="comment-body">{renderDescription(c.text)}</div>}
@@ -4188,11 +4216,7 @@ function DetailPanel({
             <>
               <dt>Autor</dt>
               <dd>
-                <PersonInline
-                  id={detail.creatorId}
-                  name={detail.creatorName}
-                  photo={detail.creatorPhoto}
-                />
+                <PersonInline name={detail.creatorName} photo={detail.creatorPhoto} />
               </dd>
             </>
           )}
@@ -4527,7 +4551,7 @@ function DetailPanel({
                 <div className="people">
                   {list.map((p) => (
                     <span key={p.id} className="person">
-                      <PersonInline id={p.id} name={p.name} photo={p.photo} />
+                      <PersonInline name={p.name} photo={p.photo} />
                       {/*
                         Usuwanie WPROST z osoby. Wczesniej jedyna droga bylo otwarcie
                         "+" i odklikniecie ptaszka — czyli usuwanie schowane pod
@@ -5200,8 +5224,19 @@ interface MenuState {
  * podpowiadaczem nazw. Zapisany `label` zostaje zapasem: dla starych wpisow
  * sprzed tej zmiany i dla identyfikatorow, ktorych juz nie ma w slownikach.
  */
+/*
+ * O kogo juz pytalismy. NA POZIOMIE MODULU, nie w refie: panel odmontowuje sie
+ * przy zamknieciu, wiec ref gubil pamiec i kazde kolejne otwarcie dziennika
+ * powtarzalo te same zapytania — razem z tymi, ktore konczyly sie bledem.
+ */
+const askedAuthors = new Set<number>();
+
+/** Pelna lista osob — raz na sesje, wspolna dla kazdego otwarcia dziennika. */
+let staffCache: Person[] = [];
+
 function History({
   initialFocus,
+  focusSeq,
   stageNames,
   people,
   labels,
@@ -5214,6 +5249,8 @@ function History({
 }: {
   /** Zadanie, do ktorego dziennik otwiera sie zawezony — z panelu zadania. */
   initialFocus: number | null;
+  /** Rosnie przy KAZDEJ prosbie o zawezenie — patrz `histSeq`. */
+  focusSeq: number;
   stageNames: Map<number, string>;
   people: Person[];
   labels: FieldEnums;
@@ -5238,6 +5275,26 @@ function History({
    * wiec dziala tez dla zadania, ktore juz nie istnieje.
    */
   const [focus, setFocus] = useState<number | null>(initialFocus);
+  /*
+   * Zrodlo zapisu jako filtr. „Czy to my to zrobilismy" jest przy przegladaniu
+   * dziennika osobnym pytaniem od „co sie stalo" — a odsianie jednej strony
+   * wzrokiem, po samym wyciszeniu wiersza, przy stu wpisach nie dziala.
+   */
+  const [source, setSource] = useState<'all' | 'binear' | 'out'>('all');
+
+  /*
+   * `useState(initialFocus)` czyta propa TYLKO przy montowaniu — a panel potrafi
+   * byc juz otwarty, gdy przychodzi zadanie do zawezenia. Sciezka: dziennik jest
+   * otwarty, klikasz wiersz, na wierzchu otwiera sie panel zadania, w nim
+   * naciskasz „historia" — `initialFocus` sie zmienia, ale `useState` to ignoruje
+   * i dziennik dalej pokazuje WSZYSTKO zamiast czterech wpisow tego zadania.
+   *
+   * `null` swiadomie pomijamy: zerowanie idzie z zamkniecia panelu, a nie z
+   * prosby „pokaz wszystko", i skasowaloby zawezenie klikniete w samym dzienniku.
+   */
+  useEffect(() => {
+    if (initialFocus !== null) setFocus(initialFocus);
+  }, [initialFocus, focusSeq]);
   /*
    * Szukanie i odsiew nieudanych. Przy oknie TYGODNIOWYM przewijanie przestalo
    * wystarczac — wpisow bywa kilkaset, a szuka sie zwykle jednego konkretnego
@@ -5275,6 +5332,34 @@ function History({
   }, [focus, items]);
 
   /*
+   * PELNA lista osob firmy — do nazwisk w dzienniku.
+   *
+   * `people` powstaje z BIEZACYCH przypisan, wiec nie zna nikogo, kto nie jest
+   * w tej chwili za nic odpowiedzialny. A dziennik z natury mowi o przeszlosci:
+   * „kto to byl, zanim to zmieniono". Wpis o odpieciu zadania od Anny pokazywal
+   * przez to `#387`, choc w chwili zmiany byla odpowiedzialna.
+   *
+   * `fetchEmployees` bierze takze konta WYLACZONE, wiec byli pracownicy tez maja
+   * nazwisko. Pobranie jest jedno na sesje i tylko po otwarciu panelu.
+   */
+  const [staff, setStaff] = useState<Person[]>(() => staffCache);
+  useEffect(() => {
+    if (staffCache.length) return;
+    let stop = false;
+    void fetchEmployees()
+      .then((list) => {
+        staffCache = list;
+        if (!stop) setStaff(list);
+      })
+      .catch(() => {
+        /* Brak listy tylko cofa nas do stanu sprzed zmiany: zostaje `#id`. */
+      });
+    return () => {
+      stop = true;
+    };
+  }, []);
+
+  /*
    * Nazwy wracaja OZNACZONE, zeby dalo sie je pozniej wyroznic w tekscie.
    *
    * `describe` sklada jedno zdanie i zwraca string — jest jeden dla zapisu i dla
@@ -5290,7 +5375,7 @@ function History({
         kind === 'stage'
           ? stageNames.get(n)
           : kind === 'person'
-            ? people.find((p) => p.id === n)?.name
+            ? (people.find((p) => p.id === n)?.name ?? staff.find((p) => p.id === n)?.name)
             : kind === 'status'
               ? labels.status[id]
               : kind === 'priority'
@@ -5311,7 +5396,7 @@ function History({
        */
       return name;
     },
-    [stageNames, people, labels, sprints, backlogId],
+    [stageNames, people, staff, labels, sprints, backlogId],
   );
 
   /*
@@ -5333,10 +5418,26 @@ function History({
          * (odszedl z firmy), `Avatar` sam rysuje inicjaly z nazwy z wpisu.
          */
         if (kind === 'person') {
-          const person = people.find((pp) => pp.id === Number(id));
+          const n = Number(id);
+          const person = people.find((pp) => pp.id === n) ?? staff.find((pp) => pp.id === n);
+          /*
+           * Awatar dostaje ten, kogo UMIEMY NAZWAC. Przy nieznanym id `Avatar`
+           * rysowalby inicjaly z samego „#387", czyli kolko z krzyzykiem tuz przy
+           * napisie „#387" — czytalo sie to jak „##387".
+           *
+           * Konto-zaslepka dostaje PUSTY krazek, a nie nic. Wczesniej bylo tu
+           * odwrotnie — z mysla, ze „Nieprzypisane" to brak osoby, wiec nie ma czego
+           * rysowac. W zdaniu wyglada to jednak tak, jakby jednej stronie strzalki
+           * czegos brakowalo: „X → Nieprzypisane" traci rytm, gdy tylko lewa strona
+           * ma krazek. Pusty krazek jest wtedy znakiem „nikt", a nie ozdobnikiem.
+           */
           return (
             <span key={i} className="hist-name hist-name-person">
-              <Avatar name={name} photo={person?.photo} />
+              {isUnassigned(n) ? (
+                <Avatar name={null} />
+              ) : (
+                person && <Avatar name={person.name} photo={person.photo} />
+              )}
               {name}
             </span>
           );
@@ -5469,26 +5570,38 @@ function History({
     const q = query.trim().toLowerCase();
     return items.filter((e) => {
       if (focus !== null && e.taskId !== focus) return false;
+      if (source === 'binear' && e.source === 'bitrix') return false;
+      if (source === 'out' && e.source !== 'bitrix') return false;
       if (onlyFailed && !e.error) return false;
       if (q && !haystack(e).includes(q)) return false;
       return true;
     });
-  }, [items, focus, onlyFailed, query, haystack]);
+  }, [items, focus, source, onlyFailed, query, haystack]);
 
   /*
    * Nazwiska do zmian z zewnatrz — dociagane DOPIERO TUTAJ, gdy panel jest
    * otwarty, i tylko dla zadan, ktore faktycznie widac. Jedno wywolanie na
    * zadanie, raz: wynik wpisuje sie do dziennika na stale (`noteAuthor`).
    */
-  const askedRef = useRef<Set<number>>(new Set());
   useEffect(() => {
     const missing = [
       ...new Set(
         shown
-          .filter((e) => e.source === 'bitrix' && !e.by && e.taskId !== null)
+          .filter(
+            (e) =>
+              e.source === 'bitrix' &&
+              !e.by &&
+              e.taskId !== null &&
+              /*
+               * Skasowanego zadania nie ma juz o co pytac — portal odpowiada 400,
+               * a autor i tak nie przyjdzie. Bez tego kazde otwarcie panelu
+               * strzelalo seria bledow za zadania, ktore sami usunelismy.
+               */
+              !deleted.has(e.taskId),
+          )
           .map((e) => e.taskId as number),
       ),
-    ].filter((id) => !askedRef.current.has(id));
+    ].filter((id) => !askedAuthors.has(id));
     if (!missing.length) return;
 
     let stop = false;
@@ -5496,7 +5609,7 @@ function History({
       /* Po kilka na raz — panel ma sie wypelniac, a nie zalewac portal naraz. */
       for (const id of missing.slice(0, 10)) {
         if (stop) return;
-        askedRef.current.add(id);
+        askedAuthors.add(id);
         const rows = await fetchTaskHistory(id).catch(() => []);
         const by = rows[rows.length - 1]?.by;
         if (by && !stop) noteAuthor(id, by);
@@ -5505,13 +5618,21 @@ function History({
     return () => {
       stop = true;
     };
-  }, [shown]);
+  }, [shown, deleted]);
 
   /* Wejscie do sprintu to jedna pozycja — regula w `foldEntries`. */
   const rows = useMemo(
     () =>
-      foldEntries(shown).map((items) => ({
-        key: `${items[0].at}-${items[0].method}-${items.length}`,
+      foldEntries(shown).map((items, i) => ({
+        /*
+         * Indeks jest tu KONIECZNY, nie ozdoba. Bez niego kluczem byly czas +
+         * metoda + liczba wpisow — a wrzucenie kilku zadan naraz daje kilka
+         * wierszy o IDENTYCZNEJ milisekundzie i metodzie, czyli o tym samym
+         * kluczu. React przy duplikatach nie usuwa wezlow, ktore wypadly z
+         * listy: po zawezeniu do jednego zadania na ekranie ZOSTAWALY wiersze
+         * innych zadan, mimo ze dane byly juz przefiltrowane poprawnie.
+         */
+        key: `${items[0].at}-${items[0].taskId}-${items[0].method}-${i}`,
         at: items[0].at,
         items,
       })),
@@ -5554,6 +5675,14 @@ function History({
     const d = new Date(at);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
+
+  /* Ile jest czego — liczone PRZED filtrem zrodla, inaczej wlaczenie go
+     zmienialoby liczby na samych przyciskach, ktore je wlaczaja. */
+  const bySource = useMemo(() => {
+    const scoped = items.filter((e) => focus === null || e.taskId === focus);
+    const out = scoped.filter((e) => e.source === 'bitrix').length;
+    return { all: scoped.length, out, binear: scoped.length - out };
+  }, [items, focus]);
 
   /* Licznik z calosci (albo z zawezonego zadania) — inaczej wlaczenie filtra
      zmienialoby liczbe, ktora sama ten filtr wlacza. */
@@ -5644,6 +5773,36 @@ function History({
               <CloseIcon />
             </button>
           )}
+          {/*
+            Trzy stany, nie przelacznik: „tylko nasze" i „tylko cudze" to dwa
+            rozne pytania, a nie jedno z zaprzeczeniem — przelacznik zmuszalby do
+            zgadywania, ktora strone wlasnie widac.
+          */}
+          <div className="hist-src" role="group" aria-label="Źródło zapisu">
+            {(
+              [
+                ['all', 'Wszystkie', bySource.all],
+                ['binear', 'binear', bySource.binear],
+                ['out', 'Poza binear', bySource.out],
+              ] as const
+            ).map(([key, label, count]) => (
+              <button
+                key={key}
+                className={`hist-src-btn${source === key ? ' hist-src-on' : ''}`}
+                onClick={() => setSource(key)}
+                disabled={count === 0 && source !== key}
+                title={
+                  key === 'all'
+                    ? 'Wszystkie zapisy'
+                    : key === 'binear'
+                      ? 'Tylko to, co zrobiliśmy z binear'
+                      : 'Tylko zmiany zrobione poza binear'
+                }
+              >
+                {label} ({count})
+              </button>
+            ))}
+          </div>
           <button
             className={`hist-fails${onlyFailed ? ' hist-fails-on' : ''}`}
             onClick={() => setOnlyFailed((v) => !v)}
@@ -5689,12 +5848,38 @@ function History({
                       <div
                         className={`hist${lead.error ? ' hist-fail' : ''}${
                           lead.source === 'bitrix' ? ' hist-out' : ''
-                        }`}
+                        }${focus === null && lead.taskId !== null ? ' hist-pick' : ''}`}
+                        /*
+                         * Zawezenie bierze CALY wiersz, nie sam znacznik zadania.
+                         * Znacznik to kilkanascie pikseli w drugiej linii — naglowek
+                         * pisal „kliknij zadanie w wierszu", wiec klikniecie w wiersz
+                         * bylo naturalne i nie robilo NIC, co wyglada jak zepsuty filtr.
+                         * Skrot „N zapisy" zostaje wylaczony, bo rozwija, a nie zaweza.
+                         */
+                        onClick={(e) => {
+                          if (focus !== null || lead.taskId === null) return;
+                          if ((e.target as HTMLElement).closest('.hist-more')) return;
+                          setFocus(lead.taskId);
+                        }}
                       >
                         <span className="hist-time">{time(row.at)}</span>
                         <div className="hist-body">
-                          <span className="hist-what">
-                            {grouped ? renderWhat(summarize(row.items)) : renderWhat(sentence(lead))}
+                          {/*
+                            Gorna linia: zdanie po lewej, autor przy PRAWEJ krawedzi.
+                            Wczesniej autor stal w drugiej linii, zaraz za znacznikiem
+                            zadania — czyli w miejscu zaleznym od dlugosci tytulu, wiec
+                            przy przewijaniu skakal. Dociśniety do krawedzi ma zawsze te
+                            sama pozycje i czyta sie go jak kolumne, a nie jak dopisek.
+                          */}
+                          <span className="hist-line">
+                            <span className="hist-what">
+                              {grouped ? renderWhat(summarize(row.items)) : renderWhat(sentence(lead))}
+                            </span>
+                            {lead.source === 'bitrix' && (
+                              <span className="hist-out-tag" title="Zmiana spoza binear">
+                                {lead.by ?? 'poza binear'}
+                              </span>
+                            )}
                           </span>
                           {/*
                             Kod i tytul Z WPISU, nie z listy zadan — zadania moze juz nie byc.
@@ -5714,15 +5899,6 @@ function History({
                                   <span className="hist-dead">usunięte</span>
                                 )}
                               </button>
-                            )}
-                            {/*
-                              Zmiana spoza binear — inaczej dziennik sugerowalby, ze to
-                              MY ja zrobilismy, a to najgorsze, co audyt moze powiedziec.
-                            */}
-                            {lead.source === 'bitrix' && (
-                              <span className="hist-out-tag" title="Zmiana spoza binear">
-                                {lead.by ?? 'poza binear'}
-                              </span>
                             )}
                             {/* Zwiniete zawsze da sie rozwinac — skrot nie moze niczego ukryc. */}
                             {grouped && (
@@ -5881,6 +6057,7 @@ export default function App() {
     stageMeta,
     labels,
     activeSprint,
+    sprints,
     backlogId,
     config,
     projects,
@@ -6037,6 +6214,13 @@ export default function App() {
   const [histOpen, setHistOpen] = useState(false);
   /** Zadanie, do ktorego dziennik ma byc zawezony po otwarciu (`null` = caly). */
   const [histFocus, setHistFocus] = useState<number | null>(null);
+  /*
+   * Licznik PROSB o zawezenie, nie tylko jej wartosc. Samo id nie wystarcza: po
+   * powrocie na „Caly dziennik" prosba o TO SAMO zadanie nie zmienia `histFocus`,
+   * wiec panel nie ma z czego poznac, ze pytano go drugi raz — i zostaje pelna
+   * lista, mimo ze nacisnales „historia".
+   */
+  const [histSeq, setHistSeq] = useState(0);
   // Motyw i kroj stoja poza SETTINGS_KEY, bo czyta je tez skrypt w <head>.
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [font, setFont] = useState<Font>(loadFont);
@@ -8632,6 +8816,7 @@ export default function App() {
           onClose={() => setOpenId(null)}
           onHistory={(id) => {
             setHistFocus(id);
+            setHistSeq((n) => n + 1);
             setHistOpen(true);
           }}
           onDelete={() =>
@@ -8922,13 +9107,14 @@ export default function App() {
       {histOpen && (
         <History
           initialFocus={histFocus}
+          focusSeq={histSeq}
           stageNames={stageNames}
           people={people}
           labels={labels}
           /* Tylko aktywny sprint: pelna lista sprintow przychodzi z widokiem
              planowania, ktory jeszcze nie jest zacommitowany. Pozostale pokaza
              sie jako `#id` — czyli „szukalismy i nie ma". */
-          sprints={activeSprint ? [activeSprint] : []}
+          sprints={sprints}
           backlogId={backlogId}
           stageMeta={stageMeta}
           onOpen={setOpenId}

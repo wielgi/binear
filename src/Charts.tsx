@@ -15,6 +15,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { BurndownPoint, ScopeSegment } from './sprintStats';
 import { WORK_END_HOUR, WORK_START_HOUR } from './bitrix';
+import { tasksWord } from './taskView';
 
 /**
  * Gorna krawedz osi Y — najblizszy okragly stopien POWYZEJ najwyzszej wartosci.
@@ -274,13 +275,28 @@ export function BurndownChart({ series }: { series: Series[] }) {
         if (p.actual !== null && i > lastReal) lastReal = i;
       });
     }
-    const beyond = hover > lastReal;
+    /*
+     * Koniec linii rzeczywistej W TYCH SAMYCH JEDNOSTKACH co `hover`, czyli w
+     * ulamkowym indeksie dnia. Sam `lastReal` nie wystarcza: dzisiejszy punkt jest
+     * narysowany tyle PRZED swoja kreska, ile dnia roboczego jeszcze zostalo
+     * (patrz `px`), wiec prog liczony w calych dniach oglaszal pomiar na calym
+     * dzisiejszym dniu — o 10:00 rowniez na godzinach, ktorych jeszcze nie bylo.
+     */
+    const realEnd = lastReal < 0 ? -1 : lastReal - (1 - dayProgress(days[lastReal]?.at ?? 0));
+    const beyond = hover > realEnd;
 
     const all = series.map((s) => {
       const a = s.points[lo];
       const b = s.points[hi];
+      /*
+       * Na ostatnim odcinku kursor trzeba przeliczyc na ulamek TEGO, CO NARYSOWANE:
+       * odcinek konczy sie na `realEnd`, a nie na kresce dnia, wiec surowe `f`
+       * dawaloby wartosc z innego miejsca niz to, nad ktorym stoi kursor.
+       */
+      const span = hi === lastReal && realEnd > lo ? (hover - lo) / (realEnd - lo) : f;
+      const t = Math.min(1, Math.max(0, span));
       const v =
-        a.actual === null ? null : b.actual === null ? a.actual : lerp(a.actual, b.actual, f);
+        a.actual === null ? null : b.actual === null ? a.actual : lerp(a.actual, b.actual, t);
       // Projekcja KAZDEJ osoby z osobna — wspolny plan nie istnieje, bo kazda
       // ma inny zakres. Bez tego przy porownaniu widac "ile zostalo", ale nie
       // wiadomo, czy to duzo, czy malo jak na jej wlasny plan.
@@ -690,7 +706,7 @@ export function ScopeBar({
             /* Proporcja z `flex-grow` przy zerowej bazie — procenty wymagalyby
                zaokraglen, ktore przy kilkunastu kawalkach zostawiaja szpare. */
             style={{ flex: `${s.sp} 1 0`, background: hue(s.color) }}
-            title={`${s.name} — ${s.sp} SP · ${s.count} ${plural(s.count)}`}
+            title={`${s.name} — ${s.sp} SP · ${s.count} ${tasksWord(s.count)}`}
           />
         ))}
       </div>
@@ -765,19 +781,11 @@ export function StageStrip({ segments, done }: { segments: ScopeSegment[]; done:
           key={s.id}
           className="stage-strip-seg"
           style={{ flex: `${s.sp} 1 0`, background: s.color ? `#${s.color}` : 'var(--fg-dim)' }}
-          title={`${s.name} — ${s.sp} SP · ${s.count} ${plural(s.count)}`}
+          title={`${s.name} — ${s.sp} SP · ${s.count} ${tasksWord(s.count)}`}
         />
       ))}
     </span>
   );
-}
-
-/** „zadanie / zadania / zadan" — polska liczba mnoga w podpowiedzi slupka. */
-function plural(n: number): string {
-  if (n === 1) return 'zadanie';
-  const t = n % 10;
-  const h = n % 100;
-  return t >= 2 && t <= 4 && (h < 12 || h > 14) ? 'zadania' : 'zadań';
 }
 
 /** Legenda wykresu — znak plus podpis, ten sam zapis dla kazdej serii. */

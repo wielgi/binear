@@ -54,3 +54,15 @@ export function sumPoints(tasks: { storyPoints: number | null }[]): number | nul
   }
   return any ? sum : null;
 }
+
+/**
+ * „zadanie / zadania / zadan" — polska liczba mnoga. Wspolna, bo licznik zadan
+ * stoi w kilku miejscach (naglowki grup, kolumny, wykresy), a odmiana recznie
+ * w kazdym z nich rozjezdzala sie: „2 zadan" przy osobie na wykresie.
+ */
+export function tasksWord(n: number): string {
+  if (n === 1) return 'zadanie';
+  const t = n % 10;
+  const h = n % 100;
+  return t >= 2 && t <= 4 && (h < 12 || h > 14) ? 'zadania' : 'zadań';
+}

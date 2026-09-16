@@ -117,6 +117,45 @@ const WATCHED: Record<string, string> = {
   sprintId: 'entityId',
 };
 
+/*
+ * Rejestr WLASNYCH zapisow — wylacznie do odsiewania ich z „zmian z zewnatrz".
+ *
+ * Pinezka (`applyPins`) zyje 5 minut i broni EKRANU przed cofnieciem przez
+ * przeterminowana liste. Tu chodzi o co innego i dlatego nie da sie tego oprzec
+ * na czasie: `tasks.task.list` nadgania MINUTAMI po zapisie, a wejscie do sprintu
+ * jest kolejkowane (do minuty na zadanie), wiec przy wrzuceniu kilkunastu zadan
+ * naraz wlasna zmiana wraca dlugo po wygasnieciu pinezki. Dziennik oglaszal ja
+ * wtedy jako CUDZA — czyli dokladnie odwrotnie, niz bylo.
+ *
+ * Dopasowujemy po WARTOSCI: jesli przyszlo dokladnie to, co sami zapisalismy, to
+ * nasze — nizaleznie od tego, ile portal to trawil. Wpis KONSUMUJEMY, wiec
+ * pozniejsza, prawdziwie cudza zmiana na te sama wartosc zostanie zauwazona.
+ */
+const MINE_TTL_MS = 60 * 60_000;
+const mineWrites = new Map<string, { at: number; value: unknown }>();
+
+const mineKey = (taskId: number, prop: string) => `${taskId}|${prop}`;
+
+/** Woalne przez `mutate` tuz przed zapisem — patchem w ksztalcie `Task`. */
+export function noteMine(taskId: number, patch: Record<string, unknown>): void {
+  const now = Date.now();
+  for (const [k, v] of mineWrites) if (now - v.at > MINE_TTL_MS) mineWrites.delete(k);
+  for (const [prop, value] of Object.entries(patch)) {
+    mineWrites.set(mineKey(taskId, prop), { at: now, value });
+  }
+}
+
+/** Czy ta wartosc to nasz wlasny zapis, ktory wlasnie wrocil. Dopasowanie ZUZYWA wpis. */
+function wasMine(taskId: number, prop: string, value: unknown): boolean {
+  const key = mineKey(taskId, prop);
+  const hit = mineWrites.get(key);
+  if (!hit || Date.now() - hit.at > MINE_TTL_MS) return false;
+  /* Luzne porownanie: lista oddaje `status`/`priority` jako napisy, a piszemy liczby. */
+  if (String(hit.value) !== String(value)) return false;
+  mineWrites.delete(key);
+  return true;
+}
+
 /** Jedna zauwazona zmiana z zewnatrz, w ksztalcie, ktory rozumie `describe`. */
 export interface Incoming {
   taskId: number;
@@ -154,6 +193,13 @@ export function diffTasks(
       const a = was[prop];
       const b = t[prop];
       if (a === b || (a == null && b == null)) continue;
+      /*
+       * `undefined` po stronie „przed" znaczy, ze punkt odniesienia w ogole nie
+       * mial tego pola — czyli MY o nim nie wiedzielismy. Pojawienie sie wiedzy
+       * to nie jest zmiana, ktora ktos zrobil, a dziennik ma mowic o zmianach.
+       */
+      if (a === undefined) continue;
+      if (wasMine(id, prop, b)) continue;
       (fields ??= {})[rest] = b;
       (before ??= {})[rest] = a;
     }
@@ -198,12 +244,37 @@ export function onHistoryChange(fn: () => void): () => void {
  * konczy sie pusta lista. Dziennik jest wygoda, nie danymi — nie ma prawa
  * wywalic aplikacji.
  */
+/**
+ * Wyrzuca ECHA wlasnych wejsc do sprintu — wpisy „z zewnatrz", ktore opisuja
+ * zmiane, ktora sami zrobilismy chwile wczesniej.
+ *
+ * Kasujemy TYLKO te, ktore da sie udowodnic: obok musi lezec nasz wlasny
+ * `kanban.addTask` dla TEGO SAMEGO zadania i w tym samym oknie czasu. Echo bez
+ * takiego dowodu zostaje — brak dowodu, ze cos bylo nasze, nie jest dowodem, ze
+ * bylo (a audyt, ktory po cichu kasuje cudze zmiany, jest gorszy niz halasliwy).
+ *
+ * Nowe echa juz nie powstaja (patrz `noteMine`); to sprzatanie po tym, co zdazylo
+ * sie zapisac wczesniej.
+ */
+function dropEchoes(items: HistoryEntry[]): HistoryEntry[] {
+  const ours = items.filter(
+    (e) => e.method === 'tasks.api.scrum.kanban.addTask' && !e.error && e.taskId !== null,
+  );
+  if (!ours.length) return items;
+
+  return items.filter(
+    (e) =>
+      !sprintEcho(e) ||
+      !ours.some((o) => o.taskId === e.taskId && Math.abs(e.at - o.at) <= ECHO_WINDOW_MS),
+  );
+}
+
 export function readHistory(): HistoryEntry[] {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) || '[]');
     if (!Array.isArray(raw)) return [];
     const since = Date.now() - HISTORY_DAYS * 86_400_000;
-    return raw.filter(
+    const kept = raw.filter(
       (e): e is HistoryEntry =>
         Boolean(e) &&
         typeof e.at === 'number' &&
@@ -217,6 +288,19 @@ export function readHistory(): HistoryEntry[] {
          */
         e.at >= since,
     );
+
+    /*
+     * Odsiewamy przy ODCZYCIE i NIE zapisujemy z powrotem.
+     *
+     * Pierwsza wersja nadpisywala pamiec, zeby sprzatanie zdarzylo sie raz — ale
+     * `readHistory` wolaja wszystkie otwarte karty, wiec zapis jedej z nich
+     * potrafi skasowac wpis, ktory druga wlasnie dopisala. Dziennik jest zapisem
+     * tego, co zrobilismy; funkcja, ktora go CZYTA, nie ma prawa go skrocic.
+     *
+     * Kosztem jest kilka niewidocznych wpisow lezacych w pamieci. Nowe i tak juz
+     * nie powstaja (patrz `noteMine`), a stare wygasna razem z oknem 7 dni.
+     */
+    return dropEchoes(kept);
   } catch {
     return [];
   }
@@ -533,6 +617,17 @@ export function describe(
           return mark('deadline', '', arrow('termin', k, dateLabel, v));
         if (k === 'TITLE') return mark('title', '', `tytuł → „${cut(v)}”`);
         if (k === 'PRIORITY') return arrow('priorytet', k, (x) => name('priority', x), v);
+        /*
+         * Pola SCRUMA moga trafic tu razem z polami zadania, choc Bitrix zapisuje
+         * je inna metoda. Dzieje sie tak przy zmianach Z ZEWNATRZ: `diffTasks`
+         * porownuje wiersze zadan i nazywa pola tak, jak nazywa je API, a caly
+         * wpis sklada pod `tasks.task.update`. Bez tych trzech linijek sprint
+         * czytal sie jako gole „entityId → 381".
+         */
+        if (k === 'entityId') return arrow('sprint', k, (x) => name('sprint', x), v);
+        if (k === 'storyPoints')
+          return arrow('story pointy', k, str, v, 'story pointy zdjęte');
+        if (k === 'epicId') return arrow('epik', k, str, v);
         if (k === 'TAGS') return mark('tags', '', `tagi (${Array.isArray(v) ? v.length : 0})`);
         /* Pusty string kasuje pole — patrz `updateParticipants`. */
         if (k === 'AUDITORS')
@@ -622,6 +717,28 @@ function partOfSprintEntry(e: HistoryEntry): boolean {
   return false;
 }
 
+/*
+ * ECHO wlasnego wejscia do sprintu. `tasks.task.list` nadganiala z opoznieniem i
+ * ta sama zmiana wracala kilkadziesiat sekund pozniej jako „z zewnatrz" — obok
+ * trzech wierszy, ktore wlasnie ja opisaly.
+ *
+ * Od teraz takie echo w ogole nie powstaje (patrz `noteMine`), ale wpisy zapisane
+ * WCZESNIEJ zostaja: dziennik jest zapisem tego, co widzielismy, i nie przepisuje
+ * sie wstecz. Dlatego echa nie kasujemy — skladamy je z grupa, do ktorej naleza.
+ *
+ * Okno jest osobne i szerokie, bo opoznienie listy jest nieprzewidywalne; 15
+ * sekund od `FOLD_WINDOW_MS` opisuje tempo NASZYCH trzech zapisow, a nie to.
+ */
+const ECHO_WINDOW_MS = 10 * 60_000;
+
+function sprintEcho(e: HistoryEntry): boolean {
+  if (e.source !== 'bitrix' || e.error || e.taskId === null) return false;
+  if (e.method !== 'tasks.task.update') return false;
+  const keys = Object.keys((e.params?.fields ?? {}) as Record<string, unknown>);
+  /* Wylacznie pola, ktore niesie wejscie do sprintu — nic obok. */
+  return keys.length > 0 && keys.every((k) => k === 'STAGE_ID' || k === 'entityId');
+}
+
 /**
  * Dzieli dziennik (od najnowszego) na pozycje: pojedyncze wpisy albo grupy.
  * Grupa ma zawsze wiecej niz jeden wpis i zawiera `kanban.addTask`.
@@ -651,3 +768,5 @@ export function foldEntries(items: HistoryEntry[]): HistoryEntry[][] {
   }
   return out;
 }
+
+
