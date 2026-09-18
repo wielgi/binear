@@ -2,8 +2,9 @@ import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Epic, Stage, Task } from './bitrix';
 import { Avatar, CommentIcon, LinkIcon, ParentIcon, PriorityIcon, SubtaskIcon, tagHue } from './icons';
-import { shortDate, isUnassigned, sumPoints, tasksWord } from './taskView';
+import { shortDate, isUnassigned, stageOf, sumPoints } from './taskView';
 import { colDropId, dragId } from './dnd';
+import { HoverNote } from './HoverNote';
 import { TaskCode } from './TaskCode';
 
 /**
@@ -67,7 +68,10 @@ export function Board({
 }) {
   const byStage = new Map<number, Task[]>();
   for (const t of tasks) {
-    const key = t.stageId && stages.some((s) => s.id === t.stageId) ? t.stageId : NO_STAGE;
+    /* `stageOf`, nie `t.stageId`: zadanie wyjete ze sprintu zachowuje stary etap
+       i bez tego wpadaloby do kolumny sprintu, w ktorym juz go nie ma. */
+    const st = stageOf(t);
+    const key = st && stages.some((s) => s.id === st) ? st : NO_STAGE;
     const list = byStage.get(key);
     if (list) list.push(t);
     else byStage.set(key, [t]);
@@ -196,13 +200,13 @@ function BoardColumn({
       <header className="col-head">
         <span className="col-dot" style={{ background: color ? `#${color}` : 'var(--fg-dim)' }} />
         <span className="col-title">{title}</span>
-        <span className="col-count" title={`${tasks.length} ${tasksWord(tasks.length)} w kolumnie`}>
+        <HoverNote label="Zadania" value={tasks.length} note="w kolumnie" className="col-count">
           {tasks.length}
-        </span>
+        </HoverNote>
         {sp !== null && (
-          <span className="head-sp" title="Suma story points w kolumnie">
+          <HoverNote label="Story points" value={`${sp} SP`} note="w kolumnie" className="head-sp">
             {sp} SP
-          </span>
+          </HoverNote>
         )}
       </header>
 

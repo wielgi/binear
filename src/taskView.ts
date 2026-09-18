@@ -66,3 +66,19 @@ export function tasksWord(n: number): string {
   const h = n % 100;
   return t >= 2 && t <= 4 && (h < 12 || h > 14) ? 'zadania' : 'zadań';
 }
+
+/**
+ * Etap zadania — ale TYLKO wtedy, gdy zadanie jest w sprincie.
+ *
+ * Wyjecie ze sprintu NIE czysci `STAGE_ID`. Sprawdzone na IT-890 (#116305):
+ * `sprintId` jest `null`, a `stageId` dalej wskazuje 4711, czyli „Nowe /
+ * Oczekujace" sprintu, do ktorego zadanie juz nie nalezy. Bez tego straznika
+ * zadanie z rejestru pokazuje sie w kolumnie tamtego sprintu — w grupowaniu
+ * listy, w sortowaniu po etapie, w kolorze wiersza i na tablicy.
+ *
+ * Czytamy to jako „etap nalezy do sprintu, nie do zadania": skoro sprintu nie
+ * ma, to i etapu nie ma, niezaleznie od tego, co zostalo w polu.
+ */
+export function stageOf(t: { sprintId: number | null; stageId: number | null }): number | null {
+  return t.sprintId ? t.stageId : null;
+}

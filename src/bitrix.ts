@@ -1572,10 +1572,13 @@ export function inProgressIntervals(history: HistoryEntry[], nowMs: number, targ
    *
    * W tym portalu praca plynie po kolumnach kanbana sprintu, a wbudowany status
    * bywa tylko przestawiany na koncu (2 -> 4). Do 2026-09-04 Bitrix trzymal status
-   * w parze z etapem, wiec liczenie po statusie dawalo te same odcinki; odkad
-   * `moveToStage` zapisuje `STAGE_ID` przez `tasks.task.update` zamiast
-   * `task.stages.movetask`, ta para sie rozjechala i po samym statusie wychodzilo
-   * 0 minut (zadanie 116017 / IT-876: etap Nowe -> W toku bez zadnego wpisu statusu).
+   * w parze z etapem, wiec liczenie po statusie dawalo te same odcinki. Miedzy
+   * 2026-09-04 a 2026-09-16 `moveToStage` zapisywal `STAGE_ID` przez
+   * `tasks.task.update` zamiast `task.stages.movetask` i para sie rozjechala —
+   * po samym statusie wychodzilo 0 minut (zadanie 116017 / IT-876: etap
+   * Nowe -> W toku bez zadnego wpisu statusu). Od 2026-09-16 binear znow przesuwa
+   * przez `movetask`, ale zadania z tamtego okresu zostaja w historii, wiec etap
+   * pozostaje zrodlem pierwszym.
    *
    * Zrodla NIE SUMUJEMY. Dla zadan sprzed rozjazdu w dzienniku sa OBA wpisy z tym
    * samym znacznikiem czasu, wiec suma liczylaby kazdy odcinek dwa razy. Bierzemy
@@ -1766,16 +1769,58 @@ export async function fetchRelatedPresence(taskIds: number[]): Promise<Set<numbe
 }
 
 /** Etap kanbana; dziala tylko dla zadan przypisanych do sprintu. */
-export async function moveToStage(taskId: number, stageId: number): Promise<void> {
-  /*
-   * NIE `task.stages.movetask` — ta metoda obsluguje kanban PROJEKTU, nie sprintu.
-   * Sprawdzone na zywo: `task.stages.get({entityId: 451})` oddaje etapy grupy
-   * (3441/3443/3445), a etapy sprintu to inny komplet (4651...4659). Podane id
-   * sprintowe `movetask` PRZYJMUJE i zwraca `true`, po czym nic nie zmienia —
-   * czyli przeciagniecie karty na tablicy wygladalo na udane i cofalo sie przy
-   * najblizszym odswiezeniu. `tasks.task.update` ustawia etap sprintu poprawnie.
-   */
+/**
+ * Samo pole etapu, BEZ logiki kolumn — Bitrix nie rusza przy tym statusu.
+ *
+ * Uzywane WYLACZNIE przy wejsciu do sprintu, do postawienia karty w kolumnie
+ * wejsciowej: ta droga odpala regule nadajaca IT-NNN i jest sprawdzona na zywo.
+ * Wszystko inne idzie przez `moveToStage`.
+ */
+async function writeStageField(taskId: number, stageId: number): Promise<void> {
   await call('tasks.task.update', { taskId, fields: { STAGE_ID: stageId } });
+}
+
+const stageSleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Status prosto z zadania — `tasks.task.list` zobaczylby zmiane dopiero po minutach. */
+async function readStatus(taskId: number): Promise<string> {
+  const res = await call<any>('tasks.task.get', { taskId, select: ['ID', 'STATUS'] }).catch(() => null);
+  return str(res?.task?.status);
+}
+
+/**
+ * Przesuniecie karty tak, jak robi to Bitrix: przez `task.stages.movetask`.
+ *
+ * Kolumna niesie STATUS — W toku = 3, Do zatwierdzenia = 4, Wdrozone = 5,
+ * Nowe = 2. Przy przeciaganiu w Bitriksie i przy synchronizacji z GitHubem
+ * zmienia sie on razem z kolumna prawie zawsze (sprawdzone na 124 zadaniach z
+ * trzech sprintow), a przy golym `tasks.task.update {STAGE_ID}` — nigdy. Zadania
+ * przesuwane w binear staly wiec w kolumnie ze statusem, ktory do niej nie
+ * pasowal, i wykres liczyl je inaczej niz kafelki.
+ *
+ * Wczesniej binear uzywal wlasnie tego (do 2026-09-04), po czym przeszedl na
+ * `tasks.task.update`, bo `movetask` z id etapu sprintu zwracal `true` i nic nie
+ * robil. Wtedy nie wiedzielismy jeszcze, ze karta musi najpierw trafic na
+ * tablice (`kanban.addTask`, odkryte 2026-09-10) — bez karty nie bylo czego
+ * przesuwac. Sprawdzone na zywo 2026-09-16 na zadaniu testowym: przesuwa karte
+ * sprintu i status idzie za kolumna.
+ *
+ * Status zmienia Bitrix, nie my — chwile PO przesunieciu. Zwracamy go, zeby
+ * `mutate` zapisal go jako nasz skutek: inaczej wrocilby z nastepna lista jako
+ * „zmiana z zewnatrz", a na ekranie wisialby stary az do odswiezenia.
+ */
+export async function moveToStage(taskId: number, stageId: number): Promise<{ status: string } | undefined> {
+  const was = await readStatus(taskId);
+  await call('task.stages.movetask', { id: taskId, stageId });
+
+  /* Na zadaniu testowym status byl gotowy po okolo sekundzie. Kolumna bez
+     reguly statusu go nie zmieni — wtedy po prostu nic nie zwracamy. */
+  for (let i = 0; i < 5; i++) {
+    await stageSleep(500);
+    const now = await readStatus(taskId);
+    if (now && now !== was) return { status: now };
+  }
+  return undefined;
 }
 
 /**
@@ -1794,7 +1839,7 @@ export async function moveToSprint(
   taskId: number,
   entityId: number,
   stageId?: number,
-): Promise<void> {
+): Promise<{ status: string } | undefined> {
   /*
    * Wejscie do sprintu idzie PRZEZ KOLEJKE — patrz `queued`. Rownolegle wejscia
    * dostawaly ten sam numer IT, bo regula liczy go z listy, ktora nie nadaza za
@@ -1804,7 +1849,11 @@ export async function moveToSprint(
   return queued(() => enterSprint(taskId, entityId, stageId));
 }
 
-async function enterSprint(taskId: number, entityId: number, stageId?: number): Promise<void> {
+async function enterSprint(
+  taskId: number,
+  entityId: number,
+  stageId?: number,
+): Promise<{ status: string } | undefined> {
   /*
    * 1. PRZYNALEZNOSC do sprintu. Sama w sobie nie robi nic wiecej: nie nadaje
    *    etapu (`STAGE_ID` zostaje 0), nie stawia karty na tablicy i nie odpala
@@ -1813,7 +1862,7 @@ async function enterSprint(taskId: number, entityId: number, stageId?: number): 
   await call('tasks.api.scrum.task.update', { id: taskId, fields: { entityId } });
 
   /* Powrot do backlogu — nie ma kolumny, w ktora cokolwiek mialoby wejsc. */
-  if (stageId === undefined) return;
+  if (stageId === undefined) return undefined;
 
   /*
    * KOLUMNA WEJSCIOWA. Automatyzacja nadajaca numer IT-XXX wisi na JEDNEJ
@@ -1858,7 +1907,8 @@ async function enterSprint(taskId: number, entityId: number, stageId?: number): 
    * 3. ETAP. Dopiero ten zapis Bitrix czyta jako wejscie karty do kolumny —
    *    i dopiero teraz odpalaja sie jej reguly.
    */
-  await moveToStage(taskId, entryId);
+  /* Kolumna wejsciowa zostaje na sprawdzonej drodze — patrz `writeStageField`. */
+  await writeStageField(taskId, entryId);
 
 
 
@@ -1889,9 +1939,10 @@ async function enterSprint(taskId: number, entityId: number, stageId?: number): 
   if (code) await waitForListed(code);
 
   /* Upuszczone wprost na kolumne wejsciowa — nie ma dokad przestawiac. */
-  if (entryId === stageId) return;
+  if (entryId === stageId) return undefined;
 
-  await moveToStage(taskId, stageId);
+  /* Kolumna docelowa ZE statusem — tak, jak przy zwyklym przeciagnieciu. */
+  return moveToStage(taskId, stageId);
 }
 
 /**

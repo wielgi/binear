@@ -87,6 +87,19 @@ export interface HistoryEntry {
  * `STAGE_ID` to etap. Gdyby tabela mieszkala przy `mutate`, slownik pol zylby
  * w dwoch plikach i rozjechalby sie przy pierwszej zmianie.
  */
+/**
+ * Pola, ktore zapis zmienia — w nazwach REST, niezaleznie od metody.
+ *
+ * `task.stages.movetask` nie ma `fields`: niesie gole `stageId`. Bez tej
+ * normalizacji dziennik nie znalby dla niego wartosci „przed" i pokazywal samo
+ * „etap → X", a skladanie wejscia do sprintu nie rozpoznawaloby tego kroku.
+ */
+export function fieldsOf(method: string, params: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!params) return {};
+  if (method === 'task.stages.movetask') return { STAGE_ID: params.stageId };
+  return (params.fields ?? {}) as Record<string, unknown>;
+}
+
 const PREV_OF: Record<string, string> = {
   STAGE_ID: 'stageId',
   RESPONSIBLE_ID: 'responsibleId',
@@ -439,7 +452,7 @@ export function logAction(entry: HistoryEntry): void {
   const snap =
     entry.before || entry.taskId === null ? undefined : prevState.get(entry.taskId);
   if (snap && Date.now() - snap.at <= PREV_TTL_MS) {
-    const fields = (entry.params?.fields ?? {}) as Record<string, unknown>;
+    const fields = fieldsOf(entry.method, entry.params);
     for (const k of Object.keys(fields)) {
       const prop = PREV_OF[k];
       if (!prop || !(prop in snap.task)) continue;
@@ -665,7 +678,7 @@ export function describe(
       /* Krok, bez ktorego reguly kolumny nie odpalaja — patrz `moveToSprint`. */
       return `karta na tablicę ${name('sprint', params.sprintId)}, etap ${name('stage', params.stageId)}`;
     case 'task.stages.movetask':
-      return `etap → ${name('stage', params.stageId)}`;
+      return arrow('etap', 'STAGE_ID', (x) => name('stage', x), params.stageId);
     case 'task.item.update':
       return mark('related', '', 'powiązane zadania');
     case 'task.commentitem.add':
@@ -714,6 +727,8 @@ function partOfSprintEntry(e: HistoryEntry): boolean {
   /* Sam etap i nic wiecej — inaczej wciagnelibysmy obok lezaca zmiane tytulu. */
   if (e.method === 'tasks.task.update')
     return 'STAGE_ID' in fields && Object.keys(fields).length === 1;
+  /* Przejscie do kolumny docelowej idzie juz przez `movetask` — patrz `moveToStage`. */
+  if (e.method === 'task.stages.movetask') return true;
   return false;
 }
 

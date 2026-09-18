@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { HoverNote } from './HoverNote';
 import {
   CLOSED_STATUSES,
   FALLBACK_PRIORITY,
@@ -121,6 +122,7 @@ import {
   shortDate,
   isUnassigned,
   setUnassignedId,
+  stageOf,
   sumPoints,
   tasksWord,
   UNASSIGNED_ID,
@@ -177,7 +179,7 @@ import {
 
 /** Zakres listy. Domyslnie tylko aktywny sprint — reszta jest na jedno klikniecie obok. */
 type Scope = 'sprint' | 'outside' | 'all';
-type GroupBy = 'stage' | 'status' | 'assignee';
+type GroupBy = 'stage' | 'status' | 'assignee' | 'flat';
 type PickerKind =
   | 'status'
   | 'priority'
@@ -189,6 +191,27 @@ type PickerKind =
   | 'epic'
   | 'tags';
 type ViewMode = 'list' | 'board' | 'charts';
+
+/**
+ * Wyglad terminu w wierszu listy. Trzy warianty ZOSTAJA na stale — nie sa
+ * tymczasowe „do porownania", tylko wyborem uzytkownika (ustalone 2026-09-18):
+ *  `off`  — jedna data, bez ikony i koloru; termin nie rozni sie od daty zmiany;
+ *  `mark` — DOMYSLNY: jedno miejsce, termin z ikona i kolorem pilnosci, a bez
+ *           terminu przygaszona data zmiany;
+ *  `chip` — data zmiany zawsze, a termin w osobnym, zarezerwowanym slocie obok.
+ */
+type DeadlineLook = 'off' | 'mark' | 'chip';
+const DEADLINE_LOOKS: { key: DeadlineLook; label: string }[] = [
+  { key: 'off', label: 'Bez wyróżnienia' },
+  { key: 'mark', label: 'W miejscu daty' },
+  { key: 'chip', label: 'Osobny żeton' },
+];
+
+/**
+ * Grupa dla zadan BEZ etapu, czyli spoza sprintu — rejestr. To nie jest nazwa
+ * etapu, wiec kod, ktory szuka etapu po nazwie grupy, musi ja obsluzyc osobno.
+ */
+const NO_SPRINT = 'Poza sprintem';
 
 /** Warianty kolorowania grup listy — patrz `listTint` w ustawieniach. */
 type ListTint = 'off' | 'fade' | 'rail';
@@ -407,6 +430,9 @@ const GROUPS: { key: GroupBy; label: string; help: string }[] = [
   { key: 'stage', label: 'Etap w sprincie', help: 'Kolumny kanbana sprintu' },
   { key: 'status', label: 'Status zadania', help: 'Wbudowane pole Bitriksa' },
   { key: 'assignee', label: 'Osoba', help: 'Osoba odpowiedzialna' },
+  /* Klucz `flat`, a nie `none`: „none" oznacza juz WYLACZONE podgrupowanie w
+     kontrolce ponizej, wiec ta sama nazwa zderzylaby sie z tamta wartoscia. */
+  { key: 'flat', label: 'Bez grupowania', help: 'Jedna lista, bez nagłówków' },
 ];
 
 /** Klawisz -> rodzaj popovera. Jedna litera na wymiar zadania. */
@@ -448,6 +474,8 @@ interface Settings {
    *  `head` pasek na naglowku, `fade` pasek + wygaszanie w dol, `rail` szyna z lewej.
    */
   listTint: ListTint;
+  /** Wyglad terminu w wierszu — patrz `DeadlineLook`. */
+  deadlineLook: DeadlineLook;
   /**
    * Puste grupy/kolumny. Lista: pokazuje naglowek etapu/statusu nawet bez zadan.
    * Tablica: gdy wylaczone, kolumna bez kart znika (np. "Wdrozone", gdy nic nie
@@ -491,6 +519,7 @@ const DEFAULT_SETTINGS: Settings = {
   showDone: false,
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
   listTint: 'fade',
+  deadlineLook: 'mark',
   showEmpty: false,
   shownEmpty: [],
   detailWidth: 520,
@@ -1298,7 +1327,20 @@ function useBitrixData() {
       setPending((p) => new Set(p).add(id));
 
       try {
-        await run();
+        const follow = await run();
+        /*
+         * Skutek zapisu wprowadzony przez SAM Bitrix — dzis status po przesunieciu
+         * karty (patrz `moveToStage`). To wciaz nasza zmiana: zapisujemy ja jako
+         * wlasna, zeby nie wrocila z nastepna lista jako „zmiana z zewnatrz", i
+         * pokazujemy od razu, zamiast trzymac na ekranie stary status do odswiezenia.
+         */
+        if (follow && typeof follow === 'object') {
+          const extra = follow as Partial<Task>;
+          noteMine(id, extra as unknown as Record<string, unknown>);
+          patchTasks(id, extra);
+          const cur = pinsRef.current.get(id);
+          pinsRef.current.set(id, { at: Date.now(), fields: { ...cur?.fields, ...extra } });
+        }
       } catch (e) {
         patchTasks(id, rollback);
         /* Zapis sie nie udal — nie ma juz czego bronic przed serwerem. */
@@ -1570,11 +1612,17 @@ function bucket(
   /** Klucze grup, ktore maja istniec nawet bez zadan — "Pokaż puste kolumny". */
   extraKeys: string[] = [],
 ): Group[] {
+  /* Bez grupowania: jedna grupa z PUSTA etykieta — render pomija wtedy naglowek,
+     dokladnie tak jak przy wylaczonym podgrupowaniu. */
+  if (by === 'flat') {
+    return [{ key: '', label: '', order: 0, tasks: [...tasks].sort(taskComparator(sort, me)) }];
+  }
+
   const buckets = new Map<string, Task[]>();
 
   const keyOf = (t: Task) =>
     by === 'stage'
-      ? (t.stageId && stageNames.get(t.stageId)) || 'Poza sprintem'
+      ? (stageOf(t) && stageNames.get(stageOf(t) as number)) || NO_SPRINT
       : by === 'status'
         ? t.status
         : isUnassigned(t.responsibleId)
@@ -1743,7 +1791,7 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>):
           ? t.status
           : c.field === 'epic'
             ? String(t.epicId ?? 0) // 0 = bez epika
-            : (t.stageId && stageNames.get(t.stageId)) || ''; // stage — po nazwie
+            : (stageOf(t) && stageNames.get(stageOf(t) as number)) || ''; // stage — po nazwie
   const inSet = c.values.includes(key);
   return c.op === 'isNot' ? !inSet : inSet;
 }
@@ -1791,9 +1839,9 @@ function GroupPoints({ tasks }: { tasks: Task[] }) {
   const sp = sumPoints(tasks);
   if (sp === null) return null;
   return (
-    <span className="head-sp" title="Suma story points w grupie">
+    <HoverNote label="Story points" value={`${sp} SP`} note="w grupie" className="head-sp">
       {sp} SP
-    </span>
+    </HoverNote>
   );
 }
 
@@ -2642,8 +2690,85 @@ function Tag({ name, onPick }: { name: string; onPick?: (name: string) => void }
 
 // ─── Wiersz ──────────────────────────────────────────────────────────────────
 
+/**
+ * Termin w postaci do wiersza: krotka etykieta i ton pilnosci.
+ *
+ * Etykieta mowi to, co przy wierszu najwazniejsze: ile po terminie, a przy
+ * bliskim — „dziś" / „jutro". Dalszy termin to po prostu data. Ton dostaja
+ * wylacznie terminy pilne, i nigdy zadania zamkniete: termin zamknietego
+ * zadania juz niczego nie wymaga.
+ */
+function dueInfo(
+  deadline: string,
+  done: boolean,
+): { label: string; tone: '' | 'late' | 'soon'; distance: string; title: string; days: number } {
+  const end = new Date(deadline);
+  if (Number.isNaN(end.getTime())) return { label: '', tone: '', distance: '', title: '', days: 0 };
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(end) - midnight(new Date())) / 86400000);
+  const label =
+    days < 0 ? `${-days} ${days === -1 ? 'dzień' : 'dni'} po` : days === 0 ? 'dziś' : days === 1 ? 'jutro' : shortDate(deadline);
+  const tone = done ? '' : days < 0 ? 'late' : days <= 1 ? 'soon' : '';
+  /*
+   * Podpowiedz niesie ODLEGLOSC w dniach — w wierszu jest tylko data albo kolor,
+   * a „ile jeszcze / ile po" trzeba bylo liczyc w glowie. „dzień" tylko przy
+   * jedynce; od dwoch wzwyz zawsze „dni".
+   */
+  const n = Math.abs(days);
+  const unit = n === 1 ? 'dzień' : 'dni';
+  const distance =
+    days < 0 ? `${n} ${unit} po terminie` : days === 0 ? 'dziś' : days === 1 ? 'jutro' : `za ${n} ${unit}`;
+  return { label, tone, distance, days, title: `Termin: ${shortDate(deadline)} · ${distance}` };
+}
+
+/**
+ * Kolor odleglosci w karcie — ta sama paleta co dopisek „plan" na wykresie
+ * (`paceFill`): zielen (hsl 145) dla zapasu, czerwien (hsl 5) dla spoznienia,
+ * zmieszane z przygaszonym kolorem, zeby nie krzyczaly. Dzis i jutro zostaja
+ * pomaranczowe, jak w wierszu. Zamkniete zadanie nie ma juz czego pilnowac.
+ */
+function dueFill(days: number, done: boolean): string {
+  if (done) return 'var(--fg-dim)';
+  if (days <= 1 && days >= 0) return 'var(--accent-orange)';
+  if (days < 0) {
+    /* Im dluzej po terminie, tym mocniej — od ok. 35% do sufitu wykresu (65%). */
+    const t = Math.min(65, 30 + -days * 5);
+    return `color-mix(in oklab, hsl(5 52% 55%) ${t}%, var(--fg-dim))`;
+  }
+  return 'color-mix(in oklab, hsl(145 52% 55%) 45%, var(--fg-dim))';
+}
+
+/**
+ * Termin pod kursorem — wspolna karta (`HoverNote`) z trescia terminu.
+ */
+function DueHover({
+  deadline,
+  done,
+  className,
+  children,
+}: {
+  deadline: string;
+  done: boolean;
+  className: string;
+  children: ReactNode;
+}) {
+  const due = dueInfo(deadline, done);
+  return (
+    <HoverNote
+      label="Termin"
+      value={shortDate(deadline)}
+      note={due.distance}
+      noteColor={dueFill(due.days, done)}
+      className={className}
+    >
+      {children}
+    </HoverNote>
+  );
+}
+
 function TaskRow({
   task,
+  deadlineLook,
   active,
   selected,
   busy,
@@ -2669,6 +2794,7 @@ function TaskRow({
   onTag,
 }: {
   task: Task;
+  deadlineLook: DeadlineLook;
   active: boolean;
   selected: boolean;
   busy: boolean;
@@ -2902,12 +3028,61 @@ function TaskRow({
 
       {/* Story pointy scruma — dociagane w tle, wiec pojawiaja sie chwile po liscie. */}
       {task.storyPoints != null && (
-        <span className="row-sp" title={`Story points: ${task.storyPoints}`}>
+        <HoverNote label="Story points" value={task.storyPoints} className="row-sp">
           {task.storyPoints}
-        </span>
+        </HoverNote>
       )}
 
-      <span className="row-meta">{shortDate(task.deadline || task.changedDate)}</span>
+      {deadlineLook === 'chip' ? (
+        <>
+          {/*
+            Slot terminu ZAWSZE zajety, takze bez terminu. Inaczej tytuly w kolejnych
+            wierszach konczylyby sie w roznych miejscach i prawa kolumna skakalaby
+            za kazdym zadaniem, ktore termin ma.
+          */}
+          {(() => {
+            if (!task.deadline) return <span className="row-due" />;
+            const due = dueInfo(task.deadline, task.status === '5');
+            return (
+              <DueHover
+                deadline={task.deadline}
+                done={task.status === '5'}
+                className={`row-due${due.tone ? ` due-${due.tone}` : ''}`}
+              >
+                <CalendarIcon />
+                {due.label}
+              </DueHover>
+            );
+          })()}
+          <span className="row-meta" title="Ostatnia zmiana">
+            {shortDate(task.changedDate)}
+          </span>
+        </>
+      ) : deadlineLook === 'off' ? (
+        /* Bez wyroznienia: jedna data, bez ikony i bez koloru — dokladnie to, co
+           bylo tu wczesniej. Termin wciaz bije date zmiany, bo to on jest
+           terminem; roznicy po prostu nie widac. */
+        <span className="row-meta">{shortDate(task.deadline || task.changedDate)}</span>
+      ) : task.deadline ? (
+        /* Jedno miejsce jak dotad, ale termin ma ikone i jasniejszy kolor —
+           data zmiany zostaje przygaszona, wiec widac, ktora jest ktora. Pilny
+           termin barwi sie tak samo jak w wariancie z zetonem. */
+        <DueHover
+          deadline={task.deadline}
+          done={task.status === '5'}
+          className={`row-meta row-deadline${(() => {
+            const tone = dueInfo(task.deadline, task.status === '5').tone;
+            return tone ? ` due-${tone}` : '';
+          })()}`}
+        >
+          <CalendarIcon />
+          {shortDate(task.deadline)}
+        </DueHover>
+      ) : (
+        <span className="row-meta" title="Ostatnia zmiana">
+          {shortDate(task.changedDate)}
+        </span>
+      )}
 
       {/* Prawy przycisk nie jest odkrywalny — to samo menu pod widocznym przyciskiem. */}
       <button
@@ -4941,6 +5116,7 @@ function ViewMenu({
     done: boolean;
     /** Wariant kolorowania grup listy — do porownania na zywo. */
     tint: ListTint;
+    deadline: DeadlineLook;
     empty: boolean;
     filtersOn: boolean;
     theme: Theme;
@@ -4963,6 +5139,7 @@ function ViewMenu({
     unassigned: () => void;
     done: () => void;
     tint: (v: ListTint) => void;
+    deadline: (v: DeadlineLook) => void;
     empty: () => void;
     toggleColumn: (name: string) => void;
     clearFilters: () => void;
@@ -5063,13 +5240,16 @@ function ViewMenu({
             // Podgrupowanie po tej samej osi co grupowanie nic by nie dalo.
             options={[
               { value: 'none', label: 'Brak' },
-              ...GROUPS.filter((g) => g.key !== state.group).map((g) => ({
+              ...GROUPS.filter((g) => g.key !== state.group && g.key !== 'flat').map((g) => ({
                 value: g.key,
                 label: g.label,
               })),
             ]}
             onPick={(v) => on.subGroup(v === 'none' ? null : (v as GroupBy))}
-            disabled={boardMode}
+            /* Bez grupowania podgrupy nie maja sie w czym zawrzec. Kontrolka
+               zostaje widoczna, ale nieklikalna — zeby bylo widac, ze to skutek
+               wyboru obok, a nie brak funkcji. */
+            disabled={boardMode || state.group === 'flat'}
           />
         </div>
 
@@ -5119,6 +5299,16 @@ function ViewMenu({
             value={state.tint}
             options={LIST_TINTS.map((t) => ({ value: t.key, label: t.label }))}
             onPick={(v) => on.tint(v as ListTint)}
+          />
+        </div>
+
+        {/* Termin w wierszu — dwa warianty, tak samo do porownania na zywo. */}
+        <div className={rowClass}>
+          <span className="ds-label">Termin</span>
+          <Control
+            value={state.deadline}
+            options={DEADLINE_LOOKS.map((d) => ({ value: d.key, label: d.label }))}
+            onPick={(v) => on.deadline(v as DeadlineLook)}
           />
         </div>
 
@@ -6074,7 +6264,12 @@ function ContextMenu({
       <div className="picker-backdrop" onClick={onClose} onContextMenu={(e) => e.preventDefault()} />
       <div className="menu" style={{ left, top, width }}>
         <div className="menu-head">
-          {bulk ? `Zaznaczono: ${count}` : (task.code ?? `#${task.id}`)}
+          {/*
+            Przy zaznaczeniu mowimy, CZEGO DOTKNIE wybor, a nie ile jest
+            zaznaczonych. „Zaznaczono: 3" opisywalo stan listy i trzeba bylo
+            zgadywac, czy klikniecie zmieni jedno zadanie czy wszystkie trzy.
+          */}
+          {bulk ? `Zmiana obejmie ${count} ${tasksWord(count)}` : (task.code ?? `#${task.id}`)}
         </div>
 
         {MENU_ITEMS.map(({ kind, key }) => {
@@ -6303,6 +6498,9 @@ export default function App() {
   /* Zapisane ustawienie moze pochodzic ze starszej wersji (byl tez wariant sam
      naglowek) — nieznana wartosc wraca do "bez koloru", zamiast zostawiac klase,
      ktorej arkusz juz nie zna. */
+  const [deadlineLook, setDeadlineLook] = useState<DeadlineLook>(() =>
+    DEADLINE_LOOKS.some((d) => d.key === saved.deadlineLook) ? saved.deadlineLook : 'mark',
+  );
   const [listTint, setListTint] = useState<ListTint>(() =>
     LIST_TINTS.some((t) => t.key === saved.listTint) ? saved.listTint : 'fade',
   );
@@ -6993,14 +7191,20 @@ export default function App() {
     () =>
       groups.map((g) => ({
         ...g,
-        subs: subGroupBy
+        /*
+         * Bez grupowania NIE MA podgrup — takze wtedy, gdy w stanie zostala ich
+         * os. Zapisany widok sprzed tej opcji albo starsze ustawienia moga taka
+         * pare przyniesc, a wtedy jedyna grupa rozpadlaby sie na podgrupy mimo
+         * wyboru „bez grupowania".
+         */
+        subs: groupBy !== 'flat' && subGroupBy
           ? bucket(g.tasks, subGroupBy, stageNames, stageOrder, labels.status, me, sort, emptyKeysFor(subGroupBy)).map((s) => ({
               ...s,
               nodes: nest(s.tasks, collapsedTasks),
             }))
           : [{ key: '', label: '', order: 0, tasks: g.tasks, nodes: nest(g.tasks, collapsedTasks) }],
       })),
-    [groups, subGroupBy, stageNames, stageOrder, labels.status, collapsedTasks, me, sort, emptyKeysFor],
+    [groups, groupBy, subGroupBy, stageNames, stageOrder, labels.status, collapsedTasks, me, sort, emptyKeysFor],
   );
 
   /** Klucz zwijania podgrupy musi byc unikalny w obrebie calej listy. */
@@ -7016,6 +7220,7 @@ export default function App() {
         return meta?.color ? `#${meta.color}` : null;
       }
       if (groupBy === 'status') return statusColor(key);
+      if (groupBy === 'flat') return null;
       return key === UNASSIGNED_LABEL ? null : personColor(key);
     },
     [groupBy, stageIconByName],
@@ -7160,6 +7365,7 @@ export default function App() {
       withUnassigned,
       showDone,
       listTint,
+      deadlineLook,
       showEmpty,
       shownEmpty,
       detailWidth,
@@ -7171,7 +7377,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, listTint, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, listTint, deadlineLook, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -7691,6 +7897,33 @@ export default function App() {
         return;
       }
 
+      /* Bez grupowania grupa nie niesie zadnej wartosci — nie ma czego ustawic. */
+      if (axis === 'flat') return;
+
+      /*
+       * Rejestr nie jest etapem. Upuszczenie tutaj znaczy „wyjmij ze sprintu" i
+       * idzie ta sama droga co reczna zmiana sprintu — wczesniej kod szukal etapu
+       * o nazwie „Poza sprintem", nie znajdowal go i zglaszal zadanie jako
+       * pominiete, choc bylo w sprincie i dalo sie je przeniesc.
+       */
+      if (key === NO_SPRINT) {
+        if (backlogId === null) {
+          toast('Nie znam rejestru tego projektu — spróbuj odświeżyć.');
+          return;
+        }
+        for (const id of ids) {
+          if (!tasks.find((x) => x.id === id)?.sprintId) continue;
+          /*
+           * Zerujemy SAMA przynaleznosc, etap zostaje. Bitrix go nie kasuje przy
+           * wyjsciu ze sprintu, wiec kasowanie go u siebie robiloby z lokalnego
+           * stanu cos innego niz portal. Na ekranie i tak go nie widac — patrz
+           * `stageOf`: etap nalezy do sprintu, wiec bez sprintu nie ma etapu.
+           */
+          void mutate(id, { sprintId: null }, () => moveToSprint(id, backlogId), 'sprint');
+        }
+        return;
+      }
+
       // axis === 'stage': etap trzeba rozwiazac w sprincie KAZDEGO zadania osobno,
       // bo ta sama nazwa etapu ma inne id w kazdym sprincie.
       let skipped = 0;
@@ -7713,10 +7946,10 @@ export default function App() {
         else if (t?.stageId !== st.id) applyStage(id, st.id);
       }
       if (skipped > 0) {
-        toast(`Pominięto ${skipped} zadań — nie są w sprincie, więc nie mają etapów.`);
+        toast(`Pominięto ${skipped} ${tasksWord(skipped)} — nie są w sprincie, więc nie mają etapów.`);
       }
     },
-    [people, tasks, stages, mutate, applyStage, toast, activeSprint], // TEMP-TEST-UNLOCK: + activeSprint
+    [people, tasks, stages, mutate, applyStage, toast, activeSprint, backlogId], // TEMP-TEST-UNLOCK: + activeSprint
   );
 
   /**
@@ -7800,7 +8033,8 @@ export default function App() {
    * os grupowania. Kategorie z zadaniami widac zawsze — nie ma ich na tej liscie.
    */
   /** Os, ktorej dotyczy panel: tablica -> etapy, lista -> podgrupa albo grupa. */
-  const colAxis: GroupBy | null = viewMode === 'board' ? 'stage' : (subGroupBy ?? groupBy);
+  const colAxis: GroupBy | null =
+    viewMode === 'board' ? 'stage' : (subGroupBy ?? (groupBy === 'flat' ? null : groupBy));
 
   /** Przypnij/odepnij kategorie biezacej osi — klucz niesie os, wiec osie sie nie mieszaja. */
   const toggleColumn = useCallback(
@@ -8285,7 +8519,15 @@ export default function App() {
             targets.map((id) =>
               mutate(
                 id,
-                { sprintId: toSprint ? entityId : null, stageId: firstStage?.id ?? null },
+                /*
+                 * Do sprintu: przynaleznosc I kolumna wejsciowa. Do rejestru: sama
+                 * przynaleznosc — etapu NIE zerujemy, bo Bitrix tez go nie kasuje,
+                 * a na ekranie i tak go nie widac (patrz `stageOf`). Kasowanie go
+                 * tutaj rozjezdzaloby lokalny stan z portalem.
+                 */
+                toSprint
+                  ? { sprintId: entityId, stageId: firstStage?.id ?? null }
+                  : { sprintId: null },
                 () => moveToSprint(id, entityId, firstStage?.id),
                 'sprint',
               ),
@@ -8349,7 +8591,7 @@ export default function App() {
           else skipped += 1;
         }
         if (skipped > 0) {
-          toast(`Pominięto ${skipped} zadań z innego sprintu — najpierw przenieś je tutaj.`);
+          toast(`Pominięto ${skipped} ${tasksWord(skipped)} z innego sprintu — najpierw przenieś je tutaj.`);
         }
 
         await Promise.all([
@@ -8764,14 +9006,23 @@ export default function App() {
                     : ({ '--group-tint': groupTint(g.key) ?? 'var(--fg-dim)' } as CSSProperties)
                 }
               >
+                {/* Bez grupowania nie ma czego nazwac ani zwijac — naglowek znika,
+                    zostaje sama lista. Ta sama zasada co przy podgrupach. */}
+                {g.label !== '' && (
                 <div className="group-head" onClick={() => toggleGroup(g.key)}>
                   <ChevronIcon open={!isCollapsed} />
                   <span className="group-label">{g.label}</span>
-                  <span className="group-count" title={`${g.tasks.length} ${tasksWord(g.tasks.length)} w grupie`}>
+                  <HoverNote
+                    label="Zadania"
+                    value={g.tasks.length}
+                    note="w grupie"
+                    className="group-count"
+                  >
                     {g.tasks.length}
-                  </span>
+                  </HoverNote>
                   <GroupPoints tasks={g.tasks} />
                 </div>
+                )}
                 {/*
                   Zanik pod naglowkiem jako WLASNY element, nie `::after` naglowka.
                   `position: sticky` ZAWSZE tworzy kontekst ukladania, wiec pseudo-element
@@ -8802,12 +9053,14 @@ export default function App() {
                           <div className="subgroup-head" onClick={() => toggleGroup(sKey)}>
                             <ChevronIcon open={!subCollapsed} />
                             <span className="subgroup-label">{sub.label}</span>
-                            <span
+                            <HoverNote
+                              label="Zadania"
+                              value={sub.tasks.length}
+                              note="w podgrupie"
                               className="group-count"
-                              title={`${sub.tasks.length} ${tasksWord(sub.tasks.length)} w podgrupie`}
                             >
                               {sub.tasks.length}
-                            </span>
+                            </HoverNote>
                             <GroupPoints tasks={sub.tasks} />
                           </div>
                         )}
@@ -8816,6 +9069,7 @@ export default function App() {
                     <TaskRow
                       key={t.id}
                       task={t}
+                      deadlineLook={deadlineLook}
                       active={flat[cursor]?.id === t.id}
                       selected={openId === t.id}
                       busy={pending.has(t.id)}
@@ -8837,7 +9091,7 @@ export default function App() {
                       hasRelated={relatedIds.has(t.id)}
                       epic={epicOf(t)}
                       onEpic={toggleEpicFilter}
-                      stage={t.stageId ? stageMeta.get(t.stageId) : undefined}
+                      stage={stageOf(t) ? stageMeta.get(stageOf(t) as number) : undefined}
                       parentRef={parentOutside ? parentInfo(parentOutside) : undefined}
                       tagLimit={tagLimit}
                       onCopied={(code) =>
@@ -8885,7 +9139,7 @@ export default function App() {
         <DetailPanel
           task={openTask}
           people={mentionPeople}
-          stageName={(openTask.stageId && stageNames.get(openTask.stageId)) || 'Poza sprintem'}
+          stageName={(stageOf(openTask) && stageNames.get(stageOf(openTask) as number)) || NO_SPRINT}
           sprintName={sprintLabel(openTask)}
           epic={epicOf(openTask)}
           labels={labels}
@@ -8952,7 +9206,7 @@ export default function App() {
           return (
             <ContextMenu
               task={t}
-              stageName={(t.stageId && stageNames.get(t.stageId)) || 'Poza sprintem'}
+              stageName={(stageOf(t) && stageNames.get(stageOf(t) as number)) || NO_SPRINT}
               sprintName={sprintLabel(t)}
               labels={labels}
               count={menu.targets.length}
@@ -9174,6 +9428,7 @@ export default function App() {
             unassigned: withUnassigned,
             done: showDone,
             tint: listTint,
+            deadline: deadlineLook,
             empty: showEmpty,
             filtersOn: anyFilter(filters),
             theme,
@@ -9188,8 +9443,12 @@ export default function App() {
             view: setViewMode,
             group: (g) => {
               setGroupBy(g);
-              // Podgrupowanie po tej samej osi co grupowanie nic by nie dalo.
-              setSubGroupBy((s) => (s === g ? null : s));
+              /*
+               * Bez grupowania nie ma czego dzielic na podgrupy — podgrupowanie
+               * schodzi do zera. Poza tym: podgrupowanie po tej samej osi co
+               * grupowanie nic by nie dalo.
+               */
+              setSubGroupBy((s) => (g === 'flat' || s === g ? null : s));
             },
             subGroup: setSubGroupBy,
             sort: patchSort,
@@ -9198,6 +9457,7 @@ export default function App() {
             unassigned: () => setWithUnassigned((v) => !v),
             done: () => setShowDone((v) => !v),
             tint: setListTint,
+            deadline: setDeadlineLook,
             empty: () => setShowEmpty((v) => !v),
             toggleColumn,
             clearFilters: () => setFilters(EMPTY_FILTERS),

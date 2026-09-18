@@ -2135,6 +2135,105 @@ input[type='search']::-webkit-search-decoration {
   text-align: right;
 }
 
+/*
+ * Termin w wierszu, wariant `mark`: to samo miejsce co data zmiany, ale z ikona
+ * i o stopien jasniej. Data zmiany zostaje przygaszona, wiec obie da sie
+ * odroznic jednym rzutem oka, a kolumna stoi tam, gdzie stala.
+ */
+.row-deadline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  color: var(--fg-secondary);
+}
+
+.row-deadline > svg,
+.row-due > svg {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+}
+
+/*
+ * Wariant `chip`: osobny slot o STALEJ szerokosci — rowniez pusty, gdy zadanie
+ * terminu nie ma. Tytul jest jedynym elementem wiersza, ktory sie kurczy, wiec
+ * slot nie rozpycha wiersza; staly rozmiar pilnuje, zeby tytuly konczyly sie w
+ * jednej linii niezaleznie od tego, ktore zadania termin maja.
+ */
+.row-due {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  width: 68px;
+  font-size: var(--t-mini);
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Karta terminu pod kursorem. Typografia wprost z odczytu na wykresie
+ * (`.hover-label` / `.hover-value` / `.hover-plan`): drobny, przygaszony podpis
+ * i wyrazna wartosc z przygaszonym dopiskiem. Rozni sie tylko TLEM — na
+ * wykresie tekst ma obwodke, bo pod spodem jest siatka; nad lista obwodka
+ * nie wystarcza, a tekst nachodzilby na sasiednie wiersze.
+ *
+ * Kolor niesie DOPISEK z liczba dni (styl inline z `dueFill`), a nie data —
+ * tak jak na wykresie barwi sie „plan", a nie sama wartosc.
+ */
+.due-card {
+  position: fixed;
+  z-index: 70;
+  /* Nad elementem, z odstepem — kursor nie zaslania tresci. */
+  transform: translateY(calc(-100% - 6px));
+  padding: var(--s1) var(--s2);
+  background: var(--bg-panel);
+  border-radius: var(--s2);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.due-card-label {
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+}
+
+.due-card-row {
+  display: flex;
+  align-items: baseline;
+  /* Ten sam odstep co `dx="6"` miedzy wartoscia a dopiskiem na wykresie. */
+  gap: 6px;
+}
+
+.due-card-value {
+  font-size: var(--t-regular);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+}
+
+.due-card-note {
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+}
+
+/*
+ * Kolor tylko dla pilnych — spokojny termin nie konkuruje z reszta wiersza.
+ * Wspolny dla obu wariantow; stoi PO `.row-deadline` i `.row-meta`, wiec przy
+ * rownej swoistosci wygrywa z ich spokojnym kolorem.
+ */
+.due-late {
+  color: var(--danger);
+}
+
+.due-soon {
+  color: var(--accent-orange);
+}
+
 /* "+N" — tagi, ktore nie zmiescily sie w wierszu. Neutralne, wypelnione. */
 .row-sub {
   padding: 1px var(--s1);
@@ -2503,6 +2602,15 @@ input[type='search']::-webkit-search-decoration {
 
 .row-more {
   flex: 0 0 20px;
+  /*
+   * Zawartosc wysrodkowana flexem. Ikona to element `inline`, wiec bez tego
+   * siadala na LINII BAZOWEJ tekstu i zostawiala pod soba miejsce na ogonki
+   * liter — kropki wypadaly 2,7 px nad srodkiem wiersza, choc sam przycisk
+   * stal idealnie.
+   */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   height: 20px;
   padding: 0;
