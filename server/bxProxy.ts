@@ -245,8 +245,15 @@ export function bxProxy(mode: string): Plugin {
           if (name) res.setHeader('content-disposition', contentDisposition(name));
           const len = file.headers.get('content-length');
           if (len) res.setHeader('content-length', len);
-          // Bajty pliku sie nie zmieniaja — `id` wskazuje konkretna wersje.
-          res.setHeader('cache-control', 'private, max-age=3600');
+          /*
+           * Bajty pliku sie NIE ZMIENIAJA — `id` wskazuje konkretna wersje na Dysku,
+           * a nowa wersja dostaje nowy numer. Stad `immutable` i rok zamiast godziny:
+           * bez tego przegladarka po godzinie sciagala zalacznik od nowa, a przy
+           * kazdym twardym odswiezeniu ignorowala cache calkowicie. `ETag` domyka
+           * sprawe — po wygasnieciu wystarczy 304 zamiast calych bajtow.
+           */
+          res.setHeader('etag', `"disk-${id}"`);
+          res.setHeader('cache-control', 'private, max-age=31536000, immutable');
           res.end(Buffer.from(await file.arrayBuffer()));
         } catch (err) {
           res.statusCode = 502;
@@ -299,7 +306,10 @@ export function bxProxy(mode: string): Plugin {
           res.statusCode = 200;
           res.setHeader('content-type', file.headers.get('content-type') ?? 'application/octet-stream');
           if (name) res.setHeader('content-disposition', contentDisposition(name));
-          res.setHeader('cache-control', 'private, max-age=3600');
+          /* Jak przy plikach z Dysku wyzej: doczepienie wskazuje konkretna wersje,
+             wiec bajty sa niezmienne i nie ma po co ich pobierac drugi raz. */
+          res.setHeader('etag', `"att-${id}"`);
+          res.setHeader('cache-control', 'private, max-age=31536000, immutable');
           res.end(Buffer.from(await file.arrayBuffer()));
         } catch (err) {
           res.statusCode = 502;

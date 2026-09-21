@@ -701,6 +701,24 @@ const PICKER_HELP: Record<PickerKind, string> = {
 /** Kolejnosc pozycji w menu kontekstowym; skrot pokazujemy jako podpowiedz. */
 /* Etap na gorze — to nim steruje realny przeplyw pracy. Status zostaje dostepny,
    ale jako ostatni: w tej grupie zyje wlasnym zyciem i rzadko sie go rusza. */
+/*
+ * Znaczki pozycji menu — TE SAME, ktorych uzywa „+ Filtr" (patrz `FILTER_FIELDS`).
+ * Menu i filtr mowia o tych samych polach zadania, wiec musza mowic tym samym
+ * slownikiem obrazkow; dwa zestawy kazalyby uczyc sie go dwa razy.
+ *
+ * Sprint jest wyjatkiem: w filtrze go nie ma, a dziennik zostawia go bez ikony
+ * (patrz komentarz przy `hist-name`) — tam stoi w zdaniu, wiec brak znaczka nic
+ * nie psuje. Tutaj stoi w KOLUMNIE i jedna pusta pozycja wyglada jak brak, nie
+ * jak decyzja. Dostaje tablice, bo sprint to wlasnie tablica z kolumnami.
+ */
+const MENU_ICON: Partial<Record<PickerKind, ReactNode>> = {
+  sprint: <BoardIcon />,
+  stage: <ColumnsIcon />,
+  assignee: <PersonIcon />,
+  priority: <BarsIcon />,
+  status: <RingIcon />,
+};
+
 const MENU_ITEMS: { kind: PickerKind; key: string }[] = [
   { kind: 'sprint', key: 'w' },
   { kind: 'stage', key: 'm' },
@@ -4812,11 +4830,11 @@ function DeadlineLeft({ value, done }: { value: string; done: boolean }) {
     return () => clearTimeout(t);
   }, [tick, value]);
 
-  const end = new Date(value);
-  if (Number.isNaN(end.getTime())) return null;
+  if (Number.isNaN(new Date(value).getTime())) return null;
 
-  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(end) - midnight(new Date())) / 86400000);
+  /* Odleglosc liczy `dueInfo` — ta sama, ktora obsluguje wiersz i karte pod
+     kursorem. Wlasny rachunek stal tu wczesniej i dublowal tamten co do minuty. */
+  const { days } = dueInfo(value, done);
   const late = -days;
 
   const label =
@@ -4832,22 +4850,16 @@ function DeadlineLeft({ value, done }: { value: string; done: boolean }) {
           : `${days} dni`;
 
   /*
-   * Przechyl ku czerwieni liczony tak samo jak tempo na wykresie: mieszamy z
-   * `--fg-dim`, wiec punktem wyjscia w kazdym motywie zostaje jego wlasna szarosc,
-   * a dopisek nigdy nie krzyczy glosniej niz sama data. Pelny odcien od dzisiaj
-   * w dol, dwa tygodnie do przodu to juz zwykla szarosc.
+   * Kolor z `dueFill` — TEJ SAMEJ funkcji, ktorej uzywa wiersz listy i karta pod
+   * kursorem. Wczesniej stala tu wlasna rampa czerwieni rozciagnieta na dwa
+   * tygodnie i ten sam termin mial dwa znaczenia naraz: karta mowila „za 8 dni"
+   * na zielono („jest zapas"), a panel obok barwil to samo na 30% czerwieni
+   * („robi sie ciasno"). Jedna data nie moze dostawac dwoch sprzecznych ocen.
    *
-   * Zadanie ZAKONCZONE zostaje szare bez wzgledu na date: "5 dni po terminie" na
-   * czerwono przy czyms, co juz zrobione, straszy zupelnie bez powodu.
+   * Zadanie ZAKONCZONE zostaje szare bez wzgledu na date — tez z `dueFill`.
    */
-  const t = done ? 0 : days < 0 ? 1 : Math.max(0, 1 - days / 14);
-  const fill =
-    t < 0.05
-      ? 'var(--fg-dim)'
-      : `color-mix(in oklab, hsl(5 52% 55%) ${Math.round(t * 70)}%, var(--fg-dim))`;
-
   return (
-    <span className="dd-deadline" style={{ color: fill }}>
+    <span className="dd-deadline" style={{ color: dueFill(days, done) }}>
       {label}
     </span>
   );
@@ -4964,6 +4976,7 @@ function DetailPanel({
   task,
   people,
   stageName,
+  stage,
   sprintName,
   epic,
   labels,
@@ -4990,6 +5003,8 @@ function DetailPanel({
   /** Osoby projektu — do wzmianek `@` w komentarzu. */
   people: Person[];
   stageName: string;
+  /** Kolor i postep kolumny — do pierscienia przy polu. `null` poza sprintem. */
+  stage: { color: string | null; progress: number | null } | null;
   sprintName: string;
   /** Epik zadania — do pola w panelu; `null`, gdy bez epika lub projekt bez scruma. */
   epic: Epic | null;
@@ -5250,11 +5265,42 @@ function DetailPanel({
         <EditableTitle value={task.title || task.rawTitle} onSave={onTitle} />
 
         <dl className="props">
+          {/*
+            Pola w TRZECH grupach, tym samym podzialem co menu „+ Filtr" (patrz
+            `FILTER_FIELDS`): gdzie w procesie — kto — o czym.
+            Wczesniej szly w kolejnosci dopisywania i dlatego czytalo sie to jak
+            wysypana szuflada: „Osoba" i „Autor" odpowiadaja na to samo pytanie,
+            a stali po dwoch stronach panelu; „Utworzone" wchodzilo miedzy termin
+            a status; story pointy siedzialy miedzy epikiem a priorytetem.
+          */}
+          {/* ── gdzie w procesie ────────────────────────────────────────── */}
           {/* Etap pierwszy — to on niesie stan pracy w tej grupie. */}
           <dt title={PICKER_HELP.stage}>Etap</dt>
           <dd>
             <FieldButton kind="stage" onPick={onPick}>
+              {/*
+                Pierscien jak przy statusie i priorytecie obok — a przede
+                wszystkim TEN SAM, ktory to zadanie ma w wierszu listy i na
+                karcie tablicy. Poza sprintem etapu nie ma, wiec nie ma tez czego
+                rysowac: zostaje sama nazwa („Poza sprintem").
+              */}
+              {stage && <StageIcon progress={stage.progress} color={stage.color} />}{' '}
               {stageName}
+            </FieldButton>
+          </dd>
+          {/*
+            Status ZARAZ POD ETAPEM, choc przygaszony.
+            Kiedys stal na samym koncu, zeby nie udawal stanu pracy — wtedy byl od
+            etapu niezalezny. Dzis przeniesienie karty do kolumny samo go ustawia
+            (patrz `moveToStage`), wiec to dwa odczyty tej samej rzeczy. Obok
+            siebie widac, gdy sie ROZJADA — „Wdrożone" przy statusie „W toku" to
+            sygnal, ze cos poszlo nie tak; rozdzielone czterema wierszami bylo
+            niewidoczne. Rangi nie zrownuje: etap jest pierwszy i pelna jasnoscia.
+          */}
+          <dt title={PICKER_HELP.status}>Status</dt>
+          <dd className="dd-dim">
+            <FieldButton kind="status" onPick={onPick}>
+              <StatusIcon status={task.status} /> {labels.status[task.status] ?? task.status}
             </FieldButton>
           </dd>
           <dt title={PICKER_HELP.sprint}>Sprint</dt>
@@ -5263,6 +5309,49 @@ function DetailPanel({
               {sprintName}
             </FieldButton>
           </dd>
+          <dt title={PICKER_HELP.priority}>Priorytet</dt>
+          <dd>
+            <FieldButton kind="priority" onPick={onPick}>
+              <PriorityIcon priority={task.priority} /> {labels.priority[task.priority] ?? '—'}
+            </FieldButton>
+          </dd>
+          <dt>Termin</dt>
+          <dd className="dd-deadline-cell">
+            <DateField value={task.deadline} onChange={onDeadline} />
+            {task.deadline && <DeadlineLeft value={task.deadline} done={task.status === '5'} />}
+          </dd>
+
+          {/* ── kto ─────────────────────────────────────────────────────── */}
+          <div className="props-gap" />
+          <dt title={PICKER_HELP.assignee}>Osoba</dt>
+          <dd>
+            <FieldButton kind="assignee" onPick={onPick}>
+              {isUnassigned(task.responsibleId) ? (
+                <>
+                  <Avatar name={null} /> {UNASSIGNED_LABEL}
+                </>
+              ) : (
+                <>
+                  <Avatar name={task.responsibleName} photo={task.responsiblePhoto} />{' '}
+                  {task.responsibleName}
+                </>
+              )}
+            </FieldButton>
+          </dd>
+          {detail?.creatorName && (
+            <>
+              <dt>Autor</dt>
+              <dd>
+                <PersonInline name={detail.creatorName} photo={detail.creatorPhoto} />
+              </dd>
+            </>
+          )}
+          {/* Data zalozenia trzyma sie autora — „kto i kiedy" to jedno pytanie. */}
+          <dt>Utworzone</dt>
+          <dd>{shortDate(task.createdDate) || '—'}</dd>
+
+          {/* ── o czym ──────────────────────────────────────────────────── */}
+          <div className="props-gap" />
           {/* Epik — nadrzedny temat scruma. Tylko w projekcie scrumowym (jak story pointy). */}
           {canStoryPoints && (
             <>
@@ -5296,41 +5385,6 @@ function DetailPanel({
               </dd>
             </>
           )}
-          <dt title={PICKER_HELP.priority}>Priorytet</dt>
-          <dd>
-            <FieldButton kind="priority" onPick={onPick}>
-              <PriorityIcon priority={task.priority} /> {labels.priority[task.priority] ?? '—'}
-            </FieldButton>
-          </dd>
-          <dt title={PICKER_HELP.assignee}>Osoba</dt>
-          <dd>
-            <FieldButton kind="assignee" onPick={onPick}>
-              {isUnassigned(task.responsibleId) ? (
-                <>
-                  <Avatar name={null} /> {UNASSIGNED_LABEL}
-                </>
-              ) : (
-                <>
-                  <Avatar name={task.responsibleName} photo={task.responsiblePhoto} />{' '}
-                  {task.responsibleName}
-                </>
-              )}
-            </FieldButton>
-          </dd>
-          <dt>Termin</dt>
-          <dd className="dd-deadline-cell">
-            <DateField value={task.deadline} onChange={onDeadline} />
-            {task.deadline && <DeadlineLeft value={task.deadline} done={task.status === '5'} />}
-          </dd>
-          <dt>Utworzone</dt>
-          <dd>{shortDate(task.createdDate) || '—'}</dd>
-          {/* Status na koncu: w tej grupie nie odzwierciedla realnego przeplywu. */}
-          <dt title={PICKER_HELP.status}>Status</dt>
-          <dd className="dd-dim">
-            <FieldButton kind="status" onPick={onPick}>
-              <StatusIcon status={task.status} /> {labels.status[task.status] ?? task.status}
-            </FieldButton>
-          </dd>
           {/* Tagi jak epik: pole otwiera picker, tyle ze wielokrotny (zadanie ma ich kilka). */}
           <dt title={PICKER_HELP.tags}>Tagi</dt>
           <dd>
@@ -5346,14 +5400,6 @@ function DetailPanel({
               )}
             </FieldButton>
           </dd>
-          {detail?.creatorName && (
-            <>
-              <dt>Autor</dt>
-              <dd>
-                <PersonInline name={detail.creatorName} photo={detail.creatorPhoto} />
-              </dd>
-            </>
-          )}
         </dl>
 
         {/* Relacje zadania w JEDNEJ sekcji: nadrzedne (hierarchia Bitriksa) + powiazane
@@ -7182,6 +7228,7 @@ function ContextMenu({
               title={PICKER_HELP[kind]}
               onClick={() => !disabled && onPick(kind)}
             >
+              {MENU_ICON[kind]}
               <span className="menu-label">{PICKER_TITLE[kind]}</span>
               <span className="menu-value">{current[kind]}</span>
               <kbd>{key}</kbd>
@@ -7193,6 +7240,8 @@ function ContextMenu({
           <>
             <div className="menu-sep" />
             <button className="menu-item" onClick={onOpen}>
+              {/* Strzalka „w prawo" — ta sama, ktora w liscie rozwija wiersz. */}
+              <ChevronIcon open={false} />
               <span className="menu-label">Otwórz szczegóły</span>
               <kbd>Enter</kbd>
             </button>
@@ -10028,6 +10077,8 @@ export default function App() {
           task={openTask}
           people={mentionPeople}
           stageName={(stageOf(openTask) && stageNames.get(stageOf(openTask) as number)) || NO_SPRINT}
+          /* Kolor i postep kolumny — do pierscienia przy polu „Etap". */
+          stage={stageOf(openTask) ? (stageMeta.get(stageOf(openTask) as number) ?? null) : null}
           sprintName={sprintLabel(openTask)}
           epic={epicOf(openTask)}
           labels={labels}

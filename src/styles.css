@@ -3257,6 +3257,21 @@ body.resizing {
   color: var(--fg-dim);
 }
 
+/*
+ * Przerwa miedzy grupami pol. Rozpieta na OBIE kolumny siatki — inaczej kreska
+ * konczylaby sie w polowie panelu, na granicy etykiety i wartosci.
+ *
+ * Sam odstep bez linii bylby dwuznaczny: przy jedenastu wierszach nie widac,
+ * czy to grupa, czy przypadek. Linia jest ledwie widoczna, bo ma dzielic, a nie
+ * rysowac tabele.
+ */
+.props-gap {
+  grid-column: 1 / -1;
+  height: 1px;
+  margin: var(--s1) 0;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
 .props dd {
   display: flex;
   align-items: center;
