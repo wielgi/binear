@@ -5,7 +5,34 @@
  * pokazujemy je OD RAZU, a swieze dane dociagamy w tle i podmieniamy (stale-while-
  * revalidate). Id zadan sa globalne, wiec nie trzeba kluczowac po projekcie.
  */
-import type { Comment, TaskDetail } from './bitrix';
+import type { Comment, Person, TaskDetail } from './bitrix';
+
+/**
+ * Nienapisany do konca komentarz — wszystko, co trzeba, zeby wrocic do pisania
+ * dokladnie tam, gdzie sie przerwalo.
+ *
+ * `mentioned` jedzie razem z tekstem, bo w polu stoi czytelne „@Imie", a na
+ * znacznik `[USER=id]` zamieniamy dopiero przy wysylce — bez tej listy wzmianka
+ * po powrocie bylaby juz tylko napisem i nikogo by nie powiadomila.
+ */
+export interface CommentDraft {
+  text: string;
+  mentioned: Person[];
+  /** Na kogo odpowiadamy; cytat doklejamy dopiero przy wysylce. */
+  replyTo: { author: string; when: string; body: string } | null;
+  /** Rozpisane poprawki WLASNYCH komentarzy: klucz komentarza → tresc pola. */
+  edits: Record<string, string>;
+  /**
+   * Osoby wybrane z listy `@` w trakcie poprawki, per komentarz.
+   *
+   * Pole DOPISANE pozniej i dlatego opcjonalne: starsze szkice go nie maja,
+   * a `usable` go nie wymaga — brak znaczy „nikogo nie wybrano", co jest
+   * prawda. Gdyby byl wymagany, podniesienie `.vN` unicestwiloby wszystkie
+   * niewyslane komentarze, czyli jedyna rzecz w tym magazynie, ktorej nie da
+   * sie odtworzyc z Bitriksa.
+   */
+  editMentions?: Record<string, Person[]>;
+}
 
 /** Ile ostatnio otwartych zadan trzymamy — reszta wypada (LRU po czasie zapisu). */
 const CAP = 80;
@@ -43,6 +70,16 @@ function makeCache<T>(storageKey: string, usable: (value: T) => boolean) {
         return usable(value) ? value : null;
       } catch {
         return null;
+      }
+    },
+    remove(id: number): void {
+      const s = load();
+      if (!(id in s)) return;
+      delete s[id];
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(s));
+      } catch {
+        // jak przy zapisie — brak miejsca nie moze wywalic widoku
       }
     },
     set(id: number, value: T): void {
@@ -109,3 +146,22 @@ export const setCachedDetail = (id: number, detail: TaskDetail) => details.set(i
    bezpieczny; pokazujemy stare od razu, a swieze pobranie dokłada ewentualne nowe. */
 export const getCachedComments = (id: number) => comments.get(id);
 export const setCachedComments = (id: number, list: Comment[]) => comments.set(id, list);
+
+/*
+ * NIEWYSLANE komentarze. Panel szczegolow montuje sie od nowa przy kazdym zadaniu
+ * (`key={task.id}`), wiec bez tego zamkniecie zadania w polowie zdania kasowalo
+ * zdanie. Tu chodzi o cudzy tekst wlasnej reki — jedyna rzecz w panelu, ktorej
+ * NIE da sie odtworzyc z Bitriksa, bo jeszcze tam nie dotarla.
+ */
+const drafts = makeCache<CommentDraft>(
+  'binear.drafts.v1',
+  (d) =>
+    typeof d?.text === 'string' &&
+    Array.isArray(d?.mentioned) &&
+    typeof d?.edits === 'object' &&
+    d.edits !== null,
+);
+
+export const getDraft = (id: number) => drafts.get(id);
+export const setDraft = (id: number, draft: CommentDraft) => drafts.set(id, draft);
+export const clearDraft = (id: number) => drafts.remove(id);

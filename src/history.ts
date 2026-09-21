@@ -484,6 +484,15 @@ export const WRITE_METHODS = new Set([
   'task.stages.movetask',
   'task.item.update',
   'task.commentitem.add',
+  'task.commentitem.update',
+  'im.v2.Chat.Message.update',
+  'task.commentitem.delete',
+  'im.v2.Chat.Message.delete',
+  /* Zalaczniki komentarza — patrz `addCommentWithFiles`. Musza byc TUTAJ, a nie
+     tylko na allregule proxy: `call` kieruje wszystko spoza tej listy do
+     laczenia odczytow, wiec zapis zostalby potraktowany jak zapytanie. */
+  'disk.folder.uploadfile',
+  'im.disk.file.commit',
   'task.checklistitem.complete',
   'task.checklistitem.renew',
 ]);
@@ -683,6 +692,20 @@ export function describe(
       return mark('related', '', 'powiązane zadania');
     case 'task.commentitem.add':
       return mark('comment', '', 'komentarz');
+    /* Dwie metody, jedna czynnosc — forum i czat to tylko miejsce, w ktorym
+       komentarz lezy (patrz `editComment`). Dziennik mowi o czynnosci. */
+    case 'task.commentitem.update':
+    case 'im.v2.Chat.Message.update':
+      return mark('comment', '', 'komentarz zmieniony');
+    case 'task.commentitem.delete':
+    case 'im.v2.Chat.Message.delete':
+      return mark('delete', '', 'komentarz usunięty');
+    /* Wgranie pliku to KROK, nie czynnosc — dla czytajacego dziennik liczy sie
+       dopiero komentarz, ktory z niego powstal. */
+    case 'disk.folder.uploadfile':
+      return mark('comment', '', 'wgranie załącznika');
+    case 'im.disk.file.commit':
+      return mark('comment', '', 'komentarz z załącznikiem');
     case 'task.checklistitem.complete':
       return mark('check', '', 'checklista — odhaczone');
     case 'task.checklistitem.renew':

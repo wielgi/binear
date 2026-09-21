@@ -25,8 +25,14 @@ export function HoverNote({
   className,
   children,
 }: {
-  /** Przygaszony podpis nad wartoscia — „Termin", „Story points", „Zadania". */
-  label: string;
+  /**
+   * Przygaszony podpis nad wartoscia — „Termin", „Story points", „Zadania".
+   *
+   * Pomijany przy PRZYCISKACH: tam karta nie odpowiada na pytanie „co to za
+   * liczba", tylko nazywa czynnosc, a nad nazwa czynnosci nie ma czego pisac.
+   * Zostaje sam wiersz z wartoscia — czyli zwykly dymek.
+   */
+  label?: string;
   /** To, po co sie tu zaglada. */
   value: ReactNode;
   /** Dopisek obok wartosci; to on zwykle niesie kolor. */
@@ -51,7 +57,7 @@ export function HoverNote({
       {at &&
         createPortal(
           <div className="due-card" style={{ top: at.top, right: at.right }} role="tooltip">
-            <div className="due-card-label">{label}</div>
+            {label !== undefined && label !== '' && <div className="due-card-label">{label}</div>}
             <div className="due-card-row">
               <span className="due-card-value">{value}</span>
               {note !== undefined && note !== '' && (

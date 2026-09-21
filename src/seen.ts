@@ -42,3 +42,52 @@ export function saveSeen(groupId: number, ids: number[]): void {
     // brak miejsca / tryb prywatny — przy nastepnym starcie nic nie bedzie nowe
   }
 }
+
+/*
+ * DO KTOREGO MOMENTU przeczytalem watek danego zadania.
+ *
+ * Osobno od listy wyzej, bo to inne pytanie: tamta mowi „ktore ZADANIA juz
+ * widzialem", a tu chodzi o moment w czasie wewnatrz jednego watku. Licznik
+ * `newCommentsCount` z Bitriksa sie nie nadaje — zeruje go otwarcie zadania
+ * w interfejsie Bitriksa, a poza tym mowi tylko ILE, nie OD KTOREGO.
+ *
+ * Klucz per zadanie; identyfikatory sa globalne, wiec bez podzialu na projekty.
+ */
+const READ_KEY = 'binear.read.v1';
+/** Ile watkow pamietamy — potem wypadaja najstarsze znaczniki. */
+const READ_CAP = 300;
+
+function readMarks(): Record<string, number> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(READ_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** `null` = tego watku jeszcze nie ogladalismy, wiec NIC nie jest nowe. */
+export function loadRead(taskId: number): number | null {
+  const ts = readMarks()[String(taskId)];
+  return typeof ts === 'number' ? ts : null;
+}
+
+export function saveRead(taskId: number, ts: number): void {
+  try {
+    const store = readMarks();
+    /* Tylko do przodu: powrot do starszego watku nie moze cofnac znacznika. */
+    if ((store[String(taskId)] ?? 0) >= ts) return;
+    store[String(taskId)] = ts;
+
+    const klucze = Object.keys(store);
+    if (klucze.length > READ_CAP) {
+      klucze
+        .sort((a, b) => store[a] - store[b])
+        .slice(0, klucze.length - READ_CAP)
+        .forEach((k) => delete store[k]);
+    }
+    localStorage.setItem(READ_KEY, JSON.stringify(store));
+  } catch {
+    // jak wyzej — najwyzej znacznik nie przezyje odswiezenia
+  }
+}

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   forwardRef,
   useCallback,
   useEffect,
@@ -17,7 +18,11 @@ import {
   FALLBACK_PRIORITY,
   FALLBACK_STATUS,
   addComment,
+  addCommentWithFiles,
+  deleteComment,
+  editComment,
   fetchComments,
+  fetchOlderComments,
   fetchActiveSprint,
   fetchSprints,
   fetchBacklogId,
@@ -67,12 +72,17 @@ import {
   type Interval,
 } from './bitrix';
 import {
+  clearDraft,
   getCachedComments,
   getCachedDetail,
+  getDraft,
   setCachedComments,
   setCachedDetail,
+  setDraft as storeDraft,
 } from './detailCache';
+import { wczytajWklejone, wyczyscWklejone, zapiszWklejone } from './pasteStore';
 import { renderDescription, setPortalBase } from './markdown';
+import { buildQuote, plainText, splitQuote } from './quote';
 import { ErrorBoundary } from './ErrorBoundary';
 import { checkForUpdate, runUpdate, type UpdateInfo } from './version';
 import {
@@ -111,6 +121,7 @@ import {
   CheckIcon,
   CloseIcon,
   CommentIcon,
+  ReplyIcon,
   ExternalIcon,
   ElsewhereIcon,
   TrashIcon,
@@ -153,7 +164,7 @@ import { CommandPalette, type Command } from './CommandPalette';
 import { applyTheme, loadTheme, watchSystemTheme, THEMES, type Theme } from './theme';
 import { applyFont, loadFont, FONTS, type Font } from './font';
 import { loadProject, saveProject } from './project';
-import { loadSeen, saveSeen } from './seen';
+import { loadRead, loadSeen, saveRead, saveSeen } from './seen';
 import {
   DndContext,
   DragOverlay,
@@ -3340,12 +3351,68 @@ function Lightbox({
   );
 }
 
+/**
+ * „@Imie Nazwisko" → `[USER=id]Imie Nazwisko[/USER]`.
+ *
+ * Dopiero ten zapis Bitrix rozpoznaje jako wzmianke — samo „@Imie" jest dla niego
+ * zwyklym tekstem i nikogo nie powiadomi. Podmieniamy przy wysylce, zeby w polu
+ * stalo czytelne „@Imie", a nie znacznik.
+ *
+ * Dluzsze nazwy najpierw: inaczej „@Damian" zjadloby poczatek „@Damian Chwiejczak".
+ */
+function withMentions(text: string, people: { id: number; name: string }[]): string {
+  return [...people]
+    .sort((a, b) => b.name.length - a.name.length)
+    .reduce((acc, p) => acc.split(`@${p.name}`).join(`[USER=${p.id}]${p.name}[/USER]`), text);
+}
+
+/**
+ * Wzmianki JUZ obecne w tresci — po nich odtwarzamy znaczniki przy edycji.
+ *
+ * Celowo tylko te. W polu edycji stoi czytelne „@Imie" i przy zapisie trzeba je
+ * zamienic z powrotem; szukanie po WSZYSTKICH osobach z portalu zamienialoby
+ * w powiadomienie kazde „@Imie" dopisane przy okazji poprawki, a powiadomienia
+ * nie da sie cofnac. Nowa wzmianke dodaje sie wiec nowym komentarzem, nie edycja.
+ */
+function mentionsIn(text: string): { id: number; name: string }[] {
+  return [...text.matchAll(/\[USER=(\d+)\]([^[]*)\[\/USER\]/g)].map((m) => ({
+    id: Number(m[1]),
+    name: m[2],
+  }));
+}
+
+/** Tresc do POLA edycji: znaczniki wzmianek z powrotem na czytelne „@Imie". */
+function toDraft(text: string): string {
+  return text.replace(/\[USER=\d+\]([^[]*)\[\/USER\]/g, '@$1');
+}
+
+/** Data komentarza w milisekundach; brak daty liczy sie jak najstarsza. */
+function czas(iso: string | null): number {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/**
+ * Zaznaczony tekst, ale TYLKO gdy w calosci lezy w podanym komentarzu.
+ *
+ * Bez tego warunku odpowiedz cytowalaby zaznaczenie zrobione gdzie indziej —
+ * w innym komentarzu, w opisie zadania albo nawet na liscie po lewej.
+ */
+function zaznaczenieW(el: Element | null): string {
+  const sel = window.getSelection();
+  if (!el || !sel || sel.isCollapsed || sel.rangeCount === 0) return '';
+  const zakres = sel.getRangeAt(0);
+  if (!el.contains(zakres.commonAncestorContainer)) return '';
+  return sel.toString().trim();
+}
+
 function Comments({
   taskId,
   chatId,
   ready,
   me,
   people,
+  onConfirm,
   onError,
 }: {
   taskId: number;
@@ -3356,6 +3423,8 @@ function Comments({
   me: number | null;
   /** Osoby do wzmianek `@` — te same, co w filtrze i pickerze osoby. */
   people: Person[];
+  /** Pytanie przed nieodwracalnym — okno rysuje App (patrz `Confirm`). */
+  onConfirm: (state: ConfirmState) => void;
   onError: (m: string) => void;
 }) {
   // Start od CACHE (detailCache.ts): stare komentarze widac od razu, bez "Wczytywanie…".
@@ -3370,8 +3439,75 @@ function Comments({
     [comments],
   );
   const [failed, setFailed] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
+  /*
+   * NIEWYSLANY tekst przezywa zamkniecie zadania. Panel montuje sie od nowa przy
+   * kazdym zadaniu (`key={task.id}`), wiec bez tego wyjscie w polowie zdania
+   * kasowalo zdanie — a to jedyna rzecz w panelu, ktorej nie da sie odtworzyc
+   * z Bitriksa, bo jeszcze tam nie dotarla. Czytamy RAZ, przy montowaniu.
+   */
+  const [zapisany] = useState(() => getDraft(taskId));
+  /*
+   * Do ktorego momentu watek byl przeczytany PRZY WEJSCIU. Zamrozone, bo znacznik
+   * zapisujemy od razu po wczytaniu — gdyby kreska liczyla sie z zywej wartosci,
+   * zniknelaby w tej samej chwili, w ktorej ma cos pokazac.
+   */
+  const [przeczytaneDo] = useState(() => loadRead(taskId));
+  const [draft, setDraft] = useState(() => zapisany?.text ?? '');
+  /*
+   * Komentarz, na ktory odpowiadamy. Cytat NIE idzie do pola — w polu ma stac
+   * sama odpowiedz, zeby pisalo sie normalnie, a nie obok cudzego tekstu i
+   * kresek. Dokleja sie dopiero przy wysylce (patrz `send`), w formacie
+   * Bitriksa, wiec tam wyglada tak samo jak tutaj.
+   */
+  const [replyTo, setReplyTo] = useState<{ author: string; when: string; body: string } | null>(
+    () => zapisany?.replyTo ?? null,
+  );
   const [sending, setSending] = useState(false);
+  /*
+   * Zalaczniki czekajace na wyslanie — wklejone zrzuty ekranu.
+   *
+   * Trzymamy `Blob`, nie base64: w stanie nie ma po co nosic wersji o jedna
+   * trzecia wiekszej, a do IndexedDB (patrz `pasteStore`) blob idzie w oryginale.
+   * Na base64 przerabiamy dopiero przy wysylce, bo tego chce Bitrix.
+   */
+  const [zalaczniki, setZalaczniki] = useState<{ name: string; blob: Blob }[]>([]);
+
+  /* Zrzuty z poprzedniego podejscia — wracaja razem z tekstem komentarza. */
+  useEffect(() => {
+    let zywe = true;
+    void wczytajWklejone(taskId).then((z) => {
+      if (zywe && z.length) setZalaczniki(z);
+    });
+    return () => {
+      zywe = false;
+    };
+  }, [taskId]);
+
+  /*
+   * Adresy podgladu. Tworzone RAZ na blob i zwalniane przy zmianie — bez tego
+   * kazde przerysowanie zostawialoby w pamieci kolejna kopie obrazka.
+   */
+  const podglady = useMemo(() => zalaczniki.map((z) => URL.createObjectURL(z.blob)), [zalaczniki]);
+  useEffect(() => () => podglady.forEach((u) => URL.revokeObjectURL(u)), [podglady]);
+
+  /* Zapis z opoznieniem, jak przy tekscie — wklejenie kilku zrzutow pod rzad nie
+     ma przepisywac magazynu przy kazdym z nich. */
+  useEffect(() => {
+    const id = window.setTimeout(() => void zapiszWklejone(taskId, zalaczniki), 400);
+    return () => window.clearTimeout(id);
+  }, [taskId, zalaczniki]);
+  /*
+   * Edytowany komentarz — klucz `zrodlo:numer`, ten sam, ktorym React rozroznia
+   * wypowiedzi w watku. Same numery sie powtarzaja: forum i czat licza osobno.
+   */
+  const [editing, setEditing] = useState<string | null>(null);
+  /*
+   * Rozpisane poprawki, klucz → tresc pola. MAPA, nie jedno pole: zamkniecie
+   * edycji ma zachowac to, co juz napisane, a nie wyrzucic. Odrzuca dopiero
+   * „Anuluj" — patrz `porzucEdycje`.
+   */
+  const [editDrafts, setEditDrafts] = useState<Record<string, string>>(() => zapisany?.edits ?? {});
+  const [saving, setSaving] = useState(false);
   const [computing, setComputing] = useState(false);
   /**
    * Gdy czas przekracza 24 h, nie wstawiamy od razu — pytamy, czy przyciac do godzin
@@ -3394,7 +3530,17 @@ function Comments({
    * dopisano. Trzymamy jedno i drugie, bo po wyborze osoby trzeba podmienic
    * DOKLADNIE ten fragment, a nie pierwsze lepsze "@" w komentarzu.
    */
-  const [mention, setMention] = useState<{ at: number; query: string; anchor: Anchor } | null>(null);
+  /*
+   * `target` mowi, KTORE pole otworzylo liste: `'new'` to pole nowego komentarza,
+   * inaczej klucz edytowanego komentarza. Bez tego malpa dzialalaby tylko w
+   * jednym polu — a pola edycji wygladaja identycznie, wiec „@Anna" wpisane tam
+   * wygladalo na wzmianke i po cichu nia nie bylo.
+   */
+  const [mention, setMention] = useState<
+    { at: number; query: string; anchor: Anchor; target: string } | null
+  >(null);
+  /** Pola edycji po kluczu — do oddania kursora po wyborze osoby z listy. */
+  const editRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   /*
    * Kto zostal wstawiony. Bitrix oczekuje w tresci `[USER=id]Imie[/USER]`, ale
    * pokazywanie tego w polu byloby okrutne — w polu stoi zwykle "@Imie", a na
@@ -3402,7 +3548,70 @@ function Comments({
    * nazwe recznie, wzmianka po prostu zostanie tekstem. Zaden komentarz sie
    * przez to nie zepsuje.
    */
-  const [mentioned, setMentioned] = useState<Person[]>([]);
+  const [mentioned, setMentioned] = useState<Person[]>(() => zapisany?.mentioned ?? []);
+  /* To samo, ale per edytowany komentarz — osoby WYBRANE z listy w trakcie poprawki. */
+  const [editMentions, setEditMentions] = useState<Record<string, Person[]>>(
+    () => zapisany?.editMentions ?? {},
+  );
+
+  /**
+   * Wykrywanie malpy w polu tekstowym — wspolne dla pola nowego komentarza i
+   * KAZDEGO pola edycji. Wczesniej siedzialo wprost w `onChange` jednego pola.
+   *
+   * Szukamy malpy NAJBLIZSZEJ kursorowi i tylko w biezacym „slowie": po spacji
+   * wzmianka sie konczy, a adres e-mail w tekscie nie ma otwierac listy osob
+   * (stad wymog spacji albo poczatku linii przed `@`).
+   */
+  const sledzMalpe = (el: HTMLTextAreaElement, value: string, target: string) => {
+    const caret = el.selectionStart ?? value.length;
+    const at = value.lastIndexOf('@', caret - 1);
+    const query = at === -1 ? '' : value.slice(at + 1, caret);
+    const opensWord = at === 0 || /\s/.test(value[at - 1] ?? '');
+
+    if (at === -1 || !opensWord || /\s/.test(query)) {
+      dismissedAt.current = null;
+      setMention(null);
+      return;
+    }
+    // Ta sama malpa, ktora juz odrzucono — nie otwieramy jej ponownie,
+    // dopoki uzytkownik nie napisze nowej.
+    if (dismissedAt.current === at) return;
+    /*
+     * Kotwice liczymy TYLKO przy otwieraniu listy. Mierzona przy kazdej literze
+     * sprawiala, ze panel drgal razem z pisaniem; pole i tak nie zmienia
+     * polozenia, wiec nie ma czego przeliczac.
+     */
+    setMention((prev) =>
+      prev && prev.target === target
+        ? { ...prev, query, at }
+        : (() => {
+            const r = el.getBoundingClientRect();
+            return { at, query, target, anchor: { left: r.left, top: r.top, bottom: r.top } };
+          })(),
+    );
+  };
+
+  /*
+   * Zapis wersji roboczej. Z OPOZNIENIEM, bo inaczej kazde nacisniecie klawisza
+   * przepisywaloby caly magazyn w localStorage. Pusty szkic KASUJEMY — inaczej
+   * zostawalby po nim wpis, ktory tylko zjada limit i nic nie niesie.
+   */
+  useEffect(() => {
+    const pusto =
+      !draft.trim() && !replyTo && Object.values(editDrafts).every((t) => !t.trim());
+    const id = window.setTimeout(() => {
+      if (pusto) clearDraft(taskId);
+      else
+        storeDraft(taskId, {
+          text: draft,
+          mentioned,
+          replyTo,
+          edits: editDrafts,
+          editMentions,
+        });
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [taskId, draft, mentioned, replyTo, editDrafts, editMentions]);
 
   /**
    * Pozycja malpy, ktora uzytkownik ODRZUCIL (Escape / klik w tlo).
@@ -3461,6 +3670,242 @@ function Comments({
 
   useEffect(load, [load]);
 
+  /**
+   * Pierwszy komentarz, ktorego jeszcze nie widzialem — nad nim staje kreska.
+   *
+   * WLASNE wypowiedzi sie nie licza: nikt nie wraca do watku, zeby przeczytac
+   * siebie. Przy pierwszej wizycie (`null`) nie ma kreski wcale — inaczej caly
+   * watek, lacznie z rokiem archiwum, bylby „nowy".
+   */
+  const pierwszyNowy = useMemo(() => {
+    if (przeczytaneDo === null || !comments) return -1;
+    return comments.findIndex((c) => c.authorId !== me && czas(c.date) > przeczytaneDo);
+  }, [comments, przeczytaneDo, me]);
+
+  /* Znacznik przesuwamy na najswiezsza wypowiedz w watku — kreska pokazuje sie
+     raz, przy tym wejsciu, a przy nastepnym juz nie. */
+  useEffect(() => {
+    if (!comments?.length) return;
+    saveRead(taskId, Math.max(...comments.map((c) => czas(c.date))));
+  }, [comments, taskId]);
+
+  /** Komentarz podswietlony po skoku z cytatu — gasnie sam. */
+  const [flash, setFlash] = useState<number | null>(null);
+
+  /*
+   * PO OTWARCIU ZADANIA ladujemy na koncu watku, nie na jego poczatku.
+   *
+   * Zadanie otwiera sie zwykle po to, zeby zobaczyc, co sie w nim WLASNIE dzieje,
+   * a to jest na dole — przy kilkunastu komentarzach trzeba bylo za kazdym razem
+   * przewijac cala droge. Gdy jest kreska „NOWE", celujemy w NIA: wtedy widok
+   * zaczyna sie dokladnie tam, gdzie sie skonczylo czytanie.
+   *
+   * Raz na otwarcie (`skoczylem`) — panel montuje sie od nowa przy kazdym
+   * zadaniu, a odswiezenie watku w tle nie moze szarpac widoku pod palcami.
+   */
+  const sekcjaRef = useRef<HTMLElement>(null);
+
+  /*
+   * Czy uzytkownik sam ruszyl widokiem. Slucham KOLKA I PALCA, a nie zdarzenia
+   * `scroll` — to drugie odpala takze moje wlasne przewijanie, wiec pierwszy skok
+   * natychmiast blokowalby kolejne.
+   */
+  const uzytkownikRuszyl = useRef(false);
+  useEffect(() => {
+    const pojemnik = sekcjaRef.current?.closest('.detail-body');
+    if (!pojemnik) return;
+    const zaznacz = () => {
+      uzytkownikRuszyl.current = true;
+    };
+    pojemnik.addEventListener('wheel', zaznacz, { passive: true });
+    pojemnik.addEventListener('touchmove', zaznacz, { passive: true });
+    return () => {
+      pojemnik.removeEventListener('wheel', zaznacz);
+      pojemnik.removeEventListener('touchmove', zaznacz);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (uzytkownikRuszyl.current || !comments?.length) return;
+
+    const skok = () => {
+      const kreska = sekcjaRef.current?.querySelector('.comment-new-mark');
+      if (kreska) return kreska.scrollIntoView({ block: 'start' });
+      /* Bez kreski — na sam dol, razem z polem pisania: tak konczy sie watek. */
+      const pojemnik = sekcjaRef.current?.closest('.detail-body');
+      if (pojemnik) pojemnik.scrollTop = pojemnik.scrollHeight;
+    };
+
+    skok();
+    /*
+     * Efekt CELOWO odpala sie przy kazdej zmianie watku, a nie raz. Watek dochodzi
+     * dwoma turami: najpierw z cache (krotszy), potem swiezy z Bitriksa. Skok
+     * zatrzaskiwany po pierwszej turze ladowal 56 px przed koncem i juz sie nie
+     * poprawial — dopiero druga tura dokladala reszte.
+     *
+     * Dwa terminy na doniesione obrazki, ktore zmieniaja wysokosc juz po rysowaniu.
+     */
+    const timery = [200, 700].map((ms) => window.setTimeout(skok, ms));
+    return () => timery.forEach(window.clearTimeout);
+  }, [comments]);
+
+  /*
+   * Przycisk „Odpowiedz" NAD ZAZNACZENIEM.
+   *
+   * Cytowanie fragmentu dzialalo juz wczesniej — trzeba bylo tylko wiedziec, ze
+   * po zaznaczeniu nalezy trafic w strzalke w naglowku komentarza. Czyli funkcja
+   * byla, ale nic o niej nie mowilo. Przycisk przychodzi do zaznaczenia zamiast
+   * kazac go szukac; tak samo robia to Medium i Notion.
+   */
+  const [zaznaczenie, setZaznaczenie] = useState<
+    { top: number; left: number; author: string; when: string; body: string } | null
+  >(null);
+
+  const sprawdzZaznaczenie = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return setZaznaczenie(null);
+    const zakres = sel.getRangeAt(0);
+    const wezel = zakres.commonAncestorContainer;
+    const el = (wezel instanceof Element ? wezel : wezel.parentElement)?.closest('.comment-body');
+    /* Tylko TRESC komentarza: zaznaczenie w naglowku, w cytacie albo poza watkiem
+       nie jest cudza wypowiedzia, wiec nie ma czego cytowac. */
+    if (!el) return setZaznaczenie(null);
+
+    const art = el.closest('[data-comment]') as HTMLElement | null;
+    const c = (comments ?? []).find((x) => x.id === Number(art?.dataset.comment));
+    const tekst = sel.toString().trim();
+    if (!c || !tekst) return setZaznaczenie(null);
+
+    const r = zakres.getBoundingClientRect();
+    setZaznaczenie({
+      top: r.top,
+      left: r.left + r.width / 2,
+      author: c.authorName,
+      when: dateTime(c.date),
+      body: tekst,
+    });
+  };
+
+  /*
+   * Przy przewijaniu i przy zmianie zaznaczenia PRZELICZAMY pozycje, a nie
+   * chowamy pigulke.
+   *
+   * Pierwsza wersja chowala ja na kazde zdarzenie przewijania — i znikala sama,
+   * bez dotykania myszy: `capture` lapie przewijanie DOWOLNEGO kontenera, a w
+   * panelu wystarczy odswiezenie watku, zeby takie zdarzenie padlo. Przeliczenie
+   * zalatwia oba przypadki naraz: gdy zaznaczenie zyje, pigulka jedzie razem
+   * z nim; gdy zniknelo, `sprawdzZaznaczenie` samo zwraca `null`.
+   *
+   * Przez REF, bo funkcja domyka sie nad `comments` i w efekcie zapietym na
+   * pustej liscie zaleznosci zostalaby wersja z pierwszego renderu.
+   */
+  const sprawdzRef = useRef(sprawdzZaznaczenie);
+  sprawdzRef.current = sprawdzZaznaczenie;
+  useEffect(() => {
+    const odswiez = () => sprawdzRef.current();
+    document.addEventListener('selectionchange', odswiez);
+    window.addEventListener('scroll', odswiez, true);
+    return () => {
+      document.removeEventListener('selectionchange', odswiez);
+      window.removeEventListener('scroll', odswiez, true);
+    };
+  }, []);
+
+  /*
+   * Doczytywanie POCZATKU watku. Pierwsze pobranie bierze ostatnie sto wiadomosci
+   * czatu i przy dlugiej dyskusji reszta po prostu nie istniala w panelu — bez
+   * sladu, ze cos zostalo uciete.
+   */
+  const [starszeBrak, setStarszeBrak] = useState(false);
+  const [dociagam, setDociagam] = useState(false);
+
+  const pokazStarsze = async () => {
+    const najstarszyZCzatu = (comments ?? []).find((c) => c.source === 'chat');
+    if (!najstarszyZCzatu || chatId === null || dociagam) return;
+    setDociagam(true);
+    try {
+      const starsze = await fetchOlderComments(chatId, najstarszyZCzatu.id);
+      if (!starsze.length) {
+        setStarszeBrak(true);
+        return;
+      }
+      setComments((prev) => {
+        const znane = new Set((prev ?? []).map((c) => `${c.source}:${c.id}`));
+        const nowe = starsze.filter((c) => !znane.has(`${c.source}:${c.id}`));
+        if (!nowe.length) {
+          setStarszeBrak(true);
+          return prev;
+        }
+        const next = [...nowe, ...(prev ?? [])];
+        setCachedComments(taskId, next);
+        return next;
+      });
+    } catch (e) {
+      onError(`Nie udało się wczytać starszych: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDociagam(false);
+    }
+  };
+
+  /**
+   * Skok do cytowanego komentarza.
+   *
+   * Bitrix nie zapisuje, KTORY komentarz jest cytowany — zostaje tylko tekst
+   * cytatu (patrz `splitQuote`). Szukamy wiec po tresci: bierzemy poczatek
+   * cytatu i sprawdzamy, czyj komentarz tak sie zaczyna. Autor zaweza szukanie,
+   * gdy Bitrix go dopisal.
+   *
+   * Gdy oryginalu nie ma (starszy niz pobrany kawalek watku, albo skasowany),
+   * NIE udajemy, ze cos sie stalo — patrz komunikat w `onError`.
+   */
+  /**
+   * Odnajduje CYTOWANY komentarz w watku.
+   *
+   * Porownanie musi byc luzne, bo cytat nie jest kopia:
+   *  - Bitrix przeformatowuje tresc (lista „6.” w oryginale bywa „6)” w cytacie),
+   *  - podpisuje cytat nazwa z chwili cytowania — „Klaudiusz Koder”, podczas gdy
+   *    komentarz nalezy do „Klaudiusz Koder AI”.
+   * Stad: gole litery i cyfry, bez znakow i wielkosci liter, a autor tylko
+   * ZAWEZA wybor, nigdy go nie wyklucza.
+   */
+  const findQuoted = (quote: { author: string | null; body: string }): Comment | undefined => {
+    const norm = (t: string) =>
+      plainText(t)
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim();
+
+    /* Poczatkowy numer punktu odpada — to wlasnie on rozni sie miedzy oryginalem
+       a cytatem. */
+    const igla = norm(quote.body).replace(/^\d+\s*/, '').slice(0, 30);
+    if (!igla) return undefined;
+
+    const pasuje = (x: Comment) => norm(splitQuote(x.text).rest || x.text).includes(igla);
+    const tenSamAutor = (x: Comment) => {
+      if (!quote.author) return true;
+      const a = norm(x.authorName);
+      const b = norm(quote.author);
+      return a.includes(b) || b.includes(a);
+    };
+
+    const lista = comments ?? [];
+    return lista.find((x) => tenSamAutor(x) && pasuje(x)) ?? lista.find(pasuje);
+  };
+
+  const scrollToQuoted = (quote: { author: string | null; body: string }) => {
+    const cel = findQuoted(quote);
+    if (!cel) {
+      onError('Nie widzę cytowanego komentarza — może jest starszy niż wczytany fragment wątku.');
+      return;
+    }
+    document.querySelector(`[data-comment="${cel.id}"]`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+    setFlash(cel.id);
+    window.setTimeout(() => setFlash((v) => (v === cel.id ? null : v)), 1400);
+  };
+
   /** Dokleja gotowa linijke z czasem do pola komentarza (nie wysyla). */
   const insertLine = (ms: number, hoursOnly = false) =>
     setDraft((prev) => {
@@ -3496,27 +3941,185 @@ function Comments({
     }
   };
 
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || !me || sending) return;
-    setSending(true);
+  /**
+   * Zapis poprawionego komentarza.
+   *
+   * Obie metody Bitriksa podmieniaja tresc W CALOSCI, wiec wysylamy ja w calosci:
+   * cytat wraca DOKLADNIE taki, jaki byl (`raw` — z kreskami i kotwica do
+   * oryginalu), a zmienia sie tylko to, co stalo pod nim. Sam cytat nie jest do
+   * edycji z zalozenia: to cudze slowa.
+   *
+   * `was` to tresc sprzed edycji — sluzy do rozpoznania, ze nic sie nie zmienilo
+   * (wtedy nie ma po co pisac do Bitriksa) i do odtworzenia wzmianek.
+   */
+  /**
+   * Usuniecie wlasnego komentarza. Nieodwracalne, wiec zawsze przez pytanie —
+   * i z podgladem tresci, zeby bylo widac, KTORY komentarz znika (w watku stoi
+   * ich kilkanascie, a ikony sa male i blisko siebie).
+   */
+  const removeComment = (c: Comment) => {
+    const podglad = plainText(splitQuote(c.text).rest || c.text).slice(0, 80);
+    onConfirm({
+      title: 'Usunąć ten komentarz?',
+      body: `„${podglad}${podglad.length === 80 ? '…' : ''}" zniknie z Bitriksa. Tej operacji nie da się cofnąć.`,
+      confirmLabel: 'Usuń',
+      danger: true,
+      onYes: () => {
+        void (async () => {
+          try {
+            await deleteComment(c, taskId);
+            /* Znika lokalnie od razu — patrz `saveEdit`, ten sam powod. */
+            setComments((prev) => {
+              if (!prev) return prev;
+              const next = prev.filter((x) => !(x.source === c.source && x.id === c.id));
+              setCachedComments(taskId, next);
+              return next;
+            });
+          } catch (e) {
+            onError(`Nie udało się usunąć komentarza: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        })();
+      },
+    });
+  };
+
+  /** Zamyka edycje i ODRZUCA to, co w niej napisano — w odroznieniu od Escape. */
+  const porzucEdycje = (key: string) => {
+    setEditDrafts(({ [key]: _, ...reszta }) => reszta);
+    setEditMentions(({ [key]: _pominiete, ...reszta }) => reszta);
+    setEditing(null);
+  };
+
+  const saveEdit = async (c: Comment, raw: string, was: string) => {
+    const key = `${c.source}:${c.id}`;
+    const text = (editDrafts[key] ?? '').trim();
+    if (!text || saving) return;
+    if (text === toDraft(was).trim()) {
+      porzucEdycje(key);
+      return;
+    }
+    setSaving(true);
     try {
       /*
-       * Bitrix rozpoznaje wzmianke jako `[USER=id]Imie[/USER]` — samo "@Imie" jest
-       * dla niego zwyklym tekstem i nikogo nie powiadomi. Podmieniamy dopiero tutaj,
-       * zeby w polu stalo czytelne "@Imie", a nie znacznik. Dluzsze nazwy najpierw:
-       * inaczej "@Damian" zjadloby poczatek "@Damian Chwiejczak".
+       * Wzmianki z dwoch zrodel: te, ktore w komentarzu JUZ BYLY (odtwarzamy je
+       * z oryginalu, bo w polu stoi czytelne „@Imie"), plus WYBRANE z listy
+       * w trakcie poprawki. Wpisane recznie i niewybrane zostaja tekstem —
+       * dokladnie tak samo jak przy nowym komentarzu.
        */
-      const body = [...mentioned]
-        .sort((a, b) => b.name.length - a.name.length)
-        .reduce(
-          (acc, p) => acc.split(`@${p.name}`).join(`[USER=${p.id}]${p.name}[/USER]`),
-          text,
+      const pelny = raw + withMentions(text, [...mentionsIn(was), ...(editMentions[key] ?? [])]);
+      await editComment(c, taskId, pelny);
+      porzucEdycje(key);
+      /*
+       * Podmieniamy JEDEN komentarz zamiast przeladowywac watek. Pobranie
+       * calosci gasilo na moment cala liste i przewijanie skakalo — a wiadomo
+       * dokladnie, co sie zmienilo, bo sami to wyslalismy.
+       */
+      setComments((prev) => {
+        if (!prev) return prev;
+        const next = prev.map((x) =>
+          x.source === c.source && x.id === c.id ? { ...x, text: pelny } : x,
         );
+        setCachedComments(taskId, next);
+        return next;
+      });
+    } catch (e) {
+      /*
+       * `CANT_EDIT_MESSAGE` nalezy do STAREGO `im.message.update` i po przejsciu
+       * na `im.v2.*` nie powinien juz padac (patrz `editComment`). Zostaje na
+       * wypadek, gdyby portal kiedys odebral dostep do wersji v2 — wtedy binear
+       * wroci na stara sciezke i ten komunikat znowu bedzie jedynym sensownym.
+       * Wlasny opis Bitriksa to worek na dwie sprawy naraz: „Time has expired
+       * for modification OR you don't have access".
+       */
+      const code = e instanceof Error ? e.message : String(e);
+      onError(
+        code === 'CANT_EDIT_MESSAGE'
+          ? 'Bitrix nie pozwolił zmienić tego komentarza — minął czas na edycję albo brakuje uprawnień. Zostaje dopisanie nowego.'
+          : `Nie udało się zmienić komentarza: ${code}`,
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
 
-      await addComment(taskId, body, me);
+  /** Nad tym rozmiarem odmawiamy — zrzut ekranu wazy setki kilobajtow, nie megabajty. */
+  const MAX_ZALACZNIK = 10 * 1024 * 1024;
+
+  /**
+   * Wklejony obrazek ze schowka. Zrzuty ekranu to u nas normalny sposob opisania
+   * problemu, a dotad kazdy z nich wymagal przejscia do Bitriksa w polowie
+   * pisania komentarza.
+   *
+   * Czytamy `clipboardData.files`, nie tekst — Windows wkleja zrzut jako plik
+   * `image/png` bez nazwy, wiec nazwe nadajemy sami (z data, zeby dalo sie je
+   * potem odroznic na Dysku).
+   */
+  const wklej = (e: React.ClipboardEvent) => {
+    const obrazki = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (!obrazki.length) return;
+    e.preventDefault(); // inaczej Chrome wklei do pola sciezke pliku
+
+    for (const plik of obrazki) {
+      if (plik.size > MAX_ZALACZNIK) {
+        onError(`Załącznik jest za duży (${Math.round(plik.size / 1024 / 1024)} MB, limit 10 MB).`);
+        continue;
+      }
+      const rozszerzenie = (plik.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      const stempel = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      setZalaczniki((z) => [
+        ...z,
+        { name: plik.name || `zrzut-${stempel}.${rozszerzenie}`, blob: plik },
+      ]);
+    }
+  };
+
+  /** `Blob` → gole base64, czyli to, czego chce Bitrix (bez przedrostka `data:`). */
+  const naBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const czytnik = new FileReader();
+      czytnik.onload = () => {
+        const dataUrl = String(czytnik.result);
+        resolve(dataUrl.slice(dataUrl.indexOf(',') + 1));
+      };
+      czytnik.onerror = () => reject(new Error('Nie udało się odczytać załącznika'));
+      czytnik.readAsDataURL(blob);
+    });
+
+  const send = async () => {
+    const text = draft.trim();
+    /* Sam zrzut bez slowa komentarza tez jest wypowiedzia — wtedy tekst moze byc pusty. */
+    if ((!text && !zalaczniki.length) || !me || sending) return;
+    setSending(true);
+    try {
+      /* Wzmianki na znaczniki Bitriksa — patrz `withMentions`. Tu bierzemy osoby
+         WYBRANE z listy, bo tylko one sa zamierzona wzmianka. */
+      const body = withMentions(text, mentioned);
+
+      /* Cytat dopiero tutaj — w polu stala sama odpowiedz. */
+      const full = replyTo ? buildQuote(replyTo.author, replyTo.when, replyTo.body) + body : body;
+
+      /*
+       * Z zalacznikiem idziemy droga czatu (patrz `addCommentWithFiles`) — tylko
+       * ona umie doczepic plik. Bez zalacznika zostaje `task.commentitem.add`,
+       * bo to ona pozwala podpisac komentarz AUTOREM, a nie wlascicielem
+       * webhooka; dzis to ta sama osoba, ale nie musi byc.
+       */
+      if (zalaczniki.length) {
+        if (chatId === null) throw new Error('Zadanie nie ma czatu — nie ma gdzie wgrać załącznika');
+        const doWyslania = await Promise.all(
+          zalaczniki.map(async (z) => ({ name: z.name, base64: await naBase64(z.blob) })),
+        );
+        await addCommentWithFiles(taskId, chatId, full, doWyslania);
+      } else {
+        await addComment(taskId, full, me);
+      }
       setDraft('');
+      setReplyTo(null);
       setMentioned([]);
+      setZalaczniki([]);
+      void wyczyscWklejone(taskId);
+      /* Wyslane = nie ma juz czego trzymac na pozniej. */
+      clearDraft(taskId);
       load();
     } catch (e) {
       onError(`Nie udało się dodać komentarza: ${e instanceof Error ? e.message : String(e)}`);
@@ -3526,7 +4129,41 @@ function Comments({
   };
 
   return (
-    <section className="comments">
+    <section
+      className="comments"
+      ref={sekcjaRef}
+      onMouseUp={sprawdzZaznaczenie}
+      onKeyUp={sprawdzZaznaczenie}
+    >
+      {/*
+        Pigulka nad zaznaczeniem. Przez PORTAL i `position: fixed`, bo watek
+        przewija sie w kontenerze z `overflow` — w srodku bylaby przycieta przy
+        gornej krawedzi. Blokada domyslnej akcji myszy jest tu KONIECZNA: klik
+        kasuje zaznaczenie, zanim `onClick` zdazy je przeczytac.
+      */}
+      {zaznaczenie &&
+        createPortal(
+          <button
+            className="sel-reply"
+            style={{ top: zaznaczenie.top, left: zaznaczenie.left }}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setReplyTo({
+                author: zaznaczenie.author,
+                when: zaznaczenie.when,
+                body: zaznaczenie.body,
+              });
+              setZaznaczenie(null);
+              window.getSelection()?.removeAllRanges();
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }}
+          >
+            <ReplyIcon />
+            Odpowiedz
+          </button>,
+          document.body,
+        )}
+
       <h2>Komentarze{comments ? ` · ${comments.length}` : ''}</h2>
 
       {comments === null && failed === null && <p className="desc-dim">Wczytywanie…</p>}
@@ -3540,16 +4177,223 @@ function Comments({
       )}
       {comments?.length === 0 && <p className="desc-dim">Brak komentarzy.</p>}
 
-      {comments?.map((c) => {
+      {/*
+        „Starsze" tylko wtedy, gdy jest z czego: watek ma czesc czatowa i jeszcze
+        nie dostalismy pustej odpowiedzi. Przy krotkiej dyskusji znika po jednym
+        klikniecu i wiecej nie wraca.
+      */}
+      {!starszeBrak && chatId !== null && comments?.some((c) => c.source === 'chat') && (
+        <button className="link-btn comment-older" disabled={dociagam} onClick={() => void pokazStarsze()}>
+          {dociagam ? 'Wczytywanie…' : 'Pokaż starsze'}
+        </button>
+      )}
+
+      {comments?.map((c, idx) => {
+        /*
+         * Odpowiedz w Bitriksie to CYTAT WKLEJONY w tresc, nie osobne pole —
+         * patrz `splitQuote`. Rozdzielamy je, zeby cudze slowa byly widocznie
+         * cudze; wczesniej komentarz wyswietlal sie razem z kreskami i
+         * wewnetrznym odnosnikiem `#chat…/…`.
+         */
+        const { quote, rest, raw } = splitQuote(c.text);
+        const key = `${c.source}:${c.id}`;
         return (
-        <article key={`${c.source}:${c.id}`} className="comment">
+        <Fragment key={key}>
+        {/* Kreska „nowe" — jedna, nad pierwsza nieprzeczytana wypowiedzia. */}
+        {idx === pierwszyNowy && (
+          <div className="comment-new-mark" role="separator">
+            <span>Nowe</span>
+          </div>
+        )}
+        <article
+          className={`comment${flash === c.id ? ' comment-flash' : ''}`}
+          data-comment={c.id}
+        >
+          {/*
+            Cytat NAD naglowkiem i w JEDNEJ linii — tak pokazuja odpowiedzi
+            Discord, Telegram i iMessage. Wczesniej byl to dwuliniowy blok pod
+            naglowkiem, z rozwijaniem: duzo tekstu do przeczytania drugi raz i
+            do tego wysuniety z osi, bo tresc komentarza ma wciecie pod awatar.
+            Klikniecie przewija do oryginalu, zamiast rozwijac kopie.
+          */}
+          {quote && (
+            <button
+              className="comment-quote"
+              title="Pokaż cytowany komentarz"
+              onClick={() => scrollToQuoted(quote)}
+            >
+              <ReplyIcon />
+              {/* Awatar cytowanej osoby — widac komu odpowiadamy, zanim ktokolwiek
+                  przeczyta nazwisko. Zdjecie bierzemy z odnalezionego oryginalu;
+                  gdy go nie ma, `Avatar` rysuje inicjaly z samej nazwy. */}
+              {quote.author && (
+                <Avatar name={quote.author} photo={findQuoted(quote)?.authorPhoto ?? undefined} />
+              )}
+              {quote.author && <strong>{quote.author}</strong>}
+              <span className="comment-quote-body">{plainText(quote.body)}</span>
+            </button>
+          )}
           <div className="comment-head">
             {/* Autor komentarza to zawsze konkretna osoba — patrz `PersonInline`. */}
             <Avatar name={c.authorName} photo={c.authorPhoto} />
             <strong>{c.authorName}</strong>
             <span className="row-meta">{dateTime(c.date)}</span>
+            {/*
+              Narzedzia wypowiedzi — IKONY w stalej kolumnie przy prawej
+              krawedzi. Jako napisy staly w jednej linii z autorem i data
+              i czytaly sie jak dalszy ciag naglowka.
+            */}
+            <div className="comment-tools">
+            {/*
+              Odpowiedz = CYTAT w tresci nowego komentarza, w formacie Bitriksa
+              (patrz `buildQuote`). Dzieki temu wyglada tak samo tutaj i tam, a
+              odpowiadanie z binear nie tworzy drugiego, wlasnego zapisu.
+              Cytujemy `rest`, nie caly tekst: inaczej odpowiedz na odpowiedz
+              zagniezdzalaby cytat w cytacie i rosla bez konca.
+            */}
+            {/*
+              Dymek z WLASNEJ karty (`HoverNote`), nie z `title`. Podpowiedz
+              przegladarki pojawia sie z sekundowym opoznieniem, a przy ikonie bez
+              napisu to wlasnie ona jest jedynym miejscem, z ktorego mozna sie
+              dowiedziec, co ten znaczek robi — czekanie sekunde na ta odpowiedz
+              znaczy, ze pierwszy raz i tak sie jej nie doczeka.
+            */}
+            {/* Cale wyrazenie w JEDNYM tonie. Rozbite na wartosc i dopisek
+                („Odpowiedz" jasne, „cytatem" przygaszone) czytalo sie jak liczba
+                z przypisem, a to jest zwykle zdanie — dwa kolory rozrywaly je
+                w polowie. Dopisek zostaje dla odczytow z wykresu, nie dla nazw
+                czynnosci. */}
+            <HoverNote value="Odpowiedz cytatem" className="comment-tool">
+              <button
+                aria-label="Odpowiedz na ten komentarz"
+                /*
+                 * Klik zwyczajnie kasuje zaznaczenie, zanim `onClick` zdazy je
+                 * przeczytac — a to wlasnie zaznaczenie ma trafic do cytatu.
+                 * Blokada domyslnej akcji myszy zostawia je nietkniete.
+                 */
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  /*
+                   * Zaznaczony FRAGMENT ma pierwszenstwo przed cala wypowiedzia.
+                   * Przy komentarzu na dziesiec punktow odpowiedz ma wskazywac
+                   * punkt, a nie przyklejac sciane tekstu.
+                   *
+                   * Cytujemy `rest`, nie caly tekst: inaczej odpowiedz na odpowiedz
+                   * zagniezdzalaby cytat w cytacie i rosla bez konca.
+                   */
+                  const fragment = zaznaczenieW(
+                    document.querySelector(`[data-comment="${c.id}"] .comment-body`),
+                  );
+                  setReplyTo({
+                    author: c.authorName,
+                    when: dateTime(c.date),
+                    body: fragment || rest || c.text,
+                  });
+                  requestAnimationFrame(() => inputRef.current?.focus());
+                }}
+              >
+                <ReplyIcon />
+              </button>
+            </HoverNote>
+            {/*
+              Edycja TYLKO wlasnych komentarzy. Webhook dziala z uprawnieniami,
+              ktore poprawilyby takze cudze — ale poprawianie cudzych slow nie
+              jest czynnoscia, ktora narzedzie ma proponowac.
+            */}
+            {me === c.authorId && editing !== key && (
+              /* Bez dopisku: „Edytuj" nie zostawia pytania. Przy odpowiedzi
+                 zostaje — bo to, ze wklei sie cytat, z ikony nie wynika. */
+              <HoverNote value="Edytuj" className="comment-tool">
+                <button
+                  aria-label="Zmień treść tego komentarza"
+                  onClick={() => {
+                    setEditing(key);
+                    /* Zaczeta wczesniej poprawka WRACA; dopiero gdy jej nie ma,
+                       bierzemy tresc komentarza. Bez cytatu: edytuje sie wlasna
+                       odpowiedz, nie cudza wypowiedz. */
+                    setEditDrafts((d) => (key in d ? d : { ...d, [key]: toDraft(rest || c.text) }));
+                  }}
+                >
+                  <PenIcon />
+                </button>
+              </HoverNote>
+            )}
+            {me === c.authorId && (
+              <HoverNote value="Usuń" className="comment-tool">
+                <button
+                  className="comment-tool-danger"
+                  aria-label="Usuń ten komentarz"
+                  onClick={() => removeComment(c)}
+                >
+                  <TrashIcon />
+                </button>
+              </HoverNote>
+            )}
+            </div>
           </div>
-          {c.text && <div className="comment-body">{renderDescription(c.text)}</div>}
+          {editing === key ? (
+            <div className="comment-edit">
+              <textarea
+                className="comment-input"
+                ref={(el) => {
+                  editRefs.current[key] = el;
+                }}
+                value={editDrafts[key] ?? ''}
+                autoFocus
+                disabled={saving}
+                /* Malpa dziala tu tak samo jak w polu nowego komentarza — patrz
+                   `sledzMalpe`. Bez tego „@Anna" wpisane w poprawce wygladalo na
+                   wzmianke i po cichu nia nie bylo. */
+                onChange={(e) => {
+                  setEditDrafts((d) => ({ ...d, [key]: e.target.value }));
+                  sledzMalpe(e.target, e.target.value, key);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    void saveEdit(c, raw, rest || c.text);
+                  }
+                  /* Escape najpierw zamyka LISTE OSOB, dopiero potem edycje —
+                     inaczej jedno nacisniecie robilo obie rzeczy naraz. */
+                  if (e.key === 'Escape' && mention?.target === key) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeMention(mention.at);
+                    return;
+                  }
+                  /*
+                   * Escape ZAMYKA, ale nie wyrzuca napisanego tekstu — pole stoi
+                   * w srodku watku i trafia sie w nie odruchowo, a poprawka bywa
+                   * dluga. Odrzuca dopiero „Anuluj", i to jest cala roznica
+                   * miedzy nimi (napisana wprost pod polem).
+                   */
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setEditing(null);
+                  }
+                }}
+              />
+              <div className="comment-foot">
+                <span className="comment-hint">
+                  @ wspomina · Ctrl+Enter zapisuje · Esc zamyka i zachowuje · Anuluj odrzuca
+                </span>
+                <div className="comment-actions">
+                  <button className="btn" disabled={saving} onClick={() => porzucEdycje(key)}>
+                    Anuluj
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={saving || !(editDrafts[key] ?? '').trim()}
+                    onClick={() => void saveEdit(c, raw, rest || c.text)}
+                  >
+                    {saving ? 'Zapisywanie…' : 'Zapisz'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            rest && <div className="comment-body">{renderDescription(rest)}</div>
+          )}
           {c.files.length > 0 && (
             <div className="comment-files">
               {c.files.map((f) =>
@@ -3604,6 +4448,7 @@ function Comments({
             </div>
           )}
         </article>
+        </Fragment>
         );
       })}
 
@@ -3611,47 +4456,38 @@ function Comments({
         <Lightbox files={gallery} index={preview} onIndex={setPreview} onClose={() => setPreview(null)} />
       )}
 
+      {/*
+        Pasek odpowiedzi NAD polem: kogo cytujemy i poczatek jego slow. Sam cytat
+        zostaje poza polem, zeby pisanie odpowiedzi wygladalo jak pisanie
+        komentarza, a nie jak edycja cudzego tekstu.
+      */}
+      {replyTo && (
+        <div className="reply-bar">
+          <ReplyIcon />
+          <span className="reply-bar-text">
+            <strong>{replyTo.author}</strong>
+            <span className="reply-bar-quote">{plainText(replyTo.body)}</span>
+          </span>
+          <button
+            className="reply-bar-x"
+            title="Nie odpowiadaj na ten komentarz"
+            onClick={() => setReplyTo(null)}
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      )}
       <textarea
         ref={inputRef}
         className="comment-input"
         value={draft}
-        placeholder={me ? 'Napisz komentarz… (@ wspomina osobę, Ctrl+Enter wysyła)' : 'Brak identyfikatora użytkownika'}
+        /* Sam zachetnik — skroty stoja pod polem i nie znikaja przy pisaniu. */
+        placeholder={me ? 'Napisz komentarz…' : 'Brak identyfikatora użytkownika'}
+        onPaste={wklej}
         disabled={!me || sending}
         onChange={(e) => {
-          const value = e.target.value;
-          setDraft(value);
-
-          /*
-           * Szukamy malpy NAJBLIZSZEJ kursorowi i tylko w biezacym "slowie":
-           * po spacji wzmianka sie konczy, a adres e-mail w tekscie nie ma
-           * otwierac listy osob (stad wymog spacji/poczatku linii przed `@`).
-           */
-          const caret = e.target.selectionStart ?? value.length;
-          const at = value.lastIndexOf('@', caret - 1);
-          const query = at === -1 ? '' : value.slice(at + 1, caret);
-          const opensWord = at === 0 || /\s/.test(value[at - 1] ?? '');
-
-          if (at === -1 || !opensWord || /\s/.test(query)) {
-            dismissedAt.current = null;
-            setMention(null);
-            return;
-          }
-          // Ta sama malpa, ktora juz odrzucono — nie otwieramy jej ponownie,
-          // dopoki uzytkownik nie napisze nowej.
-          if (dismissedAt.current === at) return;
-          /*
-           * Kotwice liczymy TYLKO przy otwieraniu listy. Mierzona przy kazdej
-           * literze sprawiala, ze panel drgal razem z pisaniem; pole i tak nie
-           * zmienia polozenia, wiec nie ma czego przeliczac.
-           */
-          setMention((prev) =>
-            prev
-              ? { ...prev, query, at }
-              : (() => {
-                  const r = e.target.getBoundingClientRect();
-                  return { at, query, anchor: { left: r.left, top: r.top, bottom: r.top } };
-                })(),
-          );
+          setDraft(e.target.value);
+          sledzMalpe(e.target, e.target.value, 'new');
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -3686,16 +4522,29 @@ function Comments({
               return;
             }
             setMention(null);
-            // Podmieniamy dokladnie fragment "@to-co-wpisano" na "@Imie " i
-            // stawiamy kursor za nim, zeby dalo sie pisac dalej bez klikania.
-            const before = draft.slice(0, mention.at);
-            const after = draft.slice(mention.at + 1 + mention.query.length);
+            /*
+             * Podmieniamy dokladnie fragment „@to-co-wpisano" na „@Imie " i
+             * stawiamy kursor za nim, zeby dalo sie pisac dalej bez klikania.
+             * Cel zalezy od tego, ktore pole otworzylo liste (`mention.target`).
+             */
+            const nowe = mention.target === 'new';
+            const biezacy = nowe ? draft : (editDrafts[mention.target] ?? '');
+            const before = biezacy.slice(0, mention.at);
+            const after = biezacy.slice(mention.at + 1 + mention.query.length);
             const insert = `@${p.name} `;
-            setDraft(`${before}${insert}${after}`);
-            setMentioned((m) => (m.some((x) => x.id === p.id) ? m : [...m, p]));
+            const dopisz = (m: Person[]) => (m.some((x) => x.id === p.id) ? m : [...m, p]);
+
+            if (nowe) {
+              setDraft(`${before}${insert}${after}`);
+              setMentioned(dopisz);
+            } else {
+              const klucz = mention.target;
+              setEditDrafts((d) => ({ ...d, [klucz]: `${before}${insert}${after}` }));
+              setEditMentions((m) => ({ ...m, [klucz]: dopisz(m[klucz] ?? []) }));
+            }
             dismissedAt.current = null;
             requestAnimationFrame(() => {
-              const el = inputRef.current;
+              const el = nowe ? inputRef.current : editRefs.current[mention.target];
               if (!el) return;
               const pos = before.length + insert.length;
               el.focus();
@@ -3784,7 +4633,37 @@ function Comments({
           </div>
         </div>
       )}
-      <div className="comment-actions">
+      {/*
+        Podpowiedz POD polem, nie w placeholderze.
+        W placeholderze znikala dokladnie wtedy, gdy zaczynalo sie pisac — czyli
+        w chwili, w ktorej „Ctrl+Enter wysyła" staje sie potrzebne. Tu stoi caly
+        czas i czyta sie tak samo jak przy edycji.
+      */}
+      {/*
+        Wklejone zrzuty czekajace na wyslanie. Miniatury, a nie nazwy plikow:
+        zrzut rozpoznaje sie po tym, co na nim widac, a nie po „zrzut-2026-09-21".
+      */}
+      {zalaczniki.length > 0 && (
+        <div className="paste-list">
+          {zalaczniki.map((z, i) => (
+            <span className="paste-item" key={`${z.name}-${i}`}>
+              <img src={podglady[i]} alt={z.name} />
+              <button
+                className="paste-x"
+                title="Nie wysyłaj tego załącznika"
+                onClick={() => setZalaczniki((lista) => lista.filter((_, j) => j !== i))}
+              >
+                <CloseIcon />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="comment-foot">
+        <span className="comment-hint">
+          @ wspomina osobę · Ctrl+V wkleja zrzut · Ctrl+Enter wysyła
+        </span>
+        <div className="comment-actions">
         <button
           className="btn"
           disabled={computing || sending}
@@ -3793,9 +4672,14 @@ function Comments({
         >
           {computing ? 'Liczenie…' : 'Wstaw czas pracy'}
         </button>
-        <button className="btn" disabled={!draft.trim() || !me || sending} onClick={() => void send()}>
+        <button
+          className="btn"
+          disabled={(!draft.trim() && !zalaczniki.length) || !me || sending}
+          onClick={() => void send()}
+        >
           {sending ? 'Wysyłanie…' : 'Dodaj komentarz'}
         </button>
+        </div>
       </div>
     </section>
   );
@@ -4098,6 +4982,7 @@ function DetailPanel({
   onTitle,
   onClose,
   onDelete,
+  onConfirm,
   onHistory,
   onError,
 }: {
@@ -4130,6 +5015,8 @@ function DetailPanel({
   onClose: () => void;
   /** Usuniecie zadania — panel sam pyta o potwierdzenie przez App (setConfirm). */
   onDelete: () => void;
+  /** To samo okno dla drobniejszych nieodwracalnych — dzis: usuniecie komentarza. */
+  onConfirm: (state: ConfirmState) => void;
   /** Otwiera dziennik zawezony do tego zadania. */
   onHistory: (taskId: number) => void;
   onError: (m: string) => void;
@@ -4883,6 +5770,7 @@ function DetailPanel({
           ready={mine !== null || detailError}
           me={me}
           people={people}
+          onConfirm={onConfirm}
           onError={onError}
         />
       </div>
@@ -9195,6 +10083,7 @@ export default function App() {
               },
             })
           }
+          onConfirm={setConfirm}
           onError={toast}
         />
       )}

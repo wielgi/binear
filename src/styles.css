@@ -3770,8 +3770,160 @@ a.mention:hover {
   box-shadow: inset 0 1px 0 var(--border);
 }
 
+/*
+ * Watek czyta sie jak tabela: co druga wypowiedz ma tlo.
+ *
+ * Wczesniej byl to ciag akapitow oddzielonych samym odstepem — nie bylo widac,
+ * gdzie konczy sie jedna wypowiedz, a zaczyna druga. Tlo na KAZDYM komentarzu
+ * probowalismy wczesniej i przy kilkunastu wpisach robi sie z tego jednolita
+ * plama; naprzemienne daje granice, a mimo to zostawia watek lekkim.
+ *
+ * `nth-of-type`, nie `nth-child`: w sekcji komentarzy stoja tez inne elementy
+ * (naglowek, pole pisania), wiec liczenie wszystkich dzieci gubiloby rytm.
+ */
 .comment {
-  margin-bottom: var(--s4);
+  /* Odstep wyrazny — zebra sama nie wystarczala, zeby oddzielic wypowiedzi. */
+  margin-bottom: var(--s3);
+  padding: var(--s2);
+  border-radius: var(--s2);
+}
+
+.comment:nth-of-type(even) {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+
+/*
+ * Kreska „Nowe" — granica miedzy tym, co juz czytalem, a tym, co przyszlo potem.
+ *
+ * Linia ciagnie sie na CALA szerokosc, bo ma dzielic watek, a nie byc plakietka
+ * przy jednym komentarzu. Kolor akcentu, bo to jedyne miejsce w watku, ktore ma
+ * przyciagnac wzrok samo z siebie — reszta czeka, az sie ja przeczyta.
+ */
+.comment-new-mark {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s3) 0 var(--s2);
+  font-size: var(--t-micro);
+  font-weight: var(--w-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.comment-new-mark::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/*
+ * Pigulka „Odpowiedz" nad zaznaczonym fragmentem.
+ *
+ * `translate(-50%, …)` centruje ja na srodku zaznaczenia, a `-100%` minus odstep
+ * stawia NAD nim — pod spodem zaslanialaby wlasnie to, co sie zaznaczylo.
+ */
+.sel-reply {
+  position: fixed;
+  z-index: 80;
+  transform: translate(-50%, calc(-100% - 8px));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 4px var(--s2);
+  font-size: var(--t-mini);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+  background: var(--bg-panel);
+  border-radius: var(--s2);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sel-reply:hover {
+  background: var(--bg-active);
+}
+
+.sel-reply > svg {
+  flex: 0 0 13px;
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+
+/*
+ * Wklejone zrzuty czekajace na wyslanie — pasek miniatur pod polem komentarza.
+ * Miniatura, nie nazwa pliku: zrzut poznaje sie po tym, co na nim widac.
+ */
+.paste-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+
+.paste-item {
+  position: relative;
+  display: inline-flex;
+  border-radius: var(--s1);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.paste-item img {
+  display: block;
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+}
+
+/* Krzyzyk w rogu miniatury — wyrazny, bo stoi na dowolnym obrazku. */
+.paste-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.62);
+  border-radius: 50%;
+}
+
+.paste-x:hover {
+  background: rgb(0 0 0 / 0.82);
+}
+
+.paste-x > svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* „Pokaz starsze" — nad watkiem, cicho: to wejscie do archiwum, nie akcja dnia. */
+.comment-older {
+  display: block;
+  margin: 0 auto var(--s2);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+/* Krotkie podswietlenie po skoku z cytatu — inaczej nie wiadomo, gdzie sie wyladowalo. */
+.comment-flash {
+  animation: comment-flash 1.4s ease-out;
+  border-radius: var(--s1);
+}
+
+@keyframes comment-flash {
+  from {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  to {
+    background: transparent;
+  }
 }
 
 .comment-head {
@@ -3779,11 +3931,270 @@ a.mention:hover {
   align-items: center;
   gap: var(--s2);
   margin-bottom: var(--s1);
-  font-size: var(--t-mini);
+  font-size: var(--t-mini);}
+
+/* Data przy PRAWEJ krawedzi — nagłowek dostaje kolumne zamiast doklejac date do
+   nazwiska, przez co konczyl sie w innym miejscu przy kazdym komentarzu. */
+.comment-head .row-meta {
+  margin-left: auto;
+}
+
+/*
+ * Pasek „odpowiadasz na…" tuz nad polem komentarza — JEDNA LINIA.
+ *
+ * Panel szczegolow jest waski, wiec nazwisko lamalo sie na dwie linie i pasek
+ * robil sie dwupietrowym blokiem. Teraz nazwisko sie nie kurczy, a miejsce
+ * oddaje cytat i konczy wielokropkiem.
+ */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  min-width: 0;
+  margin-bottom: -1px;
+  padding: 3px var(--s2);
+  font-size: var(--t-micro);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--s1) var(--s1) 0 0;
+}
+
+.reply-bar > svg {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
+}
+
+.reply-bar-text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s1);
+  min-width: 0;
+}
+
+/* Cytat oddaje miejsce nazwisku i konczy sie wielokropkiem. */
+.reply-bar-quote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-muted);
+}
+
+.reply-bar-x {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--fg-muted);
+  border-radius: var(--s1);
+}
+
+.reply-bar-x:hover {
+  color: var(--fg);
+  background: var(--bg-hover, rgba(127, 127, 127, 0.13));
+}
+
+/*
+ * Odpowiedz i edycja — IKONY w prawym rogu naglowka.
+ *
+ * Jako napisy staly w jednej linii z autorem i data i czytaly sie jak dalszy
+ * ciag naglowka; do tego kazdy mial wlasny `margin-left: auto`, wiec wolne
+ * miejsce dzielilo sie na dwoje i data ladowala w polowie wiersza — czyli
+ * dokladnie to, po czym dostala wlasna kolumne.
+ *
+ * Szerokosc jest STALA, nie zalezna od liczby ikon: przy cudzym komentarzu nie
+ * ma czego edytowac, a data nie moze przez to skakac miedzy wypowiedziami.
+ *
+ * WIDOCZNE ZAWSZE i W TONIE DATY. Schowane do zera byly nie do odkrycia: nic
+ * nie zapowiadalo, ze komentarz ma jakiekolwiek dzialania, wiec trzeba bylo
+ * o nich wiedziec z gory. Przygaszenie kryciem tez nie wystarczylo — `--fg-dim`
+ * na 0,55 dawal kontrast 1,8:1, czyli najslabszy element w panelu i ponizej
+ * progu 3:1, od ktorego element sterujacy w ogole sie zauwaza.
+ *
+ * Stad `--fg-muted`, czyli 5,8:1 — o stopien wyzej niz data obok (3,4:1). Ikona
+ * ma sie czytac jako PRZYCISK, a nie jako dalszy ciag metryczki, wiec nie moze
+ * byc cichsza od niej ani jej rowna. Wciaz daleko od tresci (18:1), wiec wzrok
+ * nadal idzie do slow. Wskazanie komentarza, a potem samego przycisku, dociaga
+ * ikone dwoma stopniami do pelnej jasnosci.
+ */
+.comment-tools {
+  display: flex;
+  /* Trzy ikony po 22 px i dwie przerwy po 2 — szerokosc STALA, zeby data stala
+     w tej samej kolumnie takze przy cudzym komentarzu, gdzie ikona jest jedna. */
+  flex: 0 0 70px;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+/* Opakowanie dymka (`HoverNote`) samo staje sie elementem flexa — bez tego
+   liczyloby sie jak tekst i ikona siadalaby na linii bazowej. */
+.comment-tool {
+  display: inline-flex;
+}
+
+.comment-tools button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--fg-muted);
+  border-radius: var(--s1);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.comment:hover .comment-tools button {
+  color: var(--fg-secondary);
+}
+
+.comment-tools button:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+/* Kosz czerwienieje dopiero pod kursorem — w spoczynku jest jedna z trzech ikon
+   i nie ma powodu, zeby krzyczal przy kazdej wlasnej wypowiedzi. */
+.comment-tools .comment-tool-danger:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.comment-tools svg {
+  width: 13px;
+  height: 13px;
+}
+
+/*
+ * Cytowany komentarz — pasek przyklejony do GORNEJ KRAWEDZI karty, w jednej
+ * linii, jak odpowiedzi w Discordzie i Telegramie. Cytat ma WSKAZAC, o czym
+ * mowa; kto chce przeczytac calosc, klika i lada na oryginale.
+ *
+ * Ujemne marginesy wyciagaja go na krawedzie karty — dzieki temu czyta sie jak
+ * naglowek TEJ wypowiedzi, a nie jak osobny element miedzy komentarzami.
+ */
+.comment-quote {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  width: calc(100% + 2 * var(--s2));
+  min-width: 0;
+  margin: calc(-1 * var(--s2)) calc(-1 * var(--s2)) var(--s2);
+  padding: var(--s1) var(--s2);
+  font: inherit;
+  font-size: var(--t-small);
+  color: var(--fg-secondary);
+  text-align: left;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 0;
+  border-radius: var(--s2) var(--s2) 0 0;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.comment-quote:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.comment-quote:hover .comment-quote-body {
+  color: var(--fg-secondary);
+}
+
+/*
+ * Strzalka w kolorze akcentu — to ona mowi „to jest odpowiedz", zanim ktos
+ * przeczyta nazwisko.
+ *
+ * BEZ przesuniecia w pionie: stala tu `translateY(-1px)` z czasow, gdy pasek byl
+ * samym tekstem i strzalka miala trafic w srodek liter. Odkad obok stoi okragly
+ * awatar, ten jeden piksel widac — kolo wyznacza os, ktorej strzalka nie trzyma.
+ */
+.comment-quote > svg {
+  flex: 0 0 11px;
+  width: 11px;
+  height: 11px;
+  color: var(--accent);
+}
+
+.comment-quote > strong {
+  flex: 0 0 auto;
+  color: var(--fg);
+  font-weight: var(--w-medium);
+}
+
+/* Awatar cytowanej osoby: mniejszy niz w naglowku, bo pasek ma zostac jedna
+   linia — nie moze urosnac do wysokosci zwyklego awatara. */
+.comment-quote .avatar {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+}
+
+/* Sam cytat oddaje miejsce nazwisku i konczy sie wielokropkiem. */
+.comment-quote-body {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .comment-body {
   padding-left: 28px;
+}
+
+/* Pole edycji stoi DOKLADNIE tam, gdzie stala tresc — to samo wciecie pod
+   awatarem, zeby komentarz nie przeskakiwal w bok przy wejsciu w poprawke. */
+.comment-edit {
+  padding-left: 28px;
+}
+
+.comment-edit .comment-input {
+  margin-top: 0;
+  /* Krocej niz pole nowego komentarza: poprawia sie zwykle jedno zdanie, a nie
+     pisze od zera. Rosnie recznie, uchwytem. */
+  min-height: 60px;
+}
+
+/*
+ * Stopka pola: podpowiedz WPROST POD POLEM, przyciski pod nia.
+ *
+ * Probowalem jednej linii — panel szczegolow jest waski i nie miesci sie tam ani
+ * podpowiedz, ani dwa przyciski naraz: napis sie ucinal, a „Wstaw czas pracy"
+ * lamalo sie na dwa wiersze. Skroty naleza zreszta do POLA, nie do przyciskow,
+ * wiec stoja przy nim.
+ */
+.comment-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin-top: var(--s2);
+}
+
+/* W watku ciasniej — pole edycji stoi miedzy cudzymi wypowiedziami. */
+.comment-edit .comment-foot {
+  margin-top: var(--s1);
+}
+
+/*
+ * Skroty czytelne dopiero wtedy, gdy sie ich szuka — nie konkuruja z trescia.
+ * ZAWIJAJA sie zamiast konczyc wielokropkiem: maja wlasny wiersz, a ucieta
+ * podpowiedz nie jest podpowiedzia.
+ */
+.comment-hint {
+  min-width: 0;
+  font-size: var(--t-micro);
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+.comment-foot .comment-actions {
+  margin-top: 0;
 }
 
 .comment-body p {

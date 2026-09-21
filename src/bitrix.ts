@@ -1356,10 +1356,12 @@ async function fetchPhotos(ids: number[]): Promise<Map<number, string | null>> {
  */
 const CHAT_LIMIT = 100;
 
-async function fetchChatComments(chatId: number): Promise<Comment[]> {
+async function fetchChatComments(chatId: number, beforeId?: number): Promise<Comment[]> {
   const res = await call<any>('im.dialog.messages.get', {
     DIALOG_ID: `chat${chatId}`,
     LIMIT: CHAT_LIMIT,
+    /* `LAST_ID` stronicuje WSTECZ — oddaje wiadomosci starsze od podanej. */
+    ...(beforeId ? { LAST_ID: beforeId } : {}),
   });
 
   /*
@@ -1461,11 +1463,153 @@ export async function fetchComments(taskId: number, chatId: number | null): Prom
   return [...forum, ...chat].sort((a, b) => stamp(a.date) - stamp(b.date));
 }
 
+/**
+ * STARSZA porcja watku — do przycisku „Pokaz starsze".
+ *
+ * Pierwsze pobranie bierze `CHAT_LIMIT` ostatnich wiadomosci; przy dlugiej
+ * dyskusji poczatek po prostu nie istnial w panelu i nie bylo tego nawet widac.
+ * Pusta odpowiedz znaczy „to juz caly watek" — wolajacy chowa wtedy przycisk.
+ *
+ * Tylko czat: forum oddaje swoje komentarze w calosci za pierwszym razem.
+ */
+export async function fetchOlderComments(chatId: number, beforeId: number): Promise<Comment[]> {
+  const starsze = await fetchChatComments(chatId, beforeId);
+  return starsze.sort((a, b) => stamp(a.date) - stamp(b.date));
+}
+
 export async function addComment(taskId: number, text: string, authorId: number): Promise<void> {
   await call('task.commentitem.add', {
     TASKID: taskId,
     FIELDS: { POST_MESSAGE: text, AUTHOR_ID: authorId },
   });
+}
+
+/** Zalacznik gotowy do wyslania: nazwa i bajty juz zakodowane base64. */
+export interface Upload {
+  name: string;
+  base64: string;
+}
+
+/**
+ * Komentarz Z ZALACZNIKAMI — wklejony zrzut ekranu i tym podobne.
+ *
+ * `task.commentitem.add` nie umie doczepic pliku, wiec idziemy droga czatu, ta
+ * sama, ktora uzywa sam Bitrix:
+ *
+ *  1. `im.disk.folder.get` — kazdy czat ma wlasny folder na Dysku,
+ *  2. `disk.folder.uploadfile` — wgranie bajtow (base64) do tego folderu,
+ *  3. `im.disk.file.commit` — dopiero to ZAMIENIA wgrane pliki w wiadomosc,
+ *     razem z trescia komentarza. `UPLOAD_ID` przyjmuje tablice, wiec kilka
+ *     zrzutow idzie jako JEDEN komentarz, a nie seria osobnych.
+ *
+ * Powstaly komentarz binear czyta bez zadnych zmian: `fetchChatComments` bierze
+ * numery z `params.FILE_ID` i dane ze wspolnego worka `files`.
+ */
+export async function addCommentWithFiles(
+  taskId: number,
+  chatId: number,
+  text: string,
+  pliki: Upload[],
+): Promise<void> {
+  const folder = await call<any>('im.disk.folder.get', { CHAT_ID: chatId });
+  const folderId = Number(folder?.ID);
+  if (!Number.isFinite(folderId) || folderId <= 0) {
+    throw new BxError('Nie udało się ustalić folderu czatu dla załączników');
+  }
+
+  /*
+   * NAZWA MUSI BYC UNIKALNA W FOLDERZE. Dysk odmawia duplikatu — `DISK_OBJ_22000`
+   * („Plik o takiej nazwie juz istnieje"), a nie dokleja licznika sam. Firefox
+   * przy wklejaniu zrzutu nadaje plikowi ZAWSZE te sama nazwe, wiec pierwszy
+   * zrzut w zadaniu przechodzil, a kazdy nastepny sie odbijal.
+   *
+   * Doklejamy znacznik czasu w base36 przed rozszerzeniem: nazwa zostaje
+   * czytelna, a kolizja wymagalaby dwoch wgran w tej samej milisekundzie.
+   */
+  const unikalna = (nazwa: string, i: number) => {
+    const kropka = nazwa.lastIndexOf('.');
+    const rdzen = kropka > 0 ? nazwa.slice(0, kropka) : nazwa;
+    const ext = kropka > 0 ? nazwa.slice(kropka) : '';
+    return `${rdzen}-${(Date.now() + i).toString(36)}${ext}`;
+  };
+
+  /* Po kolei, nie rownolegle: przepustnica i tak przepuszcza dwa zapytania na
+     sekunde, a szereg latwiej opisac, gdy ktores wgranie padnie. */
+  const ids: number[] = [];
+  for (const [i, p] of pliki.entries()) {
+    const res = await call<any>('disk.folder.uploadfile', {
+      id: folderId,
+      data: { NAME: unikalna(p.name, i) },
+      fileContent: p.base64,
+    });
+    const id = Number(res?.ID);
+    if (id) ids.push(id);
+  }
+  if (!ids.length) throw new BxError('Żaden załącznik nie został wgrany');
+
+  await call('im.disk.file.commit', { CHAT_ID: chatId, UPLOAD_ID: ids, MESSAGE: text, taskId });
+}
+
+/**
+ * Zmiana tresci komentarza.
+ *
+ * Dwa zrodla = dwie metody, dokladnie jak przy czytaniu (patrz `fetchComments`):
+ * komentarz z forum ma wlasna metode zadaniowa, a komentarz z czatu jest wiadomoscia.
+ *
+ * DLA CZATU IDZIEMY PRZEZ `im.v2.*`, NIE PRZEZ `im.message.update`.
+ *
+ * Stare `im.message.update` ma OKNO CZASOWE — po jego uplywie oddaje
+ * `CANT_EDIT_MESSAGE` („Time has expired for modification or you don't have
+ * access"), a dlugosci okna nie da sie odczytac: dokumentacja mowi tylko, ze
+ * ustawia ja portal, i nie ma jej w polach wiadomosci. Zmierzone: 15 minut
+ * przechodzi, 7 i 10 dni juz nie.
+ *
+ * `im.v2.Chat.Message.update` tego limitu NIE MA i nie stawia znacznika
+ * „zmieniono" — czyli zachowuje sie dokladnie tak, jak edycja komentarza we
+ * wlasnym interfejsie Bitriksa. Sprawdzone na komentarzu sprzed 10 dni: w tej
+ * samej sekundzie stara metoda odmawiala, a ta zapisala tresc i pozwolila ja
+ * przywrocic co do znaku. Metody nie ma ani w `methods`, ani w dokumentacji.
+ *
+ * `taskId` nie jest jej parametrem — jedzie tylko po to, zeby wpis w dzienniku
+ * wiedzial, ktorego zadania dotyczy (patrz `taskIdOf`). Sprawdzone, ze nadmiarowy
+ * klucz jej nie przeszkadza.
+ */
+export async function editComment(
+  comment: { id: number; source: 'forum' | 'chat' },
+  taskId: number,
+  text: string,
+): Promise<void> {
+  if (comment.source === 'forum') {
+    await call('task.commentitem.update', {
+      TASKID: taskId,
+      ITEMID: comment.id,
+      FIELDS: { POST_MESSAGE: text },
+    });
+    return;
+  }
+  await call('im.v2.Chat.Message.update', {
+    messageId: comment.id,
+    fields: { message: text },
+    taskId,
+  });
+}
+
+/**
+ * Usuniecie komentarza. Nieodwracalne — wywolujacy MUSI wczesniej zapytac.
+ *
+ * Ta sama para zrodel co przy edycji. Wersja czatowa bierze TABLICE numerow
+ * (`messageIds`), bo pod spodem stoi kolekcja wiadomosci; pojedynczy `messageId`
+ * odbija sie od konstruktora. Dla nas to zawsze jedna pozycja.
+ */
+export async function deleteComment(
+  comment: { id: number; source: 'forum' | 'chat' },
+  taskId: number,
+): Promise<void> {
+  if (comment.source === 'forum') {
+    await call('task.commentitem.delete', { TASKID: taskId, ITEMID: comment.id });
+    return;
+  }
+  await call('im.v2.Chat.Message.delete', { messageIds: [comment.id], taskId });
 }
 
 // ─── Historia / czas w toku ──────────────────────────────────────────────────

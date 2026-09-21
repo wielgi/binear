@@ -489,6 +489,16 @@ export function CalendarIcon() {
   );
 }
 
+/** Strzalka odpowiedzi — zawijajaca w lewo, jak w poczcie. */
+export function ReplyIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <path d="M6.5 4.5 3 8l3.5 3.5" />
+      <path d="M3 8h5.5a4 4 0 0 1 4 4v1.5" />
+    </svg>
+  );
+}
+
 /** Tag — etykieta z dziurka. */
 export function TagIcon() {
   return (

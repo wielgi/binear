@@ -41,6 +41,26 @@ const ALLOWED = new Set([
    */
   'tasks.api.scrum.kanban.addTask',
   'task.commentitem.add',
+  /*
+   * Zmiana tresci komentarza. Dwie metody, bo komentarze leza w dwoch miejscach
+   * i kazde ma swoje (patrz `editComment` w src/bitrix.ts): forum zmienia sie
+   * metoda zadaniowa, czat — metoda od wiadomosci.
+   *
+   * Dla czatu WERSJA v2, a nie `im.message.update`: ta druga ma okno czasowe
+   * i po nim odmawia (`CANT_EDIT_MESSAGE`). Szczegoly przy `editComment`.
+   */
+  'task.commentitem.update',
+  'im.v2.Chat.Message.update',
+  /* Usuniecie komentarza — nieodwracalne, w UI zawsze za potwierdzeniem. */
+  'task.commentitem.delete',
+  'im.v2.Chat.Message.delete',
+  /*
+   * Zalacznik komentarza (wklejony zrzut ekranu). Trzy kroki, bo Bitrix nie ma
+   * na to jednego wywolania — patrz `addCommentWithFiles` w src/bitrix.ts.
+   */
+  'im.disk.folder.get',
+  'disk.folder.uploadfile',
+  'im.disk.file.commit',
   'task.checklistitem.complete', // odhaczenie pozycji checklisty
   'task.checklistitem.renew', // cofniecie odhaczenia
   'tasks.task.delete', // usuniecie zadania — nieodwracalne, w UI zawsze za potwierdzeniem
