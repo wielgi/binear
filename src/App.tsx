@@ -80,6 +80,7 @@ import {
   setCachedDetail,
   setDraft as storeDraft,
 } from './detailCache';
+import { wczytajListe, zapiszListe, type ListSnapshot } from './listCache';
 import { wczytajWklejone, wyczyscWklejone, zapiszWklejone } from './pasteStore';
 import { renderDescription, setPortalBase } from './markdown';
 import { buildQuote, plainText, splitQuote } from './quote';
@@ -779,6 +780,33 @@ interface Data {
   groupId: number | null;
 }
 
+/**
+ * Migawka z IndexedDB → stan widoku. Mapy odtwarzamy z par (patrz `listCache`).
+ * Brak migawki daje pusty stan, czyli to samo, co bylo wczesniej zawsze.
+ */
+function zData(s: ListSnapshot | null): Data {
+  if (!s) return EMPTY;
+  return {
+    ...EMPTY,
+    ...s,
+    stageNames: new Map(s.stageNames),
+    stageOrder: new Map(s.stageOrder),
+    stageMeta: new Map(s.stageMeta),
+    epicNames: new Map(s.epicNames),
+  };
+}
+
+/** Odwrotnie: stan widoku → migawka do zapisania. Jedno miejsce, wiec pola nie rozjada sie z `Data`. */
+function zeStanu(d: Data): ListSnapshot {
+  return {
+    ...d,
+    stageNames: [...d.stageNames],
+    stageOrder: [...d.stageOrder],
+    stageMeta: [...d.stageMeta],
+    epicNames: [...d.epicNames],
+  };
+}
+
 const EMPTY: Data = {
   tasks: [],
   stages: [],
@@ -905,7 +933,46 @@ function applyPins(tasks: Task[], pins: Map<number, Pin>): Task[] {
 }
 
 function useBitrixData() {
+  /* Pusty start; ostatnio widziana lista dochodzi z migawki w efekcie nizej. */
   const [data, setData] = useState<Data>(EMPTY);
+
+  /**
+   * Czy doszlo juz PRAWDZIWE pobranie. Dopoki nie, na ekranie stoi migawka.
+   *
+   * To nie to samo co „lista jest niepusta": projekt bez zadan konczy pobranie
+   * z pusta lista, a spozniona migawka nadpisalaby wtedy poprawny wynik cudza
+   * zawartoscia. Tak samo przy przelaczeniu projektu, ktore czysci stan do pustego.
+   */
+  const pobrano = useRef(false);
+
+  /*
+   * Ostatnio widziana lista — pokazujemy ja OD RAZU, a swieze dane podmieniaja ja
+   * chwile pozniej (patrz `load`). Ten sam wzorzec, ktorym dzialaja juz szczegoly
+   * zadania i komentarze.
+   *
+   * Bez tego kazde przeladowanie strony — takze to, ktorego nikt nie wywolal: po
+   * zerwaniu polaczenia z serwerem deweloperskim albo po uspieniu karty przez
+   * przegladarke — wygladalo jak zniknieciecie calego widoku (zgloszenie #4).
+   */
+  useEffect(() => {
+    const wybrany = loadProject();
+    void wczytajListe(wybrany).then((s) => {
+      if (!s || pobrano.current) return;
+      /* Migawka INNEGO projektu niz wybrany to nie „lepsze niz nic", tylko cudza
+         lista pod nowa nazwa — patrz `groupId` w zwracanym obiekcie. */
+      if (wybrany !== null && s.groupId !== wybrany) return;
+      /*
+       * Konfiguracja niesie skutki uboczne, ktore `load` wykonuje osobno: konto
+       * „Nieprzypisane" i baze adresow dla wzmianek. Bez nich lista z migawki
+       * grupowalaby zaslepke jako zwykla osobe, a wzmianki linkowaly w prozne.
+       */
+      if (s.config) {
+        setUnassignedId(s.config.unassignedId);
+        setPortalBase(s.config.portal);
+      }
+      setData((d) => (d.tasks.length ? d : zData(s)));
+    });
+  }, []);
   /** Wybor uzytkownika; null = "ten z .env". Zmiana pociaga za soba pelne przeladowanie. */
   const [project, setProject] = useState<number | null>(loadProject);
   const [loading, setLoading] = useState(true);
@@ -1182,6 +1249,32 @@ function useBitrixData() {
         };
       });
 
+      /* Od tej chwili na ekranie sa PRAWDZIWE dane — spozniona migawka ma odpasc. */
+      pobrano.current = true;
+
+      /*
+       * Migawka na nastepny start. Zapisujemy TO, CO WLASNIE PRZYSZLO, a nie stan
+       * ze `setData` — ten jest asynchroniczny, wiec odczytany tu byl jeszcze
+       * poprzedni. Story pointy dochodza osobno i dopisuja sie nizej, w callbacku
+       * `fetchScrumMeta`.
+       */
+      void zapiszListe(groupId, {
+        tasks,
+        stages,
+        stageNames: stages.map((s) => [s.id, s.name]),
+        stageOrder: [...stageOrder],
+        stageMeta: [...stageMeta],
+        labels,
+        activeSprint,
+        sprints: allSprints,
+        backlogId,
+        config,
+        projects,
+        epics,
+        epicNames: epics.map((e) => [e.id, e]),
+        groupId,
+      });
+
       /*
        * Scrumowe pola (story pointy + epik) dociagamy PO pierwszym renderze: to jedno
        * wywolanie na zadanie (~20 batchy dla ~1000 zadan), wiec blokowanie nimi startu
@@ -1189,20 +1282,29 @@ function useBitrixData() {
        * partiami i sa scalane po id; straznik `groupId` odrzuca je po przelaczeniu projektu.
        */
       void fetchScrumMeta(ids, (meta) => {
-        setData((d) =>
-          d.groupId === groupId
-            ? {
-                ...d,
-                tasks: applyPins(
-                  d.tasks.map((t) => {
-                    const m = meta.get(t.id);
-                    return m ? { ...t, storyPoints: m.storyPoints, epicId: m.epicId } : t;
-                  }),
-                  pinsRef.current,
-                ),
-              }
-            : d,
-        );
+        setData((d) => {
+          if (d.groupId !== groupId) return d;
+          const zPolami = {
+            ...d,
+            tasks: applyPins(
+              d.tasks.map((t) => {
+                const m = meta.get(t.id);
+                return m ? { ...t, storyPoints: m.storyPoints, epicId: m.epicId } : t;
+              }),
+              pinsRef.current,
+            ),
+          };
+          /*
+           * Migawka DOPISYWANA tutaj, a nie tylko wyzej. Story pointy i epiki
+           * dochodza po pierwszym renderze, wiec zapisane wczesniej `tasks` nigdy
+           * by ich nie mialy — a widok pogrupowany po epiku pokazywalby po
+           * przeladowaniu wszystko w kubelku „Bez epika" i bez plakietek SP,
+           * zeby po chwili przebudowac sie w prawdziwe grupy. Czyli migotanie
+           * przesuniete, a nie usuniete.
+           */
+          void zapiszListe(groupId, zeStanu(zPolami));
+          return zPolami;
+        });
       }).catch(() => {
         /* Brak story pointow nie moze wywalic widoku — zostaja po prostu puste. */
       });
@@ -1328,6 +1430,25 @@ function useBitrixData() {
     async (id: number, patch: Partial<Task>, run: () => Promise<unknown>, what: string) => {
       const before = tasksRef.current.find((t) => t.id === id);
       if (!before) return;
+
+      /*
+       * NIE PRZENOSIMY zadan, dopoki na ekranie stoi migawka.
+       *
+       * Etapy maja identyfikatory WLASNE DLA SPRINTU (patrz `stageOrder`), wiec
+       * migawka zapisana w poprzednim sprincie rysuje kolumny o numerach, ktore
+       * juz nie istnieja albo naleza do zamknietego sprintu. Przeciagniecie karty
+       * w tej jednej sekundzie przed nadejsciem swiezych danych wyslaloby zadanie
+       * na martwy etap — w najlepszym razie blad i cofniecie, w gorszym zadanie
+       * ladujace w zamknietym sprincie.
+       *
+       * Blokujemy WYLACZNIE ruchy (etap, sprint). Zmiana statusu, osoby czy
+       * priorytetu nie zalezy od identyfikatorow z migawki, wiec nie ma powodu
+       * jej wstrzymywac.
+       */
+      if (!pobrano.current && ('stageId' in patch || 'sprintId' in patch)) {
+        toast('Poczekaj chwilę — lista jeszcze się wczytuje, kolumny mogą być z poprzedniego sprintu.');
+        return;
+      }
 
       const rollback = Object.fromEntries(
         Object.keys(patch).map((k) => [k, before[k as keyof Task]]),
