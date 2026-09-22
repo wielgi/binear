@@ -174,6 +174,56 @@ async function call<T>(method: string, params: Record<string, unknown> = {}): Pr
   }
 }
 
+/**
+ * Czy dana metoda jest dla TEGO webhooka osiagalna — bez wykonywania jej skutku.
+ *
+ * Sztuczka: wolamy ja BEZ WYMAGANYCH PARAMETROW. Bitrix odpowiada wtedy bledem
+ * o brakujacym parametrze, co znaczy „metoda jest, zakres jest, uprawnienia sa" —
+ * a zaden zapis sie nie wykonuje, bo nie ma na czym. Dzieki temu tak samo
+ * bezpiecznie sprawdzamy odczyty i ZAPISY (usuniecie zadania, edycje komentarza).
+ *
+ * Rozrozniamy sciany, bo kazda prowadzi do innej rozmowy z administratorem:
+ *  - `brak`   — metody nie ma w tej WERSJI portalu; pomoze tylko aktualizacja,
+ *  - `zakres` — token webhooka nie ma uprawnienia do modulu (`insufficient_scope`),
+ *  - `dostep` — modul jest, ale KONTO nie ma praw (`ACCESS_ERROR`),
+ *  - `ok`     — przeszlo albo odbilo sie o brakujacy parametr.
+ */
+export type ProbeStan = 'ok' | 'brak' | 'zakres' | 'dostep' | 'blad';
+
+export async function probeMethod(
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<{ stan: ProbeStan; opis: string; wynik?: unknown }> {
+  try {
+    const res = await post(method, params);
+    return { stan: 'ok', opis: 'działa', wynik: res?.result };
+  } catch (e) {
+    const kod = e instanceof BxError ? e.message : String(e);
+    const opis = (e instanceof BxError && e.description) || kod;
+    if (kod === 'ERROR_METHOD_NOT_FOUND') return { stan: 'brak', opis: 'nie ma jej w tej wersji portalu' };
+    if (kod === 'insufficient_scope') return { stan: 'zakres', opis: 'webhook nie ma zakresu tego modułu' };
+    /*
+     * Brak uprawnien bywa zglaszany kodem ALBO samym opisem — np. „User does not
+     * have access to managing other users work time" przychodzi pod ogolnym
+     * kodem. Patrzymy na oba, bo od tego zalezy KOLOR: pomaranczowy „do zalatwienia
+     * u administratora", a nie czerwony „cos jest zepsute".
+     */
+    if (kod === 'ACCESS_ERROR' || /access|denied|permission/i.test(`${kod} ${opis}`)) {
+      return { stan: 'dostep', opis: String(opis).slice(0, 90) };
+    }
+    /* „Kontroler jest, ale nie ta akcja" — z naszego punktu widzenia to brak metody. */
+    if (kod === '22002') return { stan: 'brak', opis: 'kontroler jest, ale nie ta akcja' };
+    /*
+     * Blad o PARAMETRACH to dobra wiadomosc: metoda odpowiedziala, czyli jest
+     * osiagalna — a my nie podalismy nic, wiec nic sie nie wykonalo.
+     */
+    if (/^\d+$/.test(kod) || /ERROR_ARGUMENT|EMPTY|WRONG|REQUIRED|_ERROR$/i.test(kod)) {
+      return { stan: 'ok', opis: 'osiągalna (odbiła się o brak parametrów)' };
+    }
+    return { stan: 'blad', opis: String(opis).slice(0, 90) };
+  }
+}
+
 /** Serializacja do query stringa w formacie Bitriksa: `filter[GROUP_ID]=451&select[0]=ID`. */
 function toQuery(value: unknown, prefix = '', out: string[] = []): string[] {
   if (value === null || value === undefined) return out;

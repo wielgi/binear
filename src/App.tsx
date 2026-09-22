@@ -19,6 +19,8 @@ import {
   FALLBACK_STATUS,
   addComment,
   addCommentWithFiles,
+  probeMethod,
+  type ProbeStan,
   deleteComment,
   editComment,
   fetchComments,
@@ -80,6 +82,7 @@ import {
   setCachedDetail,
   setDraft as storeDraft,
 } from './detailCache';
+import { POZYCJE, SPRAWDZENIA, type Kontekst } from './perms';
 import { wczytajListe, zapiszListe, type ListSnapshot } from './listCache';
 import { wczytajWklejone, wyczyscWklejone, zapiszWklejone } from './pasteStore';
 import { renderDescription, setPortalBase } from './markdown';
@@ -6216,6 +6219,7 @@ function ViewMenu({
 
   // Panel „Kolumny/Grupy" wyskakuje jako OSOBNY panel obok (panel w panelu), nie sekcja.
   const [colsOpen, setColsOpen] = useState(false);
+  const [permsOpen, setPermsOpen] = useState(false);
   // Nazwa mowi, po co ten panel jest: trzymac PUSTE kategorie widoczne mimo braku zadan.
   const colTitle = boardMode
     ? 'Puste kolumny'
@@ -6413,7 +6417,20 @@ function ViewMenu({
           <kbd>{MOD}</kbd>
           <kbd>K</kbd>
         </button>
+        {/* Co ten webhook potrafi — przydatne po podmianie tokenu na inny portal. */}
+        <button
+          className={`menu-item${permsOpen ? ' menu-item-on' : ''}`}
+          onClick={() => setPermsOpen((o) => !o)}
+        >
+          <span className="menu-check" />
+          <span className="menu-label">Uprawnienia webhooka</span>
+          <span className="menu-flyarrow">
+            <ChevronIcon open={permsOpen} />
+          </span>
+        </button>
       </div>
+
+      {permsOpen && <PermsFlyout left={flyLeft} top={top} width={flyW} />}
 
       {/* Panel w panelu — osobny, obok menu widoku; checkbox na kazda kolumne/grupe. */}
       {colsOpen && columns.length > 0 && (
@@ -6447,6 +6464,106 @@ function ViewMenu({
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * „Uprawnienia webhooka" — co ten token potrafi, a czego nie.
+ *
+ * Binear da sie uruchomic na dowolnym webhooku i wtedy pierwsze pytanie brzmi
+ * „czego mu brakuje". Dotad odpowiedz wymagala recznego strzelania do kilkunastu
+ * metod i czytania kodow bledu; tu wystarczy jedno klikniecie.
+ *
+ * Sondy ida BEZ PARAMETROW, wiec niczego nie zapisuja — nawet te przy metodach
+ * kasujacych. Patrz `probeMethod`.
+ */
+function PermsFlyout({ left, top, width }: { left: number; top: number; width: number }) {
+  /* Klucz to POZYCJA na liscie, nie nazwa metody: `timeman.status` wystepuje
+     trzy razy, za kazdym razem z innym pytaniem. */
+  const [wyniki, setWyniki] = useState<Record<number, { stan: ProbeStan; opis: string }>>({});
+  const [trwa, setTrwa] = useState(false);
+
+  const sprawdz = async () => {
+    if (trwa) return;
+    setTrwa(true);
+    setWyniki({});
+
+    /*
+     * Kontekst: kim jestem i kto JESZCZE istnieje. Bez drugiej osoby nie da sie
+     * zapytac „czy widze cudze dane", a to jedno z dwoch pytan, po ktore sie tu
+     * przychodzi. Data sprzed tygodnia sluzy drugiemu — „czy widze wstecz".
+     */
+    const cfg = await fetch('/api/config').then((r) => r.json()).catch(() => null);
+    const ja = Number(cfg?.userId) || null;
+    const tydzienTemu = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    let ktosInny: number | null = null;
+    try {
+      const lista = (await probeMethod('user.get')).wynik as { ID?: string }[] | undefined;
+      ktosInny = lista?.map((u) => Number(u?.ID)).find((id) => id && id !== ja) ?? null;
+    } catch {
+      /* Bez drugiej osoby te jedna sonde po prostu pominiemy. */
+    }
+    const kontekst: Kontekst = { ja, ktosInny, dawno: tydzienTemu };
+
+    /* Po kolei, nie rownolegle: kilkanascie metod naraz wchodzi prosto w limit
+       zapytan portalu, a tu nie zalezy nam na czasie, tylko na wyniku. */
+    for (const [i, p] of POZYCJE.entries()) {
+      const params = p.params?.(kontekst);
+      if (p.params && !params) {
+        setWyniki((w) => ({ ...w, [i]: { stan: 'blad', opis: 'brak danych do sprawdzenia' } }));
+        continue;
+      }
+      /*
+       * Limit czasu na sonde. Bez niego jedno zapytanie, ktore wpadlo w limit
+       * portalu, ponawia sie po cichu nawet pol godziny — a panel wyglada wtedy
+       * na zawieszony. Lepiej powiedziec „nie zdazylo" i isc dalej.
+       */
+      const r = await Promise.race([
+        probeMethod(p.method, params ?? {}),
+        new Promise<{ stan: ProbeStan; opis: string }>((res) =>
+          setTimeout(() => res({ stan: 'blad', opis: 'brak odpowiedzi — limit zapytań portalu?' }), 12000),
+        ),
+      ]);
+      const ocena = p.ocena && r.stan === 'ok' ? p.ocena((r as { wynik?: unknown }).wynik, kontekst) : r;
+      setWyniki((w) => ({ ...w, [i]: ocena }));
+    }
+    setTrwa(false);
+  };
+
+  const zrobione = Object.keys(wyniki).length;
+
+  return (
+    <div className="menu perms-flyout" style={{ left, top, width: width + 120 }}>
+      <div className="ds-colhead">Uprawnienia webhooka</div>
+      <div className="ds-colhint">
+        Sprawdza, co ten token potrafi. Nic nie zapisuje — metody są wołane bez parametrów.
+      </div>
+      <button className="btn perms-run" disabled={trwa} onClick={() => void sprawdz()}>
+        {trwa ? `Sprawdzanie… ${zrobione}/${POZYCJE.length}` : 'Sprawdź'}
+      </button>
+
+      <div className="perms-list">
+        {SPRAWDZENIA.map((g) => (
+          <Fragment key={g.nazwa}>
+            <div className="perms-group">{g.nazwa}</div>
+            {g.pozycje.map((p) => {
+              const r = wyniki[POZYCJE.indexOf(p)];
+              return (
+                <div key={`${g.nazwa}:${p.po_co}`} className={`perms-row${r ? ` perms-${r.stan}` : ''}`}>
+                  <span className="perms-dot" />
+                  <span className="perms-what">
+                    {p.po_co}
+                    {p.wymagane && <span className="perms-req" title="Bez tego binear nie ruszy">wymagane</span>}
+                    <span className="perms-method">{p.method}</span>
+                  </span>
+                  <span className="perms-verdict">{r ? r.opis : '—'}</span>
+                </div>
+              );
+            })}
+          </Fragment>
+        ))}
+      </div>
+    </div>
   );
 }
 

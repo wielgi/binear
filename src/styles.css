@@ -1003,6 +1003,96 @@ kbd {
   background: var(--bg-active);
 }
 
+/*
+ * Panel „Uprawnienia webhooka". Szerszy od pozostalych paneli obok menu, bo
+ * kazdy wiersz niesie trzy rzeczy naraz: co przestanie dzialac, nazwe metody
+ * i werdykt. Ciasniej robil z tego trzy piętra na pozycje.
+ */
+.perms-flyout {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.perms-run {
+  width: calc(100% - 2 * var(--s2));
+  margin: var(--s1) var(--s2) var(--s2);
+}
+
+.perms-group {
+  padding: var(--s2) var(--s2) 2px;
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+
+.perms-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: 3px var(--s2);
+  font-size: var(--t-mini);
+}
+
+/* Kropka niesie werdykt kolorem — zanim ktokolwiek przeczyta opis po prawej. */
+.perms-dot {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.perms-ok .perms-dot {
+  background: hsl(145 52% 45%);
+}
+
+/* Trzy odcienie odmowy, bo prowadza do TRZECH ROZNYCH rozmow: zakres zmienia
+   sie w ustawieniach webhooka, dostep w prawach konta, a braku metody nie da
+   sie naprawic inaczej niz aktualizacja portalu. */
+.perms-zakres .perms-dot,
+.perms-dostep .perms-dot {
+  background: var(--accent-orange);
+}
+
+.perms-brak .perms-dot,
+.perms-blad .perms-dot {
+  background: var(--danger);
+}
+
+.perms-what {
+  flex: 1;
+  min-width: 0;
+}
+
+.perms-method {
+  display: block;
+  font-family: var(--mono, monospace);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  overflow-wrap: anywhere;
+}
+
+/* „wymagane" przy pozycji, bez ktorej binear nie wystartuje — odrozniamy to od
+   funkcji, ktorej po prostu nie bedzie. */
+.perms-req {
+  margin-left: var(--s1);
+  padding: 0 4px;
+  font-size: var(--t-micro);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--s1);
+}
+
+.perms-verdict {
+  flex: 0 0 34%;
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+  text-align: right;
+}
+
 /* Panel „Kolumny" w menu widoku — naglowek + lista przelacznikow kolumn tablicy. */
 .ds-colhead {
   padding: var(--s1) var(--s2) 2px;

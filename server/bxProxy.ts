@@ -64,6 +64,20 @@ const ALLOWED = new Set([
   'task.checklistitem.complete', // odhaczenie pozycji checklisty
   'task.checklistitem.renew', // cofniecie odhaczenia
   'tasks.task.delete', // usuniecie zadania — nieodwracalne, w UI zawsze za potwierdzeniem
+  /*
+   * SONDY do panelu „Uprawnienia" (patrz src/perms.ts). Wolane BEZ PARAMETROW,
+   * wiec niczego nie zapisuja — chodzi wylacznie o to, jakim bledem odpowie
+   * portal. Reszta listy sond to metody juz wymienione wyzej.
+   */
+  'timeman.status',
+  'timeman.settings',
+  'timeman.schedule.get',
+  'timeman.record.list',
+  'timeman.timecontrol.reports.get',
+  'timeman.timecontrol.reports.settings.get',
+  'timeman.timecontrol.reports.users.get',
+  'timeman.timecontrol.settings.get',
+  'department.get',
 ]);
 
 /** Serializacja zagniezdzonych parametrow w formacie, ktorego oczekuje Bitrix (PHP-style brackets). */
