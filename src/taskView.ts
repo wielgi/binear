@@ -82,3 +82,49 @@ export function tasksWord(n: number): string {
 export function stageOf(t: { sprintId: number | null; stageId: number | null }): number | null {
   return t.sprintId ? t.stageId : null;
 }
+
+/** Kawalek tekstu z informacja, czy pasuje do szukanej frazy. */
+export interface Kawalek {
+  text: string;
+  hit: boolean;
+}
+
+/**
+ * Rozbija tekst na kawalki, zaznaczajac te pasujace do frazy — do podswietlenia
+ * trafien w wynikach wyszukiwania.
+ *
+ * Czysta funkcja bez JSX, bo `<mark>` sklada juz kazdy widok u siebie: wiersz
+ * listy i karta tablicy maja inna typografie, a wspolny ma byc PODZIAL, nie
+ * znacznik. Dzieki temu daje sie tez wprost przetestowac.
+ *
+ * Szukamy przez `indexOf` na wersjach malymi literami, a nie wyrazeniem
+ * regularnym: fraza pochodzi od uzytkownika i trafilaby tam jako kod (`.`, `(`,
+ * `[` w tytule zadania to codziennosc).
+ */
+export function podzielNaTrafienia(text: string, fraza: string): Kawalek[] {
+  const q = fraza.trim().toLowerCase();
+  const calosc = [{ text, hit: false }];
+  if (!q) return calosc;
+
+  const hay = text.toLowerCase();
+  /*
+   * Zabezpieczenie: dla nielicznych znakow zmiana wielkosci zmienia DLUGOSC
+   * (tureckie „İ" daje dwa znaki). Indeksy z `hay` rozjechalyby sie wtedy
+   * wzgledem `text` i podswietlenie ucielo by tytul w losowym miejscu. Lepiej
+   * nie podswietlic nic.
+   */
+  if (hay.length !== text.length) return calosc;
+
+  const out: Kawalek[] = [];
+  let i = 0;
+  for (;;) {
+    const at = hay.indexOf(q, i);
+    if (at === -1) break;
+    if (at > i) out.push({ text: text.slice(i, at), hit: false });
+    out.push({ text: text.slice(at, at + q.length), hit: true });
+    i = at + q.length;
+  }
+  if (!out.length) return calosc;
+  if (i < text.length) out.push({ text: text.slice(i), hit: false });
+  return out;
+}

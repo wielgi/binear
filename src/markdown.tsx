@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { CheckIcon } from './icons';
+import { podzielNaTrafienia } from './taskView';
 
 /**
  * Adres portalu do linkow we wzmiankach. Ustawiany raz po wczytaniu konfiguracji —
@@ -168,6 +169,28 @@ function linieZLamaniem(linie: string[], key: () => number): ReactNode[] {
   return out;
 }
 
+/*
+ * Szukana fraza na czas JEDNEGO renderowania — do podswietlenia trafien
+ * w opisie i w komentarzach.
+ *
+ * Zmienna modulu, a nie parametr, bo `inline` wolane jest z dziewieciu miejsc
+ * (naglowki, listy, komorki tabeli, cytat, akapit…) i przewleczenie frazy przez
+ * kazde z nich zasmiecaloby je bez zadnego zysku. Jest to bezpieczne, bo
+ * `renderDescription` renderuje SYNCHRONICZNIE i konczy, zanim ktokolwiek zawola
+ * je ponownie — a mimo to zerujemy ja na koncu, zeby fraza nie wyciekla na
+ * wywolanie, ktore o zadnym podswietlaniu nie wie. Ten sam chwyt co `portalBase`
+ * wyzej.
+ */
+let szukana = '';
+
+/** Tekst z zaznaczonymi trafieniami frazy — albo sam tekst, gdy nie ma czego znaczyc. */
+function znacz(s: string, key: () => number): ReactNode {
+  if (!szukana || !s) return s;
+  const kawalki = podzielNaTrafienia(s, szukana);
+  if (kawalki.length === 1) return s;
+  return kawalki.map((k) => (k.hit ? <mark key={key()}>{k.text}</mark> : k.text));
+}
+
 function inline(text: string, key: () => number): ReactNode[] {
   const root: ReactNode[] = [];
   const stack: BbFrame[] = [];
@@ -182,7 +205,7 @@ function inline(text: string, key: () => number): ReactNode[] {
   let last = 0;
   for (const m of text.matchAll(INLINE)) {
     const at = m.index ?? 0;
-    if (at > last) top().push(text.slice(last, at));
+    if (at > last) top().push(znacz(text.slice(last, at), key));
     const tok = m[0];
     last = at + tok.length;
 
@@ -196,7 +219,7 @@ function inline(text: string, key: () => number): ReactNode[] {
         // inaczej samotne `[i]` (np. indeks `arr[i]` w opisie) zamienialoby
         // reszte akapitu w kursywe. Bez pary znacznik zostaje golym tekstem.
         if (lower.indexOf(`[/${letter}]`, last) >= 0) stack.push({ tag, nodes: [] });
-        else top().push(tok);
+        else top().push(znacz(tok, key));
       } else {
         let idx = -1;
         for (let i = stack.length - 1; i >= 0; i--) {
@@ -237,13 +260,13 @@ function inline(text: string, key: () => number): ReactNode[] {
     }
 
     if (tok.startsWith('`')) {
-      top().push(<code key={key()}>{tok.slice(1, -1)}</code>);
+      top().push(<code key={key()}>{znacz(tok.slice(1, -1), key)}</code>);
     } else if (tok.startsWith('**')) {
-      top().push(<strong key={key()}>{tok.slice(2, -2)}</strong>);
+      top().push(<strong key={key()}>{znacz(tok.slice(2, -2), key)}</strong>);
     } else if (tok.startsWith('~~')) {
-      top().push(<del key={key()}>{tok.slice(2, -2)}</del>);
+      top().push(<del key={key()}>{znacz(tok.slice(2, -2), key)}</del>);
     } else if (tok.startsWith('*')) {
-      top().push(<em key={key()}>{tok.slice(1, -1)}</em>);
+      top().push(<em key={key()}>{znacz(tok.slice(1, -1), key)}</em>);
     } else if (tok.startsWith('[')) {
       const cut = tok.indexOf('](');
       const label = tok.slice(1, cut);
@@ -265,7 +288,7 @@ function inline(text: string, key: () => number): ReactNode[] {
       );
     }
   }
-  if (last < text.length) top().push(text.slice(last));
+  if (last < text.length) top().push(znacz(text.slice(last), key));
 
   // Niedomkniete znaczniki domykamy — tresc zostaje sformatowana, bez golego [i].
   while (stack.length) closeTop();
@@ -303,7 +326,10 @@ const cells = (line: string) =>
 export function renderDescription(
   raw: string,
   resolveImage?: (objectId: number) => string | null,
+  /** Szukana fraza — trafienia dostaja `<mark>`. Pusta = bez podswietlania. */
+  fraza = '',
 ): ReactNode[] {
+  szukana = fraza.trim();
   const lines = normalize(raw).split('\n');
   const out: ReactNode[] = [];
   let k = 0;
@@ -493,5 +519,7 @@ export function renderDescription(
     }
   }
 
+  /* Zerujemy, zeby fraza nie wyciekla na kolejne wywolanie bez podswietlania. */
+  szukana = '';
   return out;
 }

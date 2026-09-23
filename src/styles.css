@@ -1293,6 +1293,45 @@ input[type='search']::-webkit-search-decoration {
   color: var(--fg-dim);
 }
 
+/*
+ * Przelacznik „szukaj takze w opisach", w prawym koncu pola.
+ *
+ * Wylaczony jest ledwie widoczny, wlaczony swieci akcentem — bo jego JEDYNYM
+ * zadaniem jest odpowiedziec na pytanie „czemu nie znalazlo", a to pytanie
+ * zadaje sie patrzac na puste wyniki tuz obok. Wyglada jak plakietka, nie jak
+ * przycisk, zeby nie konkurowal z samym polem.
+ */
+.search-opisy {
+  flex: none;
+  padding: 1px 6px;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  background: none;
+  border: 1px solid var(--border);
+  /* Ten sam promien co reszta kontrolek (`.btn`, pola, menu) — pastylka
+     odstawala ksztaltem od wszystkiego dookola. */
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.search-opisy:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+.search-opisy.is-on {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* W trakcie pobierania przelacznik czeka na dane — nie udajemy, ze klikniecie
+   cokolwiek teraz zmieni. */
+.search-opisy:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .count {
   font-size: var(--t-mini);
   color: var(--fg-dim);
@@ -2197,6 +2236,43 @@ input[type='search']::-webkit-search-decoration {
   white-space: nowrap;
 }
 
+/*
+ * Trafienie wyszukiwania — w wierszu listy i na karcie tablicy tak samo
+ * (parytet widokow, patrz `taskView.ts`).
+ *
+ * Domyslny `mark` w przegladarce to zolte tlo i CZARNY tekst, co w ciemnym
+ * motywie wyglada jak wklejka z innej strony. Bierzemy wiec kolor akcentu
+ * rozcienczony przez `color-mix` — jeden zapis dziala we wszystkich motywach,
+ * bo `--accent` jest w kazdym zdefiniowany — i zostawiamy `color: inherit`,
+ * zeby podswietlenie nie przebijalo wygaszonego tytulu zadania zamknietego.
+ */
+.row-title mark,
+.card-title mark,
+.desc mark,
+.comment-body mark {
+  /*
+   * Pelny akcent, nie rozcienczony. Pierwsza wersja braa 34% i po prostu nie
+   * bylo jej widac — podswietlenie ma sie rzucac w oczy z drugiego konca
+   * ekranu, bo po to sie go szuka. Napis na nim bialy — tak jak `.btn-primary`
+   * i `.btn-danger`, czyli wszedzie tam, gdzie tlem jest pelny akcent.
+   */
+  background: var(--accent);
+  color: #fff;
+  font-weight: var(--w-medium);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+/*
+ * W opisie i w komentarzach trafien bywa DUZO, wiec tam odrobine lagodniej —
+ * ale wciaz na wyraznym tle, nie na mgle. W scianie tekstu chodzi o to, zeby
+ * dalo sie przeskakiwac wzrokiem miedzy trafieniami.
+ */
+.desc mark,
+.comment-body mark {
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
 /* Odnosnik do zadania nadrzednego, gdy rodzic nie stoi tuz nad wierszem. */
 .row-parent,
 .card-parent {
@@ -2761,6 +2837,31 @@ img.avatar {
 .error {
   padding: var(--s6);
   color: var(--fg-muted);
+}
+
+/*
+ * Pasek nad lista przy wpisanej frazie: co przeszukano i czym to rozszerzyc.
+ * Stoi NAD wynikami, a nie pod nimi — informacja „opisow nie przeszukano" jest
+ * potrzebna dokladnie wtedy, gdy wynikow jest malo albo nie ma wcale, czyli
+ * zanim ktos zdazy przewinac na dol i uznac, ze zadania nie ma.
+ */
+.desc-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s4);
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+}
+
+.desc-search-note {
+  min-width: 0;
+}
+
+/* Przycisk drugoplanowy — pasek ma nie przekrzykiwac samych wynikow. */
+.desc-search .btn {
+  padding: 2px var(--s2);
+  font-size: var(--t-micro);
 }
 
 .error {

@@ -37,6 +37,7 @@ import {
   fetchEpics,
   fetchTaskDetail,
   fetchTaskHistory,
+  fetchDescriptions,
   fetchTasks,
   fetchRelated,
   fetchRelatedPresence,
@@ -84,6 +85,7 @@ import {
 } from './detailCache';
 import { POZYCJE, SPRAWDZENIA, opisWyniku, type Kontekst } from './perms';
 import { wczytajListe, zapiszListe, type ListSnapshot } from './listCache';
+import { wczytajOpisy, zapiszOpisy, type Opis } from './descCache';
 import { wczytajWklejone, wyczyscWklejone, zapiszWklejone } from './pasteStore';
 import { renderDescription, setPortalBase } from './markdown';
 import { buildQuote, plainText, splitQuote } from './quote';
@@ -134,6 +136,7 @@ import {
 } from './icons';
 import {
   MONTHS,
+  podzielNaTrafienia,
   shortDate,
   isUnassigned,
   setUnassignedId,
@@ -491,6 +494,12 @@ interface Settings {
   listTint: ListTint;
   /** Wyglad terminu w wierszu — patrz `DeadlineLook`. */
   deadlineLook: DeadlineLook;
+  /*
+   * Czy wyszukiwarka zaglada takze do OPISOW. Wylaczone domyslnie, bo wlaczenie
+   * kosztuje jednorazowe pobranie okolo 1,9 MB (patrz `descCache.ts`) — decyzja
+   * nalezy do uzytkownika, a nie do domyslnej konfiguracji.
+   */
+  szukajWOpisach: boolean;
   /**
    * Puste grupy/kolumny. Lista: pokazuje naglowek etapu/statusu nawet bez zadan.
    * Tablica: gdy wylaczone, kolumna bez kart znika (np. "Wdrozone", gdy nic nie
@@ -535,6 +544,7 @@ const DEFAULT_SETTINGS: Settings = {
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
   listTint: 'fade',
   deadlineLook: 'mark',
+  szukajWOpisach: false,
   showEmpty: false,
   shownEmpty: [],
   detailWidth: 520,
@@ -1828,7 +1838,7 @@ function bucket(
  * trafialo tez w zadanie #114749 (jego numer zawiera 749) i to ono ladowalo na
  * gorze. Dopiero brak dokladnego trafienia spuszcza nas do szukania po fragmencie.
  */
-function matchQuery(list: Task[], query: string): Task[] {
+function matchQuery(list: Task[], query: string, opisy?: Map<number, string> | null): Task[] {
   const q = (query ?? '').trim().toLowerCase();
   if (!q) return list;
 
@@ -1839,9 +1849,14 @@ function matchQuery(list: Task[], query: string): Task[] {
     if (exact.length) return exact;
   }
 
-  // Opisow nie ma w liscie (patrz LIST_SELECT) — zostaje kod, numer, tytul i tagi.
-  return list.filter((t) =>
-    `${t.code ?? ''} ${t.id} ${t.rawTitle} ${t.tags.join(' ')}`.toLowerCase().includes(q),
+  /*
+   * Kod, numer, tytul i tagi zawsze. Opisy TYLKO gdy ktos je pobral — nie ma ich
+   * w `LIST_SELECT`, bo waza mniej wiecej tyle co cala reszta listy (`descCache`).
+   */
+  return list.filter(
+    (t) =>
+      `${t.code ?? ''} ${t.id} ${t.rawTitle} ${t.tags.join(' ')}`.toLowerCase().includes(q) ||
+      (opisy?.get(t.id)?.includes(q) ?? false),
   );
 }
 
@@ -2722,8 +2737,20 @@ function useDebounced<T>(value: T, delay: number): T {
 /** Uchwyt SearchBoxa — poza fokusem pozwala ustawic tekst z zewnatrz (np. z widoku). */
 type SearchHandle = { focus: () => void; select: () => void; setValue: (v: string) => void };
 
-const SearchBox = forwardRef<SearchHandle, { onChange: (q: string) => void }>(
-  function SearchBox({ onChange }, ref) {
+const SearchBox = forwardRef<
+  SearchHandle,
+  {
+    onChange: (q: string) => void;
+    /**
+     * Stan szukania w opisach — cztery, bo „wlaczone" i „ma dane" to nie to samo:
+     * `brak` znaczy, ze ustawienie jest wlaczone, ale opisy TEGO projektu nie sa
+     * jeszcze pobrane, wiec odznaka musi byc zgaszona.
+     */
+    stanOpisow: 'off' | 'on' | 'brak' | 'pobieranie';
+    /** Klikniecie odznaki: dociaga opisy albo wylacza szukanie w nich. */
+    onOpisy: () => void;
+  }
+>(function SearchBox({ onChange, stanOpisow, onOpisy }, ref) {
     const [draft, setDraft] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     useImperativeHandle(ref, () => ({
@@ -2744,6 +2771,40 @@ const SearchBox = forwardRef<SearchHandle, { onChange: (q: string) => void }>(
     return (
       <div className="search">
         <SearchIcon />
+        {/*
+          Przelacznik stoi W POLU, a nie w ustawieniach, bo to decyzja podejmowana
+          w trakcie szukania („nie ma tego w tytulach — zajrzyj glebiej"), a nie raz
+          na zawsze. Napis zamiast ikony: „opisy" czyta sie wprost, a kazda ikona
+          tego znaczenia wymagalaby legendy.
+        */}
+        <HoverNote
+          label="Szukanie w opisach"
+          value={
+            { off: 'wyłączone', on: 'włączone', brak: 'brak danych', pobieranie: 'pobieram…' }[
+              stanOpisow
+            ]
+          }
+          note={
+            {
+              off: 'kliknij, by pobrać opisy (~1,9 MB, raz na projekt)',
+              on: 'fraza trafia w tytuły i w treść opisów',
+              brak: 'opisy tego projektu nie są jeszcze pobrane — kliknij',
+              pobieranie: 'zaraz będzie gotowe',
+            }[stanOpisow]
+          }
+        >
+          <button
+            type="button"
+            className={`search-opisy${stanOpisow === 'on' ? ' is-on' : ''}`}
+            aria-pressed={stanOpisow === 'on'}
+            disabled={stanOpisow === 'pobieranie'}
+            /* Bez tego klikniecie zabiera kursor z pola i trzeba w nie wracac. */
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onOpisy}
+          >
+            opisy
+          </button>
+        </HoverNote>
         <input
           ref={inputRef}
           type="search"
@@ -2921,6 +2982,7 @@ function DueHover({
 
 function TaskRow({
   task,
+  fraza,
   deadlineLook,
   active,
   selected,
@@ -2947,6 +3009,8 @@ function TaskRow({
   onTag,
 }: {
   task: Task;
+  /** Szukana fraza — do podswietlenia trafienia w tytule. */
+  fraza: string;
   deadlineLook: DeadlineLook;
   active: boolean;
   selected: boolean;
@@ -3098,7 +3162,11 @@ function TaskRow({
         </button>
       )}
 
-      <span className="row-title">{task.title || task.rawTitle}</span>
+      <span className="row-title">
+        {podzielNaTrafienia(task.title || task.rawTitle, fraza).map((k, i) =>
+          k.hit ? <mark key={i}>{k.text}</mark> : k.text,
+        )}
+      </span>
 
       {/* Epik ZAWSZE przed tagami: nalezy do zadania na stale, a tagi przychodza
           i znikaja — stojac za nimi skakal w bok przy kazdej zmianie etykiet.
@@ -3551,6 +3619,7 @@ function zaznaczenieW(el: Element | null): string {
 function Comments({
   taskId,
   chatId,
+  fraza,
   ready,
   me,
   people,
@@ -3558,6 +3627,8 @@ function Comments({
   onError,
 }: {
   taskId: number;
+  /** Szukana fraza — podswietlana w tresci komentarzy. */
+  fraza: string;
   /** Z `tasks.task.get`; bez niego widac tylko forum. */
   chatId: number | null;
   /** Szczegoly zadania juz doszly (albo sie nie udaly) — dopiero wtedy znamy `chatId`. */
@@ -4534,7 +4605,9 @@ function Comments({
               </div>
             </div>
           ) : (
-            rest && <div className="comment-body">{renderDescription(rest)}</div>
+            rest && (
+              <div className="comment-body">{renderDescription(rest, undefined, fraza)}</div>
+            )
           )}
           {c.files.length > 0 && (
             <div className="comment-files">
@@ -5098,6 +5171,7 @@ function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) =
 
 function DetailPanel({
   task,
+  fraza,
   people,
   stageName,
   stage,
@@ -5124,6 +5198,8 @@ function DetailPanel({
   onError,
 }: {
   task: Task;
+  /** Szukana fraza — podswietlana w opisie i w komentarzach. */
+  fraza: string;
   /** Osoby projektu — do wzmianek `@` w komentarzu. */
   people: Person[];
   stageName: string;
@@ -5705,7 +5781,7 @@ function DetailPanel({
                    */
                   const a = detail.attachments.find((x) => x.objectId === objectId);
                   return a ? `/api/attach/${a.id}` : `/api/file/${objectId}`;
-                })}
+                }, fraza)}
               </ErrorBoundary>
             ) : (
               <p className="desc-dim">Brak opisu.</p>
@@ -5936,6 +6012,7 @@ function DetailPanel({
         <Comments
           key={task.id}
           taskId={task.id}
+          fraza={fraza}
           chatId={mine?.chatId ?? null}
           ready={mine !== null || detailError}
           me={me}
@@ -7852,6 +7929,16 @@ export default function App() {
   );
   /** Zatwierdzony filtr — SearchBox oddaje go po przerwie w pisaniu, nie po znaku. */
   const [query, setQuery] = useState('');
+  /*
+   * Opisy zadan do wyszukiwania po tresci. `null` = jeszcze ich nie pobrano dla
+   * tego projektu — i tak zostaje, dopoki ktos sam o nie nie poprosi, bo waza
+   * mniej wiecej tyle co cala reszta listy (patrz `descCache.ts`).
+   */
+  const [opisy, setOpisy] = useState<Map<number, Opis> | null>(null);
+  /** Czy fraza ma trafiac takze w opisy — przelacznik w polu wyszukiwania. */
+  const [wOpisach, setWOpisach] = useState(saved.szukajWOpisach);
+  /** Postep pobierania opisow: `[gotowe, wszystkie]`, albo `null` gdy nie trwa. */
+  const [opisyPostep, setOpisyPostep] = useState<[number, number] | null>(null);
   const [cursor, setCursor] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(saved.collapsed));
@@ -7979,6 +8066,60 @@ export default function App() {
   }, []);
 
   /*
+   * Opisy z poprzedniego razu — jesli ktos juz kiedys wlaczyl szukanie w nich dla
+   * tego projektu, ma je od razu i bez pytania. Przy zmianie projektu czyscimy,
+   * zeby fraza nie trafiala w opisy z poprzedniego.
+   */
+  useEffect(() => {
+    let alive = true;
+    setOpisy(null);
+    if (groupId === null) return;
+    void wczytajOpisy(groupId)
+      .then((m) => alive && m && setOpisy(m))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [groupId]);
+
+  /** Pobranie opisow — wolane przez przelacznik w polu wyszukiwania. */
+  const pobierzOpisy = useCallback(async () => {
+    if (groupId === null || opisyPostep) return;
+    setOpisyPostep([0, 0]);
+    try {
+      const m = await fetchDescriptions(groupId, (a, b) => setOpisyPostep([a, b]));
+      setOpisy(m);
+      void zapiszOpisy(groupId, m);
+    } catch {
+      toast('Nie udało się pobrać opisów.');
+    } finally {
+      setOpisyPostep(null);
+    }
+  }, [groupId, opisyPostep]);
+
+  /*
+   * Czy szukanie w opisach DZIALA, a nie tylko jest zadeklarowane. Ustawienie
+   * `wOpisach` jest globalne i przezywa zmiane projektu, ale opisy sa pobierane
+   * per projekt — wiec po przelaczeniu na nowy projekt przelacznik bylby wlaczony,
+   * a fraza i tak nie trafialaby w opisy. Odznaka pokazuje ten stan faktyczny.
+   */
+  const opisyDzialaja = wOpisach && opisy !== null;
+
+  /**
+   * Klikniecie przelacznika. Gdy odznaka jest zgaszona z braku danych, klik ma je
+   * DOCIAGNAC — a nie wylaczyc ustawienie, ktore i tak nic nie robi. Wylaczamy
+   * tylko wtedy, gdy szukanie w opisach faktycznie dziala.
+   */
+  const przelaczOpisy = useCallback(() => {
+    if (opisyDzialaja) {
+      setWOpisach(false);
+      return;
+    }
+    setWOpisach(true);
+    if (!opisy) void pobierzOpisy();
+  }, [opisyDzialaja, opisy, pobierzOpisy]);
+
+  /*
    * Roster, a gdy go nie ma - lista z zadan. Nie SUMA obu: kto odszedl z firmy,
    * ten wypada z `FILTER[ACTIVE]`, ale jego stare zadania zostaja, wiec suma
    * wracalaby z byłymi pracownikami dokladnie tam, gdzie ich nie chcemy.
@@ -8033,7 +8174,25 @@ export default function App() {
   // `base` po wyszukiwaniu, ale BEZ ograniczenia zakresem — wspolne dla licznikow
   // przy zakresach i dla tego, czy panel ma zostac otwarty (zakres to nawigacja,
   // nie filtr tresci, patrz nizej).
-  const queriedBase = useMemo(() => matchQuery(base, query), [base, query]);
+  /*
+   * Opisy malymi literami, policzone RAZ na komplet — a nie przy kazdym znaku.
+   * `matchQuery` biegnie na kazda zmiane frazy po 1300 zadaniach; obnizanie
+   * wielkosci liter 1,9 MB tekstu w tej petli byloby odczuwalne.
+   */
+  const opisyIndeks = useMemo(() => {
+    /* Wylaczony przelacznik = opisy zostaja w cache'u, ale fraza w nie nie trafia.
+       Nie kasujemy ich: ponowne wlaczenie ma byc natychmiastowe, nie kosztowac
+       drugiego pobrania. */
+    if (!opisy || !wOpisach) return null;
+    const m = new Map<number, string>();
+    for (const [id, o] of opisy) m.set(id, o.d.toLowerCase());
+    return m;
+  }, [opisy, wOpisach]);
+
+  const queriedBase = useMemo(
+    () => matchQuery(base, query, opisyIndeks),
+    [base, query, opisyIndeks],
+  );
 
   // Liczniki przy zakresach licza to, co widac PO wpisaniu frazy, rozbite na sprint/reszte.
   const scopeCounts = useMemo(() => {
@@ -8050,6 +8209,24 @@ export default function App() {
    */
   const panelIds = useMemo(() => new Set(queriedBase.map((t) => t.id)), [queriedBase]);
 
+  /*
+   * Ile trafien przyszlo WYLACZNIE z opisu. To jedyna odpowiedz na pytanie „czy
+   * wlaczenie tego cokolwiek dalo" — bez niej pasek mowi, ze szuka w opisach,
+   * i nie wiadomo, czy to zmienilo wynik.
+   */
+  const trafioneZOpisu = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || !opisyIndeks) return 0;
+    let n = 0;
+    for (const t of queriedBase) {
+      const wTytule = `${t.code ?? ''} ${t.id} ${t.rawTitle} ${t.tags.join(' ')}`
+        .toLowerCase()
+        .includes(q);
+      if (!wTytule) n++;
+    }
+    return n;
+  }, [queriedBase, query, opisyIndeks]);
+
   const filtered = useMemo(() => {
     const inScope = base.filter((t) => {
       const inSprint = sprintId !== null && t.sprintId === sprintId;
@@ -8057,8 +8234,8 @@ export default function App() {
       if (scope === 'outside' && inSprint) return false;
       return true;
     });
-    return matchQuery(inScope, query);
-  }, [base, scope, sprintId, query]);
+    return matchQuery(inScope, query, opisyIndeks);
+  }, [base, scope, sprintId, query, opisyIndeks]);
 
   /** Wszystkie tagi wystepujace w grupie, z liczba uzyc — do palety i filtra. */
   const allTags = useMemo(() => {
@@ -8587,6 +8764,7 @@ export default function App() {
       showDone,
       listTint,
       deadlineLook,
+      szukajWOpisach: wOpisach,
       showEmpty,
       shownEmpty,
       detailWidth,
@@ -8598,7 +8776,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, listTint, deadlineLook, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, listTint, deadlineLook, wOpisach, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -9931,7 +10109,21 @@ export default function App() {
             ))}
           </span>
 
-          <SearchBox key={groupId ?? 'none'} ref={searchRef} onChange={setQuery} />
+          <SearchBox
+            key={groupId ?? 'none'}
+            ref={searchRef}
+            onChange={setQuery}
+            stanOpisow={
+              opisyPostep !== null
+                ? 'pobieranie'
+                : opisyDzialaja
+                  ? 'on'
+                  : wOpisach
+                    ? 'brak'
+                    : 'off'
+            }
+            onOpisy={przelaczOpisy}
+          />
           <span className="count">
             {loading ? 'ładowanie…' : `${filtered.length} z ${tasks.length}`}
           </span>
@@ -10185,6 +10377,7 @@ export default function App() {
         ) : viewMode === 'board' ? (
           <Board
             tasks={boardTasks}
+            fraza={query}
             stages={boardStages}
             showDone={showDone}
             shownEmpty={pinnedStages}
@@ -10208,6 +10401,32 @@ export default function App() {
           />
         ) : (
         <div className="list">
+          {/*
+            Pasek pojawia sie WYLACZNIE przy wpisanej frazie — bez niej jest to
+            informacja o niczym. Mowi wprost, czego wyszukiwarka NIE przeszukala,
+            bo cicha niepelnosc jest gorsza niz brak funkcji: bez tego „nie ma
+            takiego zadania" znaczy naprawde „nie ma go w tytule".
+          */}
+          {query.trim() && (
+            <div className="desc-search">
+              {opisyPostep ? (
+                <span className="desc-search-note">
+                  Pobieram opisy… {opisyPostep[0]}/{opisyPostep[1] || '?'}
+                </span>
+              ) : opisyDzialaja ? (
+                <span className="desc-search-note">
+                  Szukam też w opisach
+                  {trafioneZOpisu > 0 && <> — {trafioneZOpisu} z nich trafiło tylko tam</>}
+                </span>
+              ) : (
+                <span className="desc-search-note">
+                  Przeszukano tytuły, kody i tagi — opisy pomijam (przełącznik „opisy” w polu
+                  wyszukiwania).
+                </span>
+              )}
+            </div>
+          )}
+
           {!error && !loading && groupNodes.length === 0 && (
             <div className="empty">Brak zadań pasujących do filtra.</div>
           )}
@@ -10290,6 +10509,7 @@ export default function App() {
                     <TaskRow
                       key={t.id}
                       task={t}
+                      fraza={query}
                       deadlineLook={deadlineLook}
                       active={flat[cursor]?.id === t.id}
                       selected={openId === t.id}
@@ -10359,6 +10579,7 @@ export default function App() {
       {openTask && (
         <DetailPanel
           task={openTask}
+          fraza={query}
           people={mentionPeople}
           stageName={(stageOf(openTask) && stageNames.get(stageOf(openTask) as number)) || NO_SPRINT}
           /* Kolor i postep kolumny — do pierscienia przy polu „Etap". */

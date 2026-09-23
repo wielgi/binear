@@ -622,6 +622,53 @@ const LIST_SELECT = [
 
 const PAGE = 50;
 
+/**
+ * OPISY wszystkich zadan projektu — do wyszukiwania po tresci.
+ *
+ * Osobne pobranie, a nie dodatkowe pole w `LIST_SELECT`, bo opisy waza mniej
+ * wiecej tyle co cala reszta listy razem wziete (okolo 1,9 MB na 1318 zadan),
+ * a potrzebne sa tylko temu, kto wlaczy szukanie w opisach. Pelne uzasadnienie
+ * i opis pulapki `%DESCRIPTION` — w `descCache.ts`.
+ *
+ * Kosztuje tyle samo wywolan co zwykla lista: jedna strona plus reszta jednym
+ * `batch`, czyli okolo 27 wywolan na 1318 zadan.
+ */
+export async function fetchDescriptions(
+  groupId: number,
+  onPostep?: (gotowe: number, wszystkie: number) => void,
+): Promise<Map<number, { d: string; ch: string | null }>> {
+  const params = {
+    filter: { GROUP_ID: groupId },
+    select: ['ID', 'DESCRIPTION', 'CHANGED_DATE'],
+    order: { ID: 'desc' },
+  };
+
+  const first = await coalesceRaw<{ tasks?: any[] }>('tasks.task.list', { ...params, start: 0 });
+  const rows: any[] = first.result?.tasks ?? [];
+  const total: number = Number(first.total ?? rows.length);
+  onPostep?.(rows.length, total);
+
+  const rest: BatchCmd[] = [];
+  for (let start = PAGE; start < total; start += PAGE) {
+    rest.push({ method: 'tasks.task.list', params: { ...params, start } });
+  }
+  if (rest.length) {
+    for (const page of await callBatch(rest)) {
+      rows.push(...(page?.tasks ?? []));
+      onPostep?.(rows.length, total);
+    }
+  }
+
+  const out = new Map<number, { d: string; ch: string | null }>();
+  for (const r of rows) {
+    const d = String(r?.description ?? '').trim();
+    /* Zadania bez opisu pomijamy — to okolo co dwudzieste, a pusty wpis
+       zajmowalby miejsce i nigdy niczego nie dopasowal. */
+    if (d) out.set(Number(r.id), { d, ch: r?.changedDate ?? null });
+  }
+  return out;
+}
+
 export async function fetchTasks(groupId: number): Promise<Task[]> {
   const params = {
     filter: { GROUP_ID: groupId },

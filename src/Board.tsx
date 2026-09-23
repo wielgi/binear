@@ -2,7 +2,7 @@ import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Epic, Stage, Task } from './bitrix';
 import { Avatar, CommentIcon, LinkIcon, ParentIcon, PriorityIcon, SubtaskIcon, tagHue } from './icons';
-import { shortDate, isUnassigned, stageOf, sumPoints } from './taskView';
+import { shortDate, isUnassigned, podzielNaTrafienia, stageOf, sumPoints } from './taskView';
 import { colDropId, dragId } from './dnd';
 import { HoverNote } from './HoverNote';
 import { TaskCode } from './TaskCode';
@@ -22,6 +22,7 @@ const NO_STAGE = -1;
 
 export function Board({
   tasks,
+  fraza,
   stages,
   showDone,
   shownEmpty,
@@ -39,6 +40,8 @@ export function Board({
   onCopied,
 }: {
   tasks: Task[];
+  /** Szukana fraza — do podswietlenia trafienia w tytule karty. */
+  fraza: string;
   stages: Stage[];
   /** PUSTE kolumny (po nazwie etapu), ktore mimo braku kart maja byc widoczne. */
   shownEmpty: string[];
@@ -97,6 +100,7 @@ export function Board({
           /* Zadania spoza sprintu nie maja etapu, wiec nie ma tu czego ustawic. */
           stageId={null}
           tasks={orphans}
+          fraza={fraza}
           pending={pending}
           activeId={activeId}
           openId={openId}
@@ -119,6 +123,7 @@ export function Board({
           color={s.color}
           stageId={s.id}
           tasks={byStage.get(s.id) ?? []}
+          fraza={fraza}
           pending={pending}
           activeId={activeId}
           openId={openId}
@@ -142,6 +147,7 @@ function BoardColumn({
   color,
   stageId,
   tasks,
+  fraza,
   pending,
   activeId,
   openId,
@@ -160,6 +166,8 @@ function BoardColumn({
   /** null = kolumna "Poza sprintem": nie jest celem i jej kart sie nie przeciaga. */
   stageId: number | null;
   tasks: Task[];
+  /** Szukana fraza — do podswietlenia trafienia w tytule karty. */
+  fraza: string;
   pending: Set<number>;
   activeId: number | null;
   openId: number | null;
@@ -215,6 +223,7 @@ function BoardColumn({
           <BoardCard
             key={t.id}
             task={t}
+            fraza={fraza}
             draggable={stageId !== null}
             active={activeId === t.id}
             selected={openId === t.id}
@@ -240,6 +249,7 @@ function BoardColumn({
 /** Karta jest osobnym komponentem, bo `useDraggable` to hook — nie wejdzie w `.map()`. */
 function BoardCard({
   task: t,
+  fraza,
   draggable,
   active,
   selected,
@@ -255,6 +265,8 @@ function BoardCard({
   onCopied,
 }: {
   task: Task;
+  /** Szukana fraza — do podswietlenia trafienia w tytule. */
+  fraza: string;
   draggable: boolean;
   active: boolean;
   selected: boolean;
@@ -362,7 +374,11 @@ function BoardCard({
           {parentLabel}
         </div>
       )}
-      <div className="card-title">{t.title || t.rawTitle}</div>
+      <div className="card-title">
+        {podzielNaTrafienia(t.title || t.rawTitle, fraza).map((k, i) =>
+          k.hit ? <mark key={i}>{k.text}</mark> : k.text,
+        )}
+      </div>
       {(t.tags.length > 0 || epic) && (
         <div className="card-tags">
           {/* Epik ZAWSZE pierwszy, przed tagami: nalezy do zadania na stale, a tagi
