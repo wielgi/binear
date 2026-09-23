@@ -29,8 +29,19 @@ export interface Quote {
 /** Linia oddzielajaca cytat: co najmniej kilkanascie myslnikow i nic wiecej. */
 const RULE = /^-{10,}$/;
 
-/** „Damian Chwiejczak [wczoraj, 22:26] #chat23455/5868373" */
-const HEAD = /^(.+?)\s*\[([^\]]+)\]\s*(?:#chat\d+\/\d+)?\s*$/;
+/**
+ * „Damian Chwiejczak [wczoraj, 22:26] #chat23455/5868373"
+ *
+ * W nawiasie MUSI stac godzina. Bez tego warunku naglowkiem stawala sie kazda
+ * linia konczaca sie nawiasem kwadratowym — np. „Poprawka [zrobione]" na
+ * poczatku cytowanej tresci. Taka linia byla wtedy zjadana jako naglowek
+ * i znikala z cytatu.
+ *
+ * Kotwica `#chatID/msgID` zostaje NIEOBOWIAZKOWA: Bitrix ja dopisuje, ale
+ * `buildQuote` (cytat zlozony przez binear) juz nie — gdyby byla wymagana,
+ * wlasne odpowiedzi przestalyby sie rozbijac.
+ */
+const HEAD = /^(.+?)\s*\[([^\]]*\d{1,2}:\d{2}[^\]]*)\]\s*(?:#chat\d+\/\d+)?\s*$/;
 
 /**
  * Dzieli tresc komentarza na cytat i wlasciwa odpowiedz.
@@ -57,9 +68,15 @@ export function splitQuote(text: string): { quote: Quote | null; rest: string; r
   const m = inner.length ? HEAD.exec(inner[0].trim()) : null;
   const body = (m ? inner.slice(1) : inner).join('\n').trim();
 
-  /* Cytat z zaznaczenia przychodzi w cudzyslowie — zdejmujemy go, bo cudzyslow
-     niesie tu to samo, co niesie juz sam ksztalt cytatu. */
-  const unquoted = body.replace(/^"([\s\S]*)"$/, '$1').trim();
+  /*
+   * Cytat z zaznaczenia przychodzi w cudzyslowie — zdejmujemy go, bo cudzyslow
+   * niesie tu to samo, co niesie juz sam ksztalt cytatu.
+   *
+   * Tylko gdy w srodku nie ma innego cudzyslowu: dla `"a" oraz "b"` poprzednia
+   * wersja scinala pierwszy i ostatni znak, robiac `a" oraz "b`. Zachlanne
+   * `[\s\S]*` siegalo do OSTATNIEGO cudzyslowu w tekscie, nie do pary.
+   */
+  const unquoted = (/^"[^"]*"$/.test(body) ? body.slice(1, -1) : body).trim();
 
   return {
     quote: { author: m ? m[1].trim() : null, when: m ? m[2].trim() : null, body: unquoted },

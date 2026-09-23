@@ -82,7 +82,7 @@ import {
   setCachedDetail,
   setDraft as storeDraft,
 } from './detailCache';
-import { POZYCJE, SPRAWDZENIA, type Kontekst } from './perms';
+import { POZYCJE, SPRAWDZENIA, opisWyniku, type Kontekst } from './perms';
 import { wczytajListe, zapiszListe, type ListSnapshot } from './listCache';
 import { wczytajWklejone, wyczyscWklejone, zapiszWklejone } from './pasteStore';
 import { renderDescription, setPortalBase } from './markdown';
@@ -6482,6 +6482,9 @@ function PermsFlyout({ left, top, width }: { left: number; top: number; width: n
      trzy razy, za kazdym razem z innym pytaniem. */
   const [wyniki, setWyniki] = useState<Record<number, { stan: ProbeStan; opis: string }>>({});
   const [trwa, setTrwa] = useState(false);
+  /* `null` = schowek odmowil. Trojstan, bo „nie udalo sie" musi wygladac inaczej
+     niz „jeszcze nie klikales". */
+  const [skopiowane, setSkopiowane] = useState<boolean | null>(false);
 
   const sprawdz = async () => {
     if (trwa) return;
@@ -6520,11 +6523,21 @@ function PermsFlyout({ left, top, width }: { left: number; top: number; width: n
        */
       const r = await Promise.race([
         probeMethod(p.method, params ?? {}),
-        new Promise<{ stan: ProbeStan; opis: string }>((res) =>
+        new Promise<{ stan: ProbeStan; opis: string; wynik?: unknown }>((res) =>
           setTimeout(() => res({ stan: 'blad', opis: 'brak odpowiedzi — limit zapytań portalu?' }), 12000),
         ),
       ]);
-      const ocena = p.ocena && r.stan === 'ok' ? p.ocena((r as { wynik?: unknown }).wynik, kontekst) : r;
+      /*
+       * Trzy stopnie, nie dwa. „Osiagalna" (odbila sie o brak parametrow) to co
+       * innego niz „odpowiedziala" — a ta druga dzieli sie jeszcze na „z danymi"
+       * i „pusto". Doklejamy wiec do werdyktu streszczenie tresci, bo inaczej
+       * pusty raport czasu pracy wyglada jak dzialajacy raport czasu pracy.
+       */
+      const ocena = p.ocena && r.stan === 'ok'
+        ? p.ocena(r.wynik, kontekst)
+        : r.stan === 'ok' && 'wynik' in r
+          ? { stan: r.stan, opis: `działa — ${opisWyniku(r.wynik)}` }
+          : r;
       setWyniki((w) => ({ ...w, [i]: ocena }));
     }
     setTrwa(false);
@@ -6536,11 +6549,44 @@ function PermsFlyout({ left, top, width }: { left: number; top: number; width: n
     <div className="menu perms-flyout" style={{ left, top, width: width + 120 }}>
       <div className="ds-colhead">Uprawnienia webhooka</div>
       <div className="ds-colhint">
-        Sprawdza, co ten token potrafi. Nic nie zapisuje — metody są wołane bez parametrów.
+        Sprawdza, co ten token potrafi. Nic nie zapisuje — wołamy wyłącznie odczyty, a resztę
+        bez parametrów. „Osiągalna” znaczy tylko tyle, że metoda istnieje; dopiero „działa —
+        N poz.” znaczy, że są dane.
       </div>
-      <button className="btn perms-run" disabled={trwa} onClick={() => void sprawdz()}>
-        {trwa ? `Sprawdzanie… ${zrobione}/${POZYCJE.length}` : 'Sprawdź'}
-      </button>
+      <div className="perms-actions">
+        <button className="btn perms-run" disabled={trwa} onClick={() => void sprawdz()}>
+          {trwa ? `Sprawdzanie… ${zrobione}/${POZYCJE.length}` : 'Sprawdź'}
+        </button>
+        {/* Panel czesto uruchamia sie na CUDZYM webhooku (np. administratora),
+            wiec wynik musi dac sie stamtad wyniesc jednym kliknieciem. */}
+        <button
+          className="btn"
+          disabled={!zrobione}
+          onClick={() => {
+            const tekst = SPRAWDZENIA.map((g) =>
+              [
+                `## ${g.nazwa}`,
+                ...g.pozycje.map((p) => {
+                  const r = wyniki[POZYCJE.indexOf(p)];
+                  return `[${r?.stan ?? '?'}] ${p.po_co} — ${p.method} — ${r?.opis ?? 'nie sprawdzono'}`;
+                }),
+              ].join('\n'),
+            ).join('\n\n');
+            /* Potwierdzenie i obsluga odmowy jak przy kopiowaniu kodu zadania
+               (`TaskCode`) — schowek potrafi odmowic i cisza znaczylaby wtedy
+               „skopiowane". */
+            void navigator.clipboard
+              .writeText(tekst)
+              .then(() => {
+                setSkopiowane(true);
+                setTimeout(() => setSkopiowane(false), 1200);
+              })
+              .catch(() => setSkopiowane(null));
+          }}
+        >
+          {skopiowane === null ? 'Nie udało się' : skopiowane ? 'Skopiowano' : 'Kopiuj wynik'}
+        </button>
+      </div>
 
       <div className="perms-list">
         {SPRAWDZENIA.map((g) => (

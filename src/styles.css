@@ -1013,9 +1013,20 @@ kbd {
   overflow-y: auto;
 }
 
-.perms-run {
-  width: calc(100% - 2 * var(--s2));
+.perms-actions {
+  display: flex;
+  gap: var(--s1);
   margin: var(--s1) var(--s2) var(--s2);
+}
+
+/* Sprawdzanie jest czynnoscia glowna, kopiowanie tylko jej nastepstwem —
+   stad podzial miejsca dwa do jednego, a nie po rowno. */
+.perms-actions .btn {
+  flex: 1;
+}
+
+.perms-actions .perms-run {
+  flex: 2;
 }
 
 .perms-group {
@@ -2277,12 +2288,17 @@ input[type='search']::-webkit-search-decoration {
 .due-card {
   position: fixed;
   z-index: 70;
-  /* Nad elementem, z odstepem — kursor nie zaslania tresci. */
-  transform: translateY(calc(-100% - 6px));
+  /*
+   * BEZ `transform` do przesuwania w gore. Odstep i strone liczy teraz sam
+   * komponent (`HoverNote`), bo tylko on wie, czy karta miesci sie nad
+   * elementem — stale przesuniecie wypychalo ja poza ekran w pasku narzedzi.
+   */
   padding: var(--s1) var(--s2);
   background: var(--bg-panel);
   border-radius: var(--s2);
   box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+  /* Ostatnia linia obrony: przy waskim oknie karta i tak nie wyjdzie poza ekran. */
+  max-width: calc(100vw - 16px);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   pointer-events: none;

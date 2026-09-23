@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 /**
@@ -15,7 +15,16 @@ import { createPortal } from 'react-dom';
  *
  * Renderowana przez PORTAL: listy i panele przewijaja sie w kontenerach z
  * `overflow`, wiec karta pozycjonowana w srodku wiersza bylaby przycieta przy
- * gornej krawedzi. Stoi NAD elementem i jest dociskana do jego prawej krawedzi.
+ * gornej krawedzi.
+ *
+ * DOMYSLNIE stoi nad elementem, dociskana do jego prawej krawedzi — ale mierzy
+ * sie i UCIEKA, gdy by sie nie zmiescila: przy braku miejsca u gory przeskakuje
+ * pod element, a w poziomie jest przytrzymywana przy krawedziach okna.
+ *
+ * Wczesniej pozycja byla stala („zawsze nad, zawsze do prawej") i karta potrafila
+ * wyjsc poza ekran — najdotkliwiej w PASKU NARZEDZI, gdzie „nad elementem" znaczy
+ * poza gorna krawedzia okna, oraz przy lewym brzegu, gdzie dlugi dopisek wychodzil
+ * w lewo. W srodku listy bylo to mniej widoczne, ale dzialo sie tak samo.
  */
 export function HoverNote({
   label,
@@ -42,21 +51,62 @@ export function HoverNote({
   className?: string;
   children: ReactNode;
 }) {
-  const [at, setAt] = useState<{ top: number; right: number } | null>(null);
+  /** Prostokat elementu, nad ktorym stoi kursor — punkt odniesienia dla karty. */
+  const [kotwica, setKotwica] = useState<DOMRect | null>(null);
+  const kartaRef = useRef<HTMLDivElement>(null);
+  const [poz, setPoz] = useState<{ top: number; left: number } | null>(null);
+
+  /*
+   * Pozycje liczymy DOPIERO gdy karta jest w drzewie, bo bez jej wymiarow nie da
+   * sie stwierdzic, czy sie miesci. `useLayoutEffect`, a nie `useEffect` — pomiar
+   * i poprawka musza zajsc przed malowaniem, inaczej karta mignelaby w zlym
+   * miejscu.
+   */
+  useLayoutEffect(() => {
+    const karta = kartaRef.current;
+    if (!kotwica || !karta) {
+      setPoz(null);
+      return;
+    }
+    const k = karta.getBoundingClientRect();
+    const margines = 8;
+    const odstep = 6;
+
+    /* Nad elementem, a gdy tam nie ma miejsca (pasek narzedzi!) — pod nim. */
+    const nad = kotwica.top - k.height - odstep;
+    const top = nad >= margines ? nad : kotwica.bottom + odstep;
+
+    /* Dociskamy do PRAWEJ krawedzi elementu, ale nie pozwalamy wyjsc z okna. */
+    const maks = Math.max(margines, window.innerWidth - k.width - margines);
+    const left = Math.min(Math.max(kotwica.right - k.width, margines), maks);
+
+    setPoz({ top, left });
+  }, [kotwica]);
 
   return (
     <span
       className={className}
-      onMouseEnter={(e) => {
-        const r = e.currentTarget.getBoundingClientRect();
-        setAt({ top: r.top, right: window.innerWidth - r.right });
-      }}
-      onMouseLeave={() => setAt(null)}
+      onMouseEnter={(e) => setKotwica(e.currentTarget.getBoundingClientRect())}
+      onMouseLeave={() => setKotwica(null)}
     >
       {children}
-      {at &&
+      {kotwica &&
         createPortal(
-          <div className="due-card" style={{ top: at.top, right: at.right }} role="tooltip">
+          <div
+            ref={kartaRef}
+            className="due-card"
+            /*
+             * Do pierwszego pomiaru karta jest NIEWIDOCZNA, a nie odsunieta poza
+             * ekran: `visibility` nie wyklucza jej z pomiarow, a przesuniecie
+             * poza krawedz zmienialoby szerokosc przy zawijaniu.
+             */
+            style={
+              poz
+                ? { top: poz.top, left: poz.left }
+                : { top: 0, left: 0, visibility: 'hidden' }
+            }
+            role="tooltip"
+          >
             {label !== undefined && label !== '' && <div className="due-card-label">{label}</div>}
             <div className="due-card-row">
               <span className="due-card-value">{value}</span>

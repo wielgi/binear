@@ -51,6 +51,25 @@ export interface Grupa {
   pozycje: Sprawdzenie[];
 }
 
+/**
+ * Co NAPRAWDE przyszlo w odpowiedzi, w jednym zdaniu.
+ *
+ * Bez tego panel klamie przez przemilczenie: metoda, ktora istnieje i oddaje
+ * pusta liste, swieci tak samo jak ta, ktora oddaje dane. Przy raportach czasu
+ * pracy to cala roznica — kontrola czasu bywa na portalu WYLACZONA, wiec raport
+ * odpowiada poprawnie i pusto. „Dziala" znaczy wtedy „nie ma czego czytac".
+ */
+export function opisWyniku(w: unknown): string {
+  if (w === null || w === undefined) return 'pusta odpowiedź';
+  if (Array.isArray(w)) return w.length ? `${w.length} poz.` : 'pusta lista';
+  if (typeof w === 'object') {
+    const klucze = Object.keys(w as object);
+    if (!klucze.length) return 'pusty obiekt';
+    return `pola: ${klucze.slice(0, 4).join(', ')}${klucze.length > 4 ? '…' : ''}`;
+  }
+  return String(w).slice(0, 60);
+}
+
 export const SPRAWDZENIA: Grupa[] = [
   {
     nazwa: 'Podstawa — bez tego binear nie ruszy',

@@ -146,6 +146,28 @@ type BbFrame = { tag: 'strong' | 'em' | 'u' | 'del'; nodes: ReactNode[] };
  * choćby zrodlo bylo polamane (patrz #114681). Reszta (kod, `**`, linki, wzmianki)
  * dziala jak wczesniej — trafia do biezaco otwartej ramki albo do korzenia.
  */
+/**
+ * Kolejne linie jednego akapitu, rozdzielone TWARDYM lamaniem.
+ *
+ * Markdown kazalby skleic je spacja — pojedynczy enter jest tam tylko miekkim
+ * zawijaniem. Ale tutaj tresc nie pochodzi z pliku .md: komentarze pisze sie
+ * w textarei, gdzie enter znaczy enter, a Bitrix wyswietla je jako osobne
+ * linie. Sklejanie spacja robilo z „linia / linia / linia" jedno „linia linia
+ * linia" — inaczej niz w Bitriksie, czyli po prostu zle.
+ *
+ * Opisom to nie szkodzi: w tym portalu nie sa zawijane na kolumnie (mediana
+ * takiej linii to ~153 znaki, a zawijanie daje twardy sufit kolo 80), wiec
+ * kazda linia i tak jest osobnym zdaniem.
+ */
+function linieZLamaniem(linie: string[], key: () => number): ReactNode[] {
+  const out: ReactNode[] = [];
+  linie.forEach((l, n) => {
+    if (n) out.push(<br key={key()} />);
+    out.push(...inline(l, key));
+  });
+  return out;
+}
+
 function inline(text: string, key: () => number): ReactNode[] {
   const root: ReactNode[] = [];
   const stack: BbFrame[] = [];
@@ -444,7 +466,7 @@ export function renderDescription(
         body.push(m[1]);
         i++;
       }
-      out.push(<blockquote key={key()}>{inline(body.join(' '), key)}</blockquote>);
+      out.push(<blockquote key={key()}>{linieZLamaniem(body, key)}</blockquote>);
       continue;
     }
 
@@ -457,7 +479,7 @@ export function renderDescription(
       para.push(l);
       i++;
     }
-    if (para.length) out.push(<p key={key()}>{inline(para.join(' '), key)}</p>);
+    if (para.length) out.push(<p key={key()}>{linieZLamaniem(para, key)}</p>);
     else {
       /*
        * Linia WYGLADA na poczatek bloku, ale zaden blok jej nie przyjal — w praktyce
