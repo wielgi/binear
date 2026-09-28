@@ -173,6 +173,15 @@ import { TaskCode } from './TaskCode';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning } from './Planning';
+import { CountersBar, useAnsweredTasks, useCounterHistory } from './CountersBar';
+import {
+  COUNTERS,
+  counterDef,
+  countAll,
+  type CounterCtx,
+  type CounterKey,
+  type DaySnapshot,
+} from './counters';
 import { CommandPalette, type Command } from './CommandPalette';
 import { applyTheme, loadTheme, watchSystemTheme, THEMES, type Theme } from './theme';
 import { applyFont, loadFont, FONTS, type Font } from './font';
@@ -1006,6 +1015,13 @@ function useBitrixData() {
   /* Pusty start; ostatnio widziana lista dochodzi z migawki w efekcie nizej. */
   const [data, setData] = useState<Data>(EMPTY);
 
+  /*
+   * Projekt, dla ktorego skonczyl sie tlowy przebieg story pointow i epikow. Do tego
+   * momentu „bez SP" i „bez epika" to w wiekszosci zadania jeszcze niedociagniete,
+   * wiec liczniki oparte na tych polach pokazuja wielokropek zamiast falszywej liczby.
+   */
+  const [metaGroup, setMetaGroup] = useState<number | null>(null);
+
   /**
    * Czy doszlo juz PRAWDZIWE pobranie. Dopoki nie, na ekranie stoi migawka.
    *
@@ -1375,9 +1391,11 @@ function useBitrixData() {
           void zapiszListe(groupId, zeStanu(zPolami));
           return zPolami;
         });
-      }).catch(() => {
-        /* Brak story pointow nie moze wywalic widoku — zostaja po prostu puste. */
-      });
+      })
+        .catch(() => {
+          /* Brak story pointow nie moze wywalic widoku — zostaja po prostu puste. */
+        })
+        .finally(() => setMetaGroup(groupId));
     } catch (e) {
       /*
        * Limit zapytan nie trafia na ekran bledu. `post` ponawia juz sam przez
@@ -1659,6 +1677,7 @@ function useBitrixData() {
     // Wybor widac natychmiast, jeszcze zanim dojda zadania — inaczej klikniecie
     // w projekt przez kilka sekund nie zmienia niczego poza licznikiem.
     groupId: project ?? data.groupId,
+    metaReady: metaGroup !== null && metaGroup === (project ?? data.groupId),
     loading,
     error,
     pending,
@@ -7824,6 +7843,7 @@ export default function App() {
     epics,
     epicNames,
     groupId,
+    metaReady,
     loading,
     error,
     pending,
@@ -8225,6 +8245,7 @@ export default function App() {
       setFilters(EMPTY_FILTERS);
       setQuery('');
       setCursor(0);
+      setCard(null);
       selectProject(id);
     },
     [groupId, selectProject],
@@ -8382,6 +8403,59 @@ export default function App() {
 
   const sprintId = activeSprint?.id ?? null;
 
+  /*
+   * Liczniki nad lista (patrz counters.ts). Licza CALA grupe — bez zakresu,
+   * przelacznikow i filtrow — bo odpowiadaja na pytanie „ile tego jest", a nie „ile
+   * widze". Klikniecie karty podmienia liste na dokladnie te zadania, ktore liczy.
+   */
+  const [card, setCard] = useState<CounterKey | null>(null);
+  const answered = useAnsweredTasks(tasks, {
+    closed: CLOSED_STATUSES,
+    itDepartments: config?.itDepartments ?? [],
+    itUsers: config?.itUsers ?? [],
+    me,
+    groupId,
+    enabled: metaReady,
+  });
+  const counterCtx = useMemo<CounterCtx>(
+    () => ({ sprintId, closed: CLOSED_STATUSES, answered }),
+    [sprintId, answered],
+  );
+  const counterDefs = useMemo(
+    () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),
+    [activeSprint],
+  );
+  const counterValues = useMemo(
+    () => countAll(tasks, counterCtx, counterDefs),
+    [tasks, counterCtx, counterDefs],
+  );
+  /* Dopoki nie doszlo swieze pobranie ze story pointami, na ekranie jest migawka z
+     poprzedniej sesji — liczba bylaby wczorajsza, wiec pokazujemy wielokropek. */
+  const counterPending = useMemo(() => {
+    const s = new Set<CounterKey>();
+    for (const d of counterDefs) {
+      if (!metaReady || (d.key === 'odpowiedzi' && answered === null)) s.add(d.key);
+    }
+    return s;
+  }, [counterDefs, metaReady, answered]);
+  const counterSnap = useMemo<DaySnapshot>(() => {
+    const s: DaySnapshot = {};
+    for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
+    if (!counterPending.has('sprint') && counterValues.sprint?.points != null) {
+      s.sprintPoints = counterValues.sprint.points;
+    }
+    return s;
+  }, [counterDefs, counterPending, counterValues]);
+  const counterPrev = useCounterHistory(groupId, counterSnap);
+  const cardTasks = useMemo(
+    () => (card ? tasks.filter((t) => counterDef(card).match(t, counterCtx)) : null),
+    [card, tasks, counterCtx],
+  );
+  // Zmiana filtrow, zakresu albo przelacznikow = wracasz do zwyklego widoku.
+  useEffect(() => {
+    setCard(null);
+  }, [filters, onlyMine, withUnassigned, showDone, scopePref]);
+
   // Przelaczniki dzialaja niezaleznie od zakresu, zeby liczniki przy zakresach
   // pokazywaly to, co faktycznie zobaczysz po klliknieciu.
   const base = useMemo(
@@ -8437,7 +8511,10 @@ export default function App() {
    * przelaczenie go NIE ma zamykac otwartego zadania. Zamyka je dopiero wypadniecie
    * z filtrow TRESCI (tylko moje, zakonczone, tag, szukanie) — patrz efekt nizej.
    */
-  const panelIds = useMemo(() => new Set(queriedBase.map((t) => t.id)), [queriedBase]);
+  const panelIds = useMemo(
+    () => new Set([...queriedBase, ...(cardTasks ?? [])].map((t) => t.id)),
+    [queriedBase, cardTasks],
+  );
 
   /*
    * Ile trafien przyszlo WYLACZNIE z opisu. To jedyna odpowiedz na pytanie „czy
@@ -8458,6 +8535,8 @@ export default function App() {
   }, [queriedBase, query, opisyIndeks]);
 
   const filtered = useMemo(() => {
+    // Aktywna karta licznika: lista = dokladnie to, co karta liczy (plus szukanie).
+    if (cardTasks) return matchQuery(cardTasks, query, opisyIndeks);
     const inScope = base.filter((t) => {
       const inSprint = sprintId !== null && t.sprintId === sprintId;
       if (scope === 'sprint' && !inSprint) return false;
@@ -8465,7 +8544,7 @@ export default function App() {
       return true;
     });
     return matchQuery(inScope, query, opisyIndeks);
-  }, [base, scope, sprintId, query, opisyIndeks]);
+  }, [base, scope, sprintId, query, opisyIndeks, cardTasks]);
 
   /** Wszystkie tagi wystepujace w grupie, z liczba uzyc — do palety i filtra. */
   const allTags = useMemo(() => {
@@ -10761,6 +10840,19 @@ export default function App() {
           </button>
         </header>
 
+        {/* Liczniki pod samym naglowkiem, nad zakresem i filtrami: licza cala grupe,
+            wiec stoja ponad tym, co pasek nizej zaweza. */}
+        {(viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
+          <CountersBar
+            defs={counterDefs}
+            values={counterValues}
+            pending={counterPending}
+            prev={counterPrev}
+            active={card}
+            onPick={setCard}
+          />
+        )}
+
         {/* Zakres jest zawsze na wierzchu — wyjscie poza aktywny sprint to jedno klikniecie. */}
         {/* Wybor Lista/Tablica siedzi wylacznie w panelu widoku (zakladki na gorze) —
             tu byl duplikat tej samej kontrolki. */}
@@ -10798,7 +10890,10 @@ export default function App() {
             scopes={scopes}
             counts={scopeCounts}
             activeSprint={activeSprint}
-            onPick={setScope}
+            onPick={(s) => {
+              setCard(null);
+              setScope(s);
+            }}
             blokada={blokadaZakresu}
           />
 

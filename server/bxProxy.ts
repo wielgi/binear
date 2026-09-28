@@ -129,6 +129,16 @@ export function bxProxy(mode: string): Plugin {
   const groupId = env.BX_GROUP_ID || '451';
   // Konto-zaslepka "Nieprzypisane" — patrz .env.example. Domyslnie 251 (Klaudiusz Koder).
   const unassignedId = Number(env.BX_UNASSIGNED_ID) || 251;
+  // Dzialy IT (np. "79,81") — licznik odpowiedzi w czacie. Patrz .env.example.
+  const itDepartments = (env.BX_IT_DEPARTMENTS || '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  // Konta liczone jako IT niezaleznie od dzialu — np. konto, z ktorego automat zadaje pytania.
+  const itUsers = (env.BX_IT_USERS || '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
 
   return {
     name: 'bitrix-proxy',
@@ -150,7 +160,17 @@ export function bxProxy(mode: string): Plugin {
 
       server.middlewares.use('/api/config', (_req, res) => {
         res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ groupId, userId, portal, unassignedId, configured: Boolean(webhook) }));
+        res.end(
+          JSON.stringify({
+            groupId,
+            userId,
+            portal,
+            unassignedId,
+            itDepartments,
+            itUsers,
+            configured: Boolean(webhook),
+          }),
+        );
       });
 
       /**

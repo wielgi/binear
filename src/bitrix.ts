@@ -1,5 +1,6 @@
 /** Klient REST Bitrix — leci przez lokalne proxy, token nigdy nie trafia do przegladarki. */
 
+import { QUESTION, type ChatMessage } from './counters';
 import { describe, logAction, slimParams, taskIdOf, WRITE_METHODS } from './history';
 
 export class BxError extends Error {
@@ -405,6 +406,11 @@ export interface Task {
    * dodatkowego zapytania.
    */
   newComments: number;
+  /**
+   * Czat zadania (komentarze nowszych zadan). Jest w `tasks.task.list`, wiec licznik
+   * odpowiedzi nie musi pytac o kazde zadanie osobno przez `tasks.task.get`.
+   */
+  chatId: number | null;
 }
 
 export interface Stage {
@@ -588,6 +594,7 @@ function normalizeTask(t: any): Task {
     storyPoints: null,
     epicId: null,
     newComments: Math.max(0, Number(t.newCommentsCount ?? t.NEW_COMMENTS_COUNT ?? 0) || 0),
+    chatId: relId(t.chatId ?? t.CHAT_ID),
   };
 }
 
@@ -618,6 +625,7 @@ const LIST_SELECT = [
   'PARENT_ID',
   'TAGS',
   'NEW_COMMENTS_COUNT',
+  'CHAT_ID',
 ];
 
 const PAGE = 50;
@@ -1604,6 +1612,50 @@ export async function fetchOlderComments(chatId: number, beforeId: number): Prom
   return starsze.sort((a, b) => stamp(a.date) - stamp(b.date));
 }
 
+export interface ChatTail {
+  /** Od najstarszej do najnowszej, z wpisami systemowymi (author_id 0). */
+  messages: ChatMessage[];
+  /** Autor → jego dzialy w strukturze firmy (pole `departments` w `users`). */
+  departments: Map<number, number[]>;
+}
+
+const TAIL_PAGE = 50;
+
+/**
+ * Koncowka czatu w surowej postaci — dla licznika odpowiedzi, nie dla panelu.
+ *
+ * Surowy BBCode, bo kotwica to „[B]1." pytan wywiadu. Dzialy autorow przychodza
+ * w tej samej odpowiedzi, wiec odroznienie IT od reszty nie kosztuje zapytania.
+ * Druga strona tylko wtedy, gdy w pierwszej pelnej nie ma zadnych pytan — kotwica
+ * to OSTATNIA runda, wiec lezy prawie zawsze w najnowszych wiadomosciach.
+ */
+export async function fetchChatTail(chatId: number, pages = 2): Promise<ChatTail> {
+  const messages: ChatMessage[] = [];
+  const departments = new Map<number, number[]>();
+  let lastId: number | undefined;
+
+  for (let p = 0; p < pages; p++) {
+    const res = await call<any>('im.dialog.messages.get', {
+      DIALOG_ID: `chat${chatId}`,
+      LIMIT: TAIL_PAGE,
+      ...(lastId ? { LAST_ID: lastId } : {}),
+    });
+    for (const u of Object.values((res?.users ?? {}) as Record<string, any>)) {
+      const id = Number(u?.id);
+      if (Number.isFinite(id)) departments.set(id, ((u?.departments ?? []) as unknown[]).map(Number));
+    }
+    const got: ChatMessage[] = Object.values((res?.messages ?? {}) as Record<string, any>)
+      .filter(Boolean)
+      .map((m: any) => ({ id: Number(m.id), authorId: Number(m.author_id) || 0, text: str(m.text) }));
+    messages.push(...got);
+    if (got.length < TAIL_PAGE || got.some((m) => QUESTION.test(m.text))) break;
+    lastId = Math.min(...got.map((m) => m.id));
+  }
+
+  messages.sort((a, b) => a.id - b.id);
+  return { messages, departments };
+}
+
 export async function addComment(taskId: number, text: string, authorId: number): Promise<void> {
   await call('task.commentitem.add', {
     TASKID: taskId,
@@ -2349,6 +2401,16 @@ export interface AppConfig {
   portal: string | null;
   /** Konto-zaslepka pokazywane jako "Nieprzypisane" — z .env (BX_UNASSIGNED_ID). */
   unassignedId: number;
+  /**
+   * Dzialy Bitriksa uznawane za IT — z .env (BX_IT_DEPARTMENTS). Licznik odpowiedzi
+   * odroznia po nich pytajacych od odpowiadajacych. Pusto = IT to tylko konto webhooka.
+   */
+  itDepartments: number[];
+  /**
+   * Konta liczone jako IT bez wzgledu na dzial — z .env (BX_IT_USERS). Typowo konto,
+   * z ktorego automat zadaje pytania wywiadu, gdy siedzi w dziale spoza IT.
+   */
+  itUsers: number[];
   configured: boolean;
 }
 
