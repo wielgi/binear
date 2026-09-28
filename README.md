@@ -109,6 +109,46 @@ with names (`{"243":{"id":243,"title":"EMX"}}`), so no dictionary query is neede
 Clicking a tag filters the list (shown in the scope bar, cleared with ✕). Tags are
 also a palette section with usage counts.
 
+## Counters
+
+A row of cards under the header answers "what is there to do in the register",
+following the steps of the task audit. Left to right:
+
+| card | counts |
+| --- | --- |
+| **Outside sprint** | open tasks outside the active sprint, deferred included |
+| **No epic** | open, not deferred, no epic |
+| **To interview** | open, not deferred, tagged `DO-WYWIADU` |
+| **Answers to read** | tagged `OCZEKUJE-NA-ODPOWIEDZ`, and someone outside IT wrote in the chat after our last round of questions |
+| **To estimate** | outside the sprint, tagged `DO-STARTU`, no story points |
+| **In sprint** | every task of the active sprint, done ones too, with the SP sum |
+
+The numbers are **global**: the whole group, regardless of scope, `Only mine`,
+`Completed` and filters. The point is to see whether the register holds 200 or 220
+tasks, not how many the current view shows. Clicking a card replaces the list
+with exactly the tasks it counts (search still applies); clicking it again, or
+changing scope, filters or toggles, returns to the normal view. Tag names match
+case-insensitively, as in Bitrix. Deferred tasks (status 6) stay out of the audit
+cards because the audit leaves them alone until someone resumes them.
+
+**Answers.** The anchor is the last comment by IT that looks like interview
+questions (a line starting with `[B]1.`). An answer is any later message from
+someone outside IT; system entries (`author_id 0`) don't count. A subtask with no
+questions of its own reads its parent's chat, where the interview usually happened.
+IT means the webhook owner, the accounts in `BX_IT_USERS` and the people in the
+`BX_IT_DEPARTMENTS` departments. Departments come with the chat messages
+(`users[].departments`), so telling IT apart costs no extra call. `CHAT_ID` is in
+the task list select, so the only cost is one `im.dialog.messages.get` per waiting
+task, batched. It runs after the story points arrive, again when a waiting task
+changes, and every 5 minutes.
+
+**Trend.** Each day's values are kept in the browser (`binear.counters.v1`, per
+project, 90 days). A card shows the change against the last recorded day before
+today (`▲ 20 wczoraj`); a rise is amber, a drop green. Only settled values are
+recorded: until story points and chats arrive, a card shows `…` and writes
+nothing, so a half-loaded zero can't pose as a drop. Days with binear closed are
+simply missing, and the arrow then compares with the last day it was open.
+
 ## Search
 
 An identifier-shaped query (`IT-749`, `it 749`, `749`, `#114677`) is matched

@@ -1389,6 +1389,131 @@ input[type='search']::-webkit-search-decoration {
   border-bottom: 1px solid var(--border);
 }
 
+/*
+ * Liczniki nad lista (CountersBar.tsx). Rzad kart jak pasek zakresu: stala wysokosc,
+ * przewijany w bok na waskim oknie. Karta to przycisk — klikniecie filtruje liste,
+ * wlaczona dostaje akcent, tak jak aktywny segment zakresu.
+ */
+.counters {
+  display: flex;
+  gap: var(--s2);
+  flex: 0 0 auto;
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/*
+ * Kolor karty = `--c`, ustawiany per klucz nizej. Niesie go pasek z lewej i kafelek
+ * ikony; tlo karty zostaje neutralne, zeby szesc kolorow naraz nie krzyczalo.
+ * Wlaczona karta dostaje obwodke i delikatne tlo w swoim kolorze.
+ */
+.counter {
+  --c: var(--accent);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  min-width: 150px;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--c);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.counter:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  border-left-color: var(--c);
+}
+
+.counter-on,
+.counter-on:hover {
+  border-color: var(--c);
+  background: color-mix(in srgb, var(--c) 12%, var(--bg-panel));
+}
+
+.counter-poza { --c: var(--accent); }
+.counter-epik { --c: var(--danger); }
+.counter-wywiad { --c: var(--accent-orange); }
+.counter-odpowiedzi { --c: var(--accent-amber); }
+.counter-wycena { --c: #a371f7; }
+.counter-sprint { --c: var(--accent-green); }
+
+.counter-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  border-radius: var(--radius);
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+}
+
+.counter-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.counter-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+}
+
+.counter-value {
+  font-size: var(--t-large);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.counter-pending {
+  color: var(--fg-dim);
+}
+
+.counter-points {
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.counter-label {
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.counter-delta {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Wiecej roboty niz wczoraj — bursztyn; mniej — zielen. Sprint nie ma kierunku. */
+.counter-delta-up {
+  color: var(--accent-amber);
+}
+
+.counter-delta-down {
+  color: var(--accent-green);
+}
+
+.counter-delta-when {
+  color: var(--fg-dim);
+}
+
 .segments {
   display: flex;
   gap: 2px;

@@ -173,6 +173,15 @@ import { TaskCode } from './TaskCode';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning } from './Planning';
+import { CountersBar, useAnsweredTasks, useCounterHistory } from './CountersBar';
+import {
+  COUNTERS,
+  counterDef,
+  countAll,
+  type CounterCtx,
+  type CounterKey,
+  type DaySnapshot,
+} from './counters';
 import { CommandPalette, type Command } from './CommandPalette';
 import { applyTheme, loadTheme, watchSystemTheme, THEMES, type Theme } from './theme';
 import { applyFont, loadFont, FONTS, type Font } from './font';
@@ -550,6 +559,8 @@ interface Settings {
    * nie ma skonczonego zbioru grup do domalowania.
    */
   showEmpty: boolean;
+  /** Karty licznikow pod naglowkiem (patrz `CountersBar`). */
+  showCounters: boolean;
   /**
    * PUSTE kategorie (kolumny/grupy), ktore mimo braku zadan maja byc widoczne —
    * po NAZWIE, bo te same etapy maja rozne id w kazdym sprincie (patrz stageOrder).
@@ -603,6 +614,7 @@ const DEFAULT_SETTINGS: Settings = {
   planTura: 0,
   planTylkoDoStartu: true,
   showEmpty: false,
+  showCounters: true,
   shownEmpty: [],
   detailWidth: 520,
   collapsed: [],
@@ -1006,6 +1018,13 @@ function useBitrixData() {
   /* Pusty start; ostatnio widziana lista dochodzi z migawki w efekcie nizej. */
   const [data, setData] = useState<Data>(EMPTY);
 
+  /*
+   * Projekt, dla ktorego skonczyl sie tlowy przebieg story pointow i epikow. Do tego
+   * momentu „bez SP" i „bez epika" to w wiekszosci zadania jeszcze niedociagniete,
+   * wiec liczniki oparte na tych polach pokazuja wielokropek zamiast falszywej liczby.
+   */
+  const [metaGroup, setMetaGroup] = useState<number | null>(null);
+
   /**
    * Czy doszlo juz PRAWDZIWE pobranie. Dopoki nie, na ekranie stoi migawka.
    *
@@ -1375,9 +1394,11 @@ function useBitrixData() {
           void zapiszListe(groupId, zeStanu(zPolami));
           return zPolami;
         });
-      }).catch(() => {
-        /* Brak story pointow nie moze wywalic widoku — zostaja po prostu puste. */
-      });
+      })
+        .catch(() => {
+          /* Brak story pointow nie moze wywalic widoku — zostaja po prostu puste. */
+        })
+        .finally(() => setMetaGroup(groupId));
     } catch (e) {
       /*
        * Limit zapytan nie trafia na ekran bledu. `post` ponawia juz sam przez
@@ -1659,6 +1680,7 @@ function useBitrixData() {
     // Wybor widac natychmiast, jeszcze zanim dojda zadania — inaczej klikniecie
     // w projekt przez kilka sekund nie zmienia niczego poza licznikiem.
     groupId: project ?? data.groupId,
+    metaReady: metaGroup !== null && metaGroup === (project ?? data.groupId),
     loading,
     error,
     pending,
@@ -6428,6 +6450,7 @@ function ViewMenu({
     tint: ListTint;
     deadline: DeadlineLook;
     empty: boolean;
+    counters: boolean;
     filtersOn: boolean;
     theme: Theme;
     font: Font;
@@ -6451,6 +6474,7 @@ function ViewMenu({
     tint: (v: ListTint) => void;
     deadline: (v: DeadlineLook) => void;
     empty: () => void;
+    counters: () => void;
     toggleColumn: (name: string) => void;
     clearFilters: () => void;
     reload: () => void;
@@ -6657,6 +6681,8 @@ function ViewMenu({
           zamiast zostawiac przycisk, ktory nic nie robi.
         */}
         {check('Pokaż zakończone', state.done, on.done, planMode)}
+        {/* Liczniki sa tylko nad lista i tablica — w planowaniu nie ma ich czym chowac. */}
+        {check('Pokaż liczniki', state.counters, on.counters, planMode)}
 
         <div className="menu-sep" />
         {/* „Kolumny/Grupy" otwiera OSOBNY panel obok — w dolnej sekcji, obok akcji. */}
@@ -7824,6 +7850,7 @@ export default function App() {
     epics,
     epicNames,
     groupId,
+    metaReady,
     loading,
     error,
     pending,
@@ -8019,6 +8046,7 @@ export default function App() {
     LIST_TINTS.some((t) => t.key === saved.listTint) ? saved.listTint : 'fade',
   );
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
+  const [showCounters, setShowCounters] = useState(saved.showCounters ?? true);
   const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
@@ -8225,6 +8253,7 @@ export default function App() {
       setFilters(EMPTY_FILTERS);
       setQuery('');
       setCursor(0);
+      setCard(null);
       selectProject(id);
     },
     [groupId, selectProject],
@@ -8382,6 +8411,84 @@ export default function App() {
 
   const sprintId = activeSprint?.id ?? null;
 
+  /*
+   * Liczniki nad lista (patrz counters.ts). Licza CALA grupe — bez zakresu,
+   * przelacznikow i filtrow — bo odpowiadaja na pytanie „ile tego jest", a nie „ile
+   * widze". Klikniecie karty podmienia liste na dokladnie te zadania, ktore liczy.
+   */
+  const [card, setCard] = useState<CounterKey | null>(null);
+  const answered = useAnsweredTasks(tasks, {
+    closed: CLOSED_STATUSES,
+    itDepartments: config?.itDepartments ?? [],
+    itUsers: config?.itUsers ?? [],
+    me,
+    groupId,
+    enabled: metaReady,
+  });
+  const counterCtx = useMemo<CounterCtx>(
+    () => ({ sprintId, closed: CLOSED_STATUSES, answered }),
+    [sprintId, answered],
+  );
+  const counterDefs = useMemo(
+    () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),
+    [activeSprint],
+  );
+  const counterValues = useMemo(
+    () => countAll(tasks, counterCtx, counterDefs),
+    [tasks, counterCtx, counterDefs],
+  );
+  /* Dopoki nie doszlo swieze pobranie ze story pointami, na ekranie jest migawka z
+     poprzedniej sesji — liczba bylaby wczorajsza, wiec pokazujemy wielokropek. */
+  const counterPending = useMemo(() => {
+    const s = new Set<CounterKey>();
+    for (const d of counterDefs) {
+      if (!metaReady || (d.key === 'odpowiedzi' && answered === null)) s.add(d.key);
+    }
+    return s;
+  }, [counterDefs, metaReady, answered]);
+  const counterSnap = useMemo<DaySnapshot>(() => {
+    const s: DaySnapshot = {};
+    for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
+    if (!counterPending.has('sprint') && counterValues.sprint?.points != null) {
+      s.sprintPoints = counterValues.sprint.points;
+    }
+    return s;
+  }, [counterDefs, counterPending, counterValues]);
+  const counterPrev = useCounterHistory(groupId, counterSnap);
+  const cardTasks = useMemo(
+    () => (card ? tasks.filter((t) => counterDef(card).match(t, counterCtx)) : null),
+    [card, tasks, counterCtx],
+  );
+  /*
+   * Karta USTAWIA pasek pod siebie: zakres, „Pokaż zakończone" i filtry maja
+   * mowic, co naprawde jest na liscie. Wczesniej karta podmieniala liste, a pasek
+   * dalej pokazywal np. „Aktywny sprint" nad zadaniami spoza sprintu.
+   *
+   * Karta liczy cala grupe, wiec filtry i „Tylko moje" schodza; zakonczone widac
+   * tylko przy „W sprincie" (tylko ona je liczy).
+   */
+  const stanKarty = (k: CounterKey) => ({
+    scope: (k === 'sprint' ? 'sprint' : k === 'poza' || k === 'wycena' ? 'outside' : 'all') as Scope,
+    done: k === 'sprint',
+  });
+  const pickCard = useCallback((k: CounterKey | null) => {
+    setCard(k);
+    if (!k) return;
+    const st = stanKarty(k);
+    setScope(st.scope);
+    setShowDone(st.done);
+    setOnlyMine(false);
+    setFilters(EMPTY_FILTERS);
+  }, []);
+  /* Kazda RECZNA zmiana paska rozjezdza go z karta — wtedy wracasz do zwyklego
+     widoku. Porownujemy ze stanem karty zamiast reagowac na sama zmiane, bo
+     ustawienie paska przez karte tez jest zmiana. */
+  useEffect(() => {
+    if (!card) return;
+    const st = stanKarty(card);
+    if (scopePref !== st.scope || showDone !== st.done || onlyMine || anyFilter(filters)) setCard(null);
+  }, [card, filters, onlyMine, showDone, scopePref]);
+
   // Przelaczniki dzialaja niezaleznie od zakresu, zeby liczniki przy zakresach
   // pokazywaly to, co faktycznie zobaczysz po klliknieciu.
   const base = useMemo(
@@ -8437,7 +8544,10 @@ export default function App() {
    * przelaczenie go NIE ma zamykac otwartego zadania. Zamyka je dopiero wypadniecie
    * z filtrow TRESCI (tylko moje, zakonczone, tag, szukanie) — patrz efekt nizej.
    */
-  const panelIds = useMemo(() => new Set(queriedBase.map((t) => t.id)), [queriedBase]);
+  const panelIds = useMemo(
+    () => new Set([...queriedBase, ...(cardTasks ?? [])].map((t) => t.id)),
+    [queriedBase, cardTasks],
+  );
 
   /*
    * Ile trafien przyszlo WYLACZNIE z opisu. To jedyna odpowiedz na pytanie „czy
@@ -8458,6 +8568,8 @@ export default function App() {
   }, [queriedBase, query, opisyIndeks]);
 
   const filtered = useMemo(() => {
+    // Aktywna karta licznika: lista = dokladnie to, co karta liczy (plus szukanie).
+    if (cardTasks) return matchQuery(cardTasks, query, opisyIndeks);
     const inScope = base.filter((t) => {
       const inSprint = sprintId !== null && t.sprintId === sprintId;
       if (scope === 'sprint' && !inSprint) return false;
@@ -8465,7 +8577,7 @@ export default function App() {
       return true;
     });
     return matchQuery(inScope, query, opisyIndeks);
-  }, [base, scope, sprintId, query, opisyIndeks]);
+  }, [base, scope, sprintId, query, opisyIndeks, cardTasks]);
 
   /** Wszystkie tagi wystepujace w grupie, z liczba uzyc — do palety i filtra. */
   const allTags = useMemo(() => {
@@ -9004,6 +9116,7 @@ export default function App() {
       deadlineLook,
       szukajWOpisach: wOpisach,
       showEmpty,
+      showCounters,
       shownEmpty,
       detailWidth,
       collapsed: [...collapsed],
@@ -9014,7 +9127,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, listTint, deadlineLook, wOpisach, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -10761,6 +10874,19 @@ export default function App() {
           </button>
         </header>
 
+        {/* Liczniki pod samym naglowkiem, nad zakresem i filtrami: licza cala grupe,
+            wiec stoja ponad tym, co pasek nizej zaweza. */}
+        {showCounters && (viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
+          <CountersBar
+            defs={counterDefs}
+            values={counterValues}
+            pending={counterPending}
+            prev={counterPrev}
+            active={card}
+            onPick={pickCard}
+          />
+        )}
+
         {/* Zakres jest zawsze na wierzchu — wyjscie poza aktywny sprint to jedno klikniecie. */}
         {/* Wybor Lista/Tablica siedzi wylacznie w panelu widoku (zakladki na gorze) —
             tu byl duplikat tej samej kontrolki. */}
@@ -10798,7 +10924,10 @@ export default function App() {
             scopes={scopes}
             counts={scopeCounts}
             activeSprint={activeSprint}
-            onPick={setScope}
+            onPick={(s) => {
+              setCard(null);
+              setScope(s);
+            }}
             blokada={blokadaZakresu}
           />
 
@@ -11554,6 +11683,7 @@ export default function App() {
             tint: listTint,
             deadline: deadlineLook,
             empty: showEmpty,
+            counters: showCounters,
             filtersOn: anyFilter(filters),
             theme,
             font,
@@ -11583,6 +11713,11 @@ export default function App() {
             tint: setListTint,
             deadline: setDeadlineLook,
             empty: () => setShowEmpty((v) => !v),
+            /* Schowane karty nie zostawiaja wybranej — nie byloby jak z niej wyjsc. */
+            counters: () => {
+              setShowCounters((v) => !v);
+              setCard(null);
+            },
             toggleColumn,
             clearFilters: () => setFilters(EMPTY_FILTERS),
             reload: () => void reload(),
