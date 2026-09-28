@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { podzielNaTrafienia } from './taskView';
+import { podzielNaTrafienia, tagsForWidth } from './taskView';
 
 /** Skrot do czytelnych asercji: „ab[cd]ef" znaczy, ze `cd` jest podswietlone. */
 const zapis = (text: string, fraza: string) =>
@@ -46,5 +46,41 @@ describe('podzielNaTrafienia', () => {
 
   it('nie gubi ogona po ostatnim trafieniu', () => {
     expect(zapis('raz dwa raz trzy', 'raz')).toBe('[raz] dwa [raz] trzy');
+  });
+});
+
+/*
+ * Kolejnosc ustepowania w wierszu. Testy pilnuja dwoch rzeczy, na ktore juz raz
+ * sie nadzialismy: ze przy ciasnocie zostaje ZERO chipow (dawna dolna granica
+ * wynosila 2 i to one zjadaly tytul), oraz ze zero na wejsciu — czyli „jeszcze
+ * nie zmierzono" — nie udaje szerokiego wiersza. To drugie maskowalo pomiar,
+ * ktorego nigdy nie bylo: `useWidth` oddawal 0, a limit wychodzil sensowny.
+ */
+describe('tagsForWidth', () => {
+  it('szeroki wiersz pokazuje wszystkie chipy', () => {
+    expect(tagsForWidth(1850)).toBe(6);
+    expect(tagsForWidth(1500)).toBe(6);
+  });
+
+  it('kazdy prog schodzi o jeden chip', () => {
+    expect(tagsForWidth(1499)).toBe(5);
+    expect(tagsForWidth(1250)).toBe(5);
+    expect(tagsForWidth(1000)).toBe(4);
+    expect(tagsForWidth(820)).toBe(3);
+    expect(tagsForWidth(640)).toBe(2);
+    expect(tagsForWidth(480)).toBe(1);
+  });
+
+  it('przy ciasnocie nie zostaje ani jeden chip — tytul ma pierwszenstwo', () => {
+    expect(tagsForWidth(479)).toBe(0);
+    expect(tagsForWidth(200)).toBe(0);
+  });
+
+  it('brak pomiaru nie udaje szerokiego wiersza', () => {
+    expect(tagsForWidth(0)).toBe(0);
+  });
+
+  it('nie schodzi ponizej zera przy bzdurnej szerokosci', () => {
+    expect(tagsForWidth(-100)).toBe(0);
   });
 });

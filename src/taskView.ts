@@ -128,3 +128,27 @@ export function podzielNaTrafienia(text: string, fraza: string): Kawalek[] {
   if (i < text.length) out.push({ text: text.slice(i), hit: false });
   return out;
 }
+
+/**
+ * Ile tagow pokazac, zanim reszta zwinie sie w „+N".
+ *
+ * Liczone z szerokosci POJEMNIKA, w ktorym stoi wiersz — nie z szerokosci okna.
+ * Ta sama funkcja obsluguje liste (pelna szerokosc) i panele planowania, ktore
+ * przy dwoch kolumnach maja polowe tego miejsca; bez tego panel dostawal limit
+ * wyliczony dla listy i tagi nie miescily sie w wierszu.
+ */
+export function tagsForWidth(width: number): number {
+  if (width >= 1500) return 6;
+  if (width >= 1250) return 5;
+  if (width >= 1000) return 4;
+  if (width >= 820) return 3;
+  if (width >= 640) return 2;
+  if (width >= 480) return 1;
+  /*
+   * Ponizej 480 px NIE MA zadnego chipa — zostaje samo „+N". Dawniej dolna
+   * granica wynosila 2 chipy i to one zjadaly caly wiersz: tytul, ktory ma
+   * `flex-basis: 0`, dostawal wtedy zero miejsca i znikal calkowicie. Tytul
+   * niesie tresc, tagi sa dopiskiem — przy ciasnocie ustepuja tagi.
+   */
+  return 0;
+}

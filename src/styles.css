@@ -2118,6 +2118,12 @@ input[type='search']::-webkit-search-decoration {
   box-shadow: inset 0 0 0 1px var(--border-strong);
   opacity: 0;
   transition: opacity 120ms ease, background 120ms ease;
+  /*
+   * Znosi odstep `gap` wiersza PO checkboxie, zeby ikona priorytetu stala tuz
+   * przy nim. Sam slot 16 px ZOSTAJE — gdyby znikal razem z widocznoscia, cala
+   * zawartosc wiersza przeskakiwalaby w bok przy kazdym najechaniu.
+   */
+  margin-right: calc(var(--s2) * -1);
 }
 
 .row:hover .row-check,
@@ -2228,9 +2234,17 @@ input[type='search']::-webkit-search-decoration {
   white-space: nowrap;
 }
 
+/*
+ * Tytul ma PIERWSZENSTWO przed tagami przy ciasnym wierszu.
+ *
+ * `flex-basis: 0` znaczy, ze tytul dostaje tylko to, co zostanie — wiec gdy
+ * reszta wypelni wiersz, zostaje mu zero i znika bez sladu. `min-width`
+ * rezerwuje mu kawalek, ktorego nic juz nie zabierze; wielokropek dziala jak
+ * dotad, tylko na wezszym polu.
+ */
 .row-title {
   flex: 1;
-  min-width: 0;
+  min-width: 5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2692,11 +2706,26 @@ input[type='search']::-webkit-search-decoration {
 }
 
 /* Caly pasek jest strefa najechania — dymek nie zalezy od trafienia w "+N". */
+/*
+ * Przy ciasnym wierszu ustepuja TAGI, nie tytul.
+ *
+ * Wczesniej pasek tagow mial `flex: 0 0 auto`, czyli nie kurczyl sie wcale —
+ * jedynym elastycznym elementem zostawal tytul i to on dostawal wielokropek,
+ * chociaz to on niesie tresc, a tagi sa dopiskiem. Przy bardzo waskim wierszu
+ * tagi wypychaly poza kadr nawet awatar.
+ *
+ * `flex-basis: auto` (czyli szerokosc tagow) przy `flex-shrink: 1` sprawia, ze
+ * to one absorbuja zwezenie: tytul ma bazę `0%`, wiec jego udzial w kurczeniu
+ * jest znikomy. `overflow: hidden` to bezpiecznik — nic stad nie wyjdzie poza
+ * wiersz, nawet gdy miejsca zabraknie zupelnie.
+ */
 .tag-strip {
   display: inline-flex;
   align-items: center;
   gap: var(--s1);
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tag-more {

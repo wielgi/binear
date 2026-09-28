@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -137,6 +138,7 @@ import {
 import {
   MONTHS,
   podzielNaTrafienia,
+  tagsForWidth,
   shortDate,
   isUnassigned,
   setUnassignedId,
@@ -2667,28 +2669,32 @@ function ScrollX({
   );
 }
 
-/**
- * Ile tagow miesci sie w wierszu przy danej szerokosci listy. Mierzymy realny
- * kontener (a nie okno), bo otwarty panel szczegolow zabiera polowe ekranu —
- * inaczej przy szerokim oknie i otwartym panelu tagi i tak by sie nie miescily.
- * Stala wartosc 2 powodowala "+N" nawet wtedy, gdy miejsca bylo pod dostatkiem.
+/*
+ * Ile tagow miesci sie w wierszu — `tagsForWidth` siedzi w `taskView`, bo liczy
+ * to samo dla listy i dla paneli planowania, a te nie moga importowac z App
+ * (cykl). Mierzymy realny kontener, a nie okno: otwarty panel szczegolow
+ * zabiera polowe ekranu.
  */
-function tagsForWidth(width: number): number {
-  if (width >= 1500) return 6;
-  if (width >= 1250) return 5;
-  if (width >= 1000) return 4;
-  if (width >= 820) return 3;
-  return 2;
-}
 
 /** Szerokosc elementu na zywo — ResizeObserver, bo zalezy tez od panelu bocznego. */
 function useWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [width, setWidth] = useState(0);
 
-  useEffect(() => {
+  /*
+   * Odczyt OD RAZU po ulozeniu, a nie tylko przez obserwatora.
+   *
+   * Sam `ResizeObserver` zostawal z zerem: lapal element, zanim uklad policzyl
+   * mu szerokosc, a pozniejsze ulozenie nie zawsze wywoluje kolejne zgloszenie.
+   * Dlugo tego nie bylo widac, bo `tagsForWidth(0)` oddawalo wtedy 2 chipy —
+   * liczba na tyle sensowna, ze wygladala na wynik pomiaru. Dopiero obnizenie
+   * dolnego progu do zera pokazalo, ze pomiaru nigdy nie bylo.
+   */
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    setWidth(el.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
