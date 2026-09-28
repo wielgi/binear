@@ -493,6 +493,9 @@ export const WRITE_METHODS = new Set([
      laczenia odczytow, wiec zapis zostalby potraktowany jak zapytanie. */
   'disk.folder.uploadfile',
   'im.disk.file.commit',
+  /* Zalozenie kolejnego sprintu z widoku planowania. Tak jak wyzej: bez wpisu
+     tutaj `call` potraktowalby to jak odczyt i wpuscil do laczenia zapytan. */
+  'tasks.api.scrum.sprint.add',
   'task.checklistitem.complete',
   'task.checklistitem.renew',
 ]);

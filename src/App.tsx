@@ -38,6 +38,8 @@ import {
   fetchEpics,
   fetchTaskDetail,
   fetchTaskHistory,
+  BxError,
+  createSprint,
   fetchDescriptions,
   fetchTasks,
   fetchRelated,
@@ -97,6 +99,7 @@ import {
   ChevronIcon,
   GroupIcon,
   HistoryIcon,
+  PlanIcon,
   PriorityIcon,
   SearchIcon,
   StageIcon,
@@ -169,6 +172,7 @@ import {
 import { TaskCode } from './TaskCode';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
+import { Planning } from './Planning';
 import { CommandPalette, type Command } from './CommandPalette';
 import { applyTheme, loadTheme, watchSystemTheme, THEMES, type Theme } from './theme';
 import { applyFont, loadFont, FONTS, type Font } from './font';
@@ -210,7 +214,7 @@ type PickerKind =
   | 'parent'
   | 'epic'
   | 'tags';
-type ViewMode = 'list' | 'board' | 'charts';
+type ViewMode = 'list' | 'board' | 'charts' | 'planning';
 
 /**
  * Wyglad terminu w wierszu listy. Trzy warianty ZOSTAJA na stale — nie sa
@@ -489,6 +493,18 @@ interface Settings {
   onlyMine: boolean;
   withUnassigned: boolean;
   showDone: boolean;
+  /*
+   * Filtry WIDOKU PLANOWANIA — wlasne, nie te z panelu.
+   *
+   * Planowanie odpowiada na inne pytanie niz lista ("co bierzemy dalej", a nie
+   * "co jest"), wiec i odsiew ma inny: domyslnie bez zakonczonych, za to
+   * z oddanymi do akceptacji. Wspolne przelaczniki znaczylyby, ze ustawienie
+   * listy po cichu zmienia sumy w panelach planowania — i odwrotnie.
+   */
+  planDone: boolean;
+  planReview: boolean;
+  /** Stos kluczy sortowania planowania — kolejnosc ma znaczenie. */
+  planSort: { by: PlanSortBy; dir: 'asc' | 'desc' }[];
   /**
    * Odcien grup na LISCIE — trzy warianty do porownania na zywo:
    *  `head` pasek na naglowku, `fade` pasek + wygaszanie w dol, `rail` szyna z lewej.
@@ -502,6 +518,31 @@ interface Settings {
    * nalezy do uzytkownika, a nie do domyslnej konfiguracji.
    */
   szukajWOpisach: boolean;
+  /*
+   * Moce zespolu na sprint, w SP. `null` = nie ustawiono recznie i bierzemy
+   * odniesienie, ktore widok planowania i tak liczy: ile zespol NAPRAWDE dowiozl
+   * w ostatnim zamknietym sprincie. Uczciwszy domysl niz okragla liczba.
+   */
+  planMoce: number | null;
+  /*
+   * KOLEJKA DZIALOW do wybierania zadan na kolejny sprint. Dzialy to EPIKI grupy
+   * — nie wymyslamy drugiego slownika, skoro zadania sa juz nimi opisane.
+   *
+   * Trzymamy identyfikatory, nie nazwy: epik da sie w Bitriksie przemianowac,
+   * a kolejnosc ma to przezyc. Czego NIE MA w zapisie, jest nowe i dopisuje sie
+   * na koniec — dzieki temu dolozony epik pojawia sie sam, a usuniety znika.
+   */
+  planKolejka: number[];
+  /** Dzialy chwilowo pomijane (nieobecne na spotkaniu). */
+  planPominieci: number[];
+  /** Ile razy juz wybierano — pozycja w kolejce to reszta z dzielenia. */
+  planTura: number;
+  /*
+   * Czy rejestr w trakcie tury ma pokazywac TYLKO zadania z tagiem `DO-STARTU`.
+   * Domyslnie tak: bez tego do wyboru wchodza rzeczy jeszcze niedomyslane
+   * (`DO-WYWIADU`, `OCZEKUJE-NA-ODPOWIEDZ`), ktorych nie ma sensu brac na sprint.
+   */
+  planTylkoDoStartu: boolean;
   /**
    * Puste grupy/kolumny. Lista: pokazuje naglowek etapu/statusu nawet bez zadan.
    * Tablica: gdy wylaczone, kolumna bez kart znika (np. "Wdrozone", gdy nic nie
@@ -543,10 +584,24 @@ const DEFAULT_SETTINGS: Settings = {
   onlyMine: true,
   withUnassigned: false,
   showDone: false,
+  planDone: false,
+  planReview: true,
+  /* Domyslna kolejnosc waznosci — plomien rosnaco (ranga 0 = wysoki), tag tak
+     samo, a story pointy malejaco, bo tu wiecej znaczy wazniej. */
+  planSort: [
+    { by: 'priority', dir: 'asc' },
+    { by: 'wysoki', dir: 'asc' },
+    { by: 'sp', dir: 'desc' },
+  ],
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
   listTint: 'fade',
   deadlineLook: 'mark',
   szukajWOpisach: false,
+  planMoce: null,
+  planKolejka: [],
+  planPominieci: [],
+  planTura: 0,
+  planTylkoDoStartu: true,
   showEmpty: false,
   shownEmpty: [],
   detailWidth: 520,
@@ -1685,12 +1740,35 @@ const PRIORITY_RANK: Record<string, number> = { '2': 0, '1': 1, '0': 2 };
 type SortBy = 'updated' | 'created' | 'priority' | 'deadline' | 'title';
 type Dir = 'asc' | 'desc';
 
+/*
+ * ETAP jako klucz sortowania istnieje TYLKO w planowaniu.
+ *
+ * `taskComparator` go nie zna i nie moze: etap to kolumna konkretnego sprintu,
+ * a kolejnosc kolumn siedzi w `stageOrder`, ktory jest stanem aplikacji, nie
+ * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
+ * na liscie i tak grupuje sie po etapie.
+ */
+type PlanSortBy = SortBy | 'stage' | 'wysoki' | 'sp';
+
 const SORTS: { key: SortBy; label: string }[] = [
   { key: 'updated', label: 'Zaktualizowane' },
   { key: 'created', label: 'Utworzone' },
   { key: 'priority', label: 'Priorytet' },
   { key: 'deadline', label: 'Termin' },
   { key: 'title', label: 'Tytuł' },
+];
+
+const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
+  /*
+   * Kolejnosc waznosci to TRZY OSOBNE POZIOMY, nie jeden zlozony klucz: priorytet
+   * Bitriksa, potem tag „Wysoki", potem story pointy malejaco. Zwiniete w jedna
+   * pozycje bylyby niewidoczne w liscie i nie dalo by sie poprawic zadnego z nich
+   * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
+   */
+  { key: 'wysoki', label: 'Tag „Wysoki”' },
+  { key: 'sp', label: 'Story pointy' },
+  { key: 'stage', label: 'Etap w sprincie' },
+  ...SORTS,
 ];
 
 const time = (iso: string | null) => {
@@ -2481,12 +2559,21 @@ function ScopePicker({
   counts,
   activeSprint,
   onPick,
+  blokada,
 }: {
   scope: Scope;
   scopes: typeof SCOPES;
   counts: Record<Scope, number>;
   activeSprint: { name: string; dateStart: string | null; dateEnd: string | null } | null;
   onPick: (s: Scope) => void;
+  /**
+   * Powod, dla ktorego zakres jest nieczynny — albo `null`, gdy dziala.
+   *
+   * ZOSTAWIAMY wszystkie opcje i tylko odcinamy klikanie. Wyciecie ich z listy
+   * kazaloby sie zastanawiac, czy zniknely na stale i czy czegos sie nie zepsulo;
+   * nieczynny przelacznik z wyjasnieniem odpowiada na to od razu.
+   */
+  blokada: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -2542,16 +2629,29 @@ function ScopePicker({
     <div className={`scope-picker-wrap${open ? ' scope-open' : ''}`} ref={wrapRef}>
       {open && <div className="picker-backdrop" onClick={() => setOpen(false)} />}
 
-      <button
-        className={`scope-picker${open ? ' scope-picker-open' : ''}`}
-        title="Zakres"
-        onClick={() => setOpen((o) => !o)}
+      {/*
+        Gdy zakres jest nieczynny, przycisk zostaje na miejscu i wyglada tak samo,
+        tylko przygaszony i nieklikalny — a dymek mowi DLACZEGO. `HoverNote`
+        opakowuje go w element, ktory nadal lapie kursor, wiec wyjasnienie da sie
+        przeczytac mimo zablokowanego przycisku.
+      */}
+      <HoverNote
+        className="scope-picker-note"
+        label={blokada ? 'Zakres nieczynny' : undefined}
+        value={blokada ?? 'Zakres'}
+        note={blokada ? 'w tym widoku' : undefined}
       >
-        <span className="scope-picker-label">{labelFor(cur)}</span>
-        {dates(cur.key)}
-        <span className="segment-count">{counts[cur.key]}</span>
-        <ChevronIcon open={open} />
-      </button>
+        <button
+          className={`scope-picker${open ? ' scope-picker-open' : ''}${blokada ? ' scope-picker-locked' : ''}`}
+          disabled={Boolean(blokada)}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span className="scope-picker-label">{labelFor(cur)}</span>
+          {dates(cur.key)}
+          <span className="segment-count">{counts[cur.key]}</span>
+          <ChevronIcon open={open} />
+        </button>
+      </HoverNote>
 
       {open && (
         <div className="scope-menu" role="listbox">
@@ -2669,13 +2769,12 @@ function ScrollX({
   );
 }
 
-/*
- * Ile tagow miesci sie w wierszu — `tagsForWidth` siedzi w `taskView`, bo liczy
- * to samo dla listy i dla paneli planowania, a te nie moga importowac z App
- * (cykl). Mierzymy realny kontener, a nie okno: otwarty panel szczegolow
- * zabiera polowe ekranu.
+/**
+ * Ile tagow miesci sie w wierszu przy danej szerokosci listy. Mierzymy realny
+ * kontener (a nie okno), bo otwarty panel szczegolow zabiera polowe ekranu —
+ * inaczej przy szerokim oknie i otwartym panelu tagi i tak by sie nie miescily.
+ * Stala wartosc 2 powodowala "+N" nawet wtedy, gdy miejsca bylo pod dostatkiem.
  */
-
 /** Szerokosc elementu na zywo — ResizeObserver, bo zalezy tez od panelu bocznego. */
 function useWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -6082,7 +6181,7 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ['R'], label: 'Odśwież dane z Bitriksa' },
   { keys: ['X'], label: 'Wyczyść filtry i wyszukiwanie' },
   { keys: ['V'], label: 'Zapisane widoki — potem 1…9 wybiera widok' },
-  { keys: ['1', '2', '3'], label: 'Lista / Tablica / Wykresy' },
+  { keys: ['1', '2', '3', '4'], label: 'Lista / Tablica / Wykresy / Planowanie' },
   { keys: ['W'], label: 'Sprint — wrzuć do sprintu albo do backlogu' },
   { keys: ['M'], label: 'Etap w sprincie' },
   { keys: ['A'], label: 'Osoba odpowiedzialna' },
@@ -6092,6 +6191,76 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ['D'], label: 'Dziennik akcji — co binear zapisał do Bitriksa' },
   { keys: ['?'], label: 'Ta ściągawka' },
 ];
+
+/**
+ * "Uzupelnij braki" przed wejsciem do sprintu.
+ *
+ * Okno PYTA, nie blokuje. Zadanie bez story pointow jest niewidoczne dla wykresu
+ * spalania i dla kazdej sumy SP, a bez osoby nie da sie rozlozyc obciazenia —
+ * czyli przepada dokladnie to, po co planowanie istnieje. Ale bywa, ze chodzi
+ * o szybkie i brudne wrzucenie, wiec "Wrzuć tak czy siak" jest rownorzednym
+ * wyjsciem, a nie schowanym linkiem.
+ *
+ * Braki tylko POKAZUJEMY. Uzupelnia sie je w panelu zadania, gdzie sa wszystkie
+ * pola i podpowiedzi — powielanie tych kontrolek tutaj znaczyloby drugie miejsce
+ * do utrzymania i drugi zestaw bledow.
+ */
+function GapPrompt({
+  tasks,
+  sprintName,
+  onOpen,
+  onSkip,
+  onCancel,
+}: {
+  tasks: Task[];
+  sprintName: string;
+  onOpen: (id: number) => void;
+  onSkip: () => void;
+  onCancel: () => void;
+}) {
+  const gaps = (t: Task) =>
+    [
+      t.storyPoints === null ? 'story pointy' : null,
+      isUnassigned(t.responsibleId) ? 'osoba' : null,
+      t.tags.length === 0 && !t.epicId ? 'tag lub epik' : null,
+    ].filter(Boolean) as string[];
+
+  return (
+    <>
+      <div className="palette-backdrop" onClick={onCancel} />
+      <div className="palette shortcuts" role="dialog" aria-label="Uzupełnij braki">
+        <div className="palette-section">
+          {tasks.length === 1 ? 'Temu zadaniu czegoś brakuje' : `Tym zadaniom czegoś brakuje (${tasks.length})`}
+        </div>
+
+        <div className="palette-list">
+          {tasks.map((t) => (
+            <button key={t.id} className="gap-row" onClick={() => onOpen(t.id)}>
+              <span className="gap-code">{t.code ?? `#${t.id}`}</span>
+              <span className="gap-title">{t.title || t.rawTitle}</span>
+              <span className="gap-what">{gaps(t).join(', ')}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="palette-foot gap-foot">
+          <span>
+            Bez story pointów zadanie nie pojawi się na wykresie spalania ani w żadnej sumie SP.
+            Kliknij wiersz, żeby otworzyć zadanie i uzupełnić.
+          </span>
+          <span className="gap-actions">
+            <button className="btn" onClick={onCancel}>
+              Anuluj
+            </button>
+            <button className="btn btn-primary" onClick={onSkip}>
+              Wrzuć do „{sprintName}” tak czy siak
+            </button>
+          </span>
+        </div>
+      </div>
+    </>
+  );
+}
 
 function Shortcuts({ onClose }: { onClose: () => void }) {
   return (
@@ -6291,13 +6460,19 @@ function ViewMenu({
   };
 }) {
   const Control = DisplaySelect;
-  const width = 300;
+  /* 372, nie 300: czwarta zakladka („Planowanie") nie miescila sie obok ikony
+     i podpis wchodzil na sasiedni. Szerszy panel daje tez oddech wierszom
+     „etykieta + kontrolka" ponizej. */
+  const width = 372;
   const height = 510;
   const rowClass = 'ds-row';
   // Tablica to zawsze kanban po etapach — grupowanie i podgrupowanie jej nie dotycza,
   // wiec na tablicy oba wiersze sa wyszarzone i nieklikalne (patrz .ds-row-off).
-  // Wykresy, tak jak tablica, nie maja czego grupowac — oba wiersze wyszarzone.
+  // Wykresy i planowanie, tak jak tablica, nie maja czego grupowac — kazdy z nich
+  // ma wlasny, staly podzial. Stad warunek "cokolwiek poza lista".
   const boardMode = state.view !== 'list';
+  /* Planowanie ma wlasne filtry i wlasny podzial — czesc wierszy panelu go nie dotyczy. */
+  const planMode = state.view === 'planning';
   const groupRow = `${rowClass}${boardMode ? ' ds-row-off' : ''}`;
 
   // Panel „Kolumny/Grupy" wyskakuje jako OSOBNY panel obok (panel w panelu), nie sekcja.
@@ -6354,6 +6529,14 @@ function ViewMenu({
             onClick={() => on.view('charts')}
           >
             <ChartIcon /> Wykresy
+          </button>
+          <button
+            role="tab"
+            aria-selected={state.view === 'planning'}
+            className={`ds-tab${state.view === 'planning' ? ' ds-tab-on' : ''}`}
+            onClick={() => on.view('planning')}
+          >
+            <PlanIcon /> Planowanie
           </button>
         </div>
 
@@ -6467,7 +6650,13 @@ function ViewMenu({
 
         {check('Tylko moje', state.mine, on.mine)}
         {check('+ nieprzypisane', state.unassigned, on.unassigned, !state.mine)}
-        {check('Pokaż zakończone', state.done, on.done)}
+        {/*
+          W planowaniu ten przelacznik nie dziala — ten widok ma wlasny odsiew,
+          w swoim menu „Opcje" (osobno zakonczone, osobno oddane do akceptacji,
+          bo w Bitriksie to status 5 i 4, a nie jedno). Wygaszamy go tutaj,
+          zamiast zostawiac przycisk, ktory nic nie robi.
+        */}
+        {check('Pokaż zakończone', state.done, on.done, planMode)}
 
         <div className="menu-sep" />
         {/* „Kolumny/Grupy" otwiera OSOBNY panel obok — w dolnej sekcji, obok akcji. */}
@@ -7792,6 +7981,12 @@ export default function App() {
    * lista, mimo ze nacisnales „historia".
    */
   const [histSeq, setHistSeq] = useState(0);
+  /* Okno "uzupelnij braki" przed wejsciem do sprintu — patrz `planMove`. */
+  const [gapPrompt, setGapPrompt] = useState<{
+    tasks: Task[];
+    all: number[];
+    sprintId: number;
+  } | null>(null);
   // Motyw i kroj stoja poza SETTINGS_KEY, bo czyta je tez skrypt w <head>.
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [font, setFont] = useState<Font>(loadFont);
@@ -7799,6 +7994,21 @@ export default function App() {
   const [onlyMine, setOnlyMine] = useState(saved.onlyMine);
   const [withUnassigned, setWithUnassigned] = useState(saved.withUnassigned);
   const [showDone, setShowDone] = useState(saved.showDone);
+  const [planDone, setPlanDone] = useState(saved.planDone ?? false);
+  const [planReview, setPlanReview] = useState(saved.planReview ?? true);
+  /*
+   * Sortowanie planowania to STOS kluczy, nie jeden: "po priorytecie, a przy
+   * remisie po terminie". Lista ma jeden klucz i tak zostaje — tam sortuje sie
+   * raz i na dlugo, tu przestawia sie to co chwile, szukajac czym sie zajac.
+   */
+  const [planMoce, setPlanMoce] = useState<number | null>(saved.planMoce ?? null);
+  const [planKolejka, setPlanKolejka] = useState<number[]>(saved.planKolejka ?? []);
+  const [planPominieci, setPlanPominieci] = useState<number[]>(saved.planPominieci ?? []);
+  const [planTura, setPlanTura] = useState(saved.planTura ?? 0);
+  const [planTylkoDoStartu, setPlanTylkoDoStartu] = useState(saved.planTylkoDoStartu ?? true);
+  const [planSort, setPlanSort] = useState<{ by: PlanSortBy; dir: 'asc' | 'desc' }[]>(
+    () => saved.planSort ?? [{ by: 'updated', dir: 'desc' }],
+  );
   /* Zapisane ustawienie moze pochodzic ze starszej wersji (byl tez wariant sam
      naglowek) — nieznana wartosc wraca do "bez koloru", zamiast zostawiac klase,
      ktorej arkusz juz nie zna. */
@@ -7978,11 +8188,25 @@ export default function App() {
    * DERYWOWANA, a nie nadpisywana: po powrocie do projektu scrumowego wraca
    * dokladnie ten zakres, ktory byl ustawiony.
    */
+  /*
+   * Zakres ma sens tylko tam, gdzie cokolwiek zaweza. W PLANOWANIU nie zaweza:
+   * `planBase` bierze zadania wprost z `tasks`, bo caly ten widok polega na
+   * porownaniu rejestru ze sprintami — odsianie „tylko sprint" zabraloby lewy
+   * panel. Zostawiony przelacznik obiecywalby wiec dzialanie, ktorego nie ma.
+   */
   const scopes = useMemo(
     () => (activeSprint ? SCOPES : SCOPES.filter((s) => s.key === 'all')),
     [activeSprint],
   );
-  const scope: Scope = activeSprint ? scopePref : 'all';
+
+  /* Czemu zakres bywa nieczynny — tekst idzie do dymka przy przelaczniku. */
+  const blokadaZakresu =
+    viewMode === 'planning'
+      ? 'Planowanie zestawia rejestr ze sprintami, więc zawsze patrzy na wszystkie zadania.'
+      : viewMode === 'charts'
+        ? 'Wykresy liczą cały projekt — zakres, filtry i szukanie ich nie dotyczą.'
+        : null;
+  const scope: Scope = activeSprint && viewMode !== 'planning' ? scopePref : 'all';
 
   /**
    * Zmiana projektu to inny zbior zadan, wiec caly stan chwilowy odnoszacy sie do
@@ -8768,6 +8992,14 @@ export default function App() {
       onlyMine,
       withUnassigned,
       showDone,
+      planDone,
+      planReview,
+      planSort,
+      planMoce,
+      planKolejka,
+      planPominieci,
+      planTura,
+      planTylkoDoStartu,
       listTint,
       deadlineLook,
       szukajWOpisach: wOpisach,
@@ -8782,7 +9014,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, listTint, deadlineLook, wOpisach, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, listTint, deadlineLook, wOpisach, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -9133,14 +9365,14 @@ export default function App() {
         if (current) setOpenId(current.id);
       } else if (e.key === 'r') {
         void reload();
-      } else if (e.key === '1' || e.key === '2' || e.key === '3') {
+      } else if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') {
         /*
-         * Widok listy / tablicy / wykresow pod cyframi w KOLEJNOSCI ZAKLADEK
-         * z panelu widoku. Osobny klawisz tylko dla wykresow bylby wyjatkiem bez
-         * reguly - skoro widoki sa trzy, wszystkie trzy dostaja swoja cyfre.
+         * Widoki pod cyframi w KOLEJNOSCI ZAKLADEK z panelu widoku. Osobny
+         * klawisz tylko dla wybranych bylby wyjatkiem bez reguly - kazdy widok
+         * dostaje swoja cyfre.
          */
         e.preventDefault();
-        setViewMode((['list', 'board', 'charts'] as const)[Number(e.key) - 1]);
+        setViewMode((['list', 'board', 'charts', 'planning'] as const)[Number(e.key) - 1]);
       } else if (e.key === 'v') {
         /*
          * Menu kotwiczymy do PRZYCISKU, nie do srodka ekranu: to samo miejsce,
@@ -9386,6 +9618,325 @@ export default function App() {
 
   const onDragStart = useCallback((e: DragStartEvent) => setDraggingId(parseDrag(e.active.id)), []);
 
+  /*
+   * Braki, o ktore pytamy przed wejsciem do sprintu. Kolejnosc jest kolejnoscia
+   * w oknie: najpierw to, bez czego wykres spalania nic nie pokaze.
+   */
+  const gapsOf = useCallback(
+    (t: Task) => ({
+      points: t.storyPoints === null,
+      assignee: isUnassigned(t.responsibleId),
+      label: t.tags.length === 0 && !t.epicId,
+    }),
+    [],
+  );
+
+  /*
+   * Propozycja KOLEJNEGO sprintu — nazwa i daty, nic wiecej.
+   *
+   * Numer: o jeden wiekszy niz ten w nazwie aktywnego. Daty: sprinty w tym
+   * projekcie ida styk w styk (Sprint 49 zaczyna sie w dniu, w ktorym konczy sie
+   * 48), wiec start bierzemy z konca aktywnego, a dlugosc kopiujemy z niego —
+   * zamiast zaszywac „tydzien", bo bywaly i dwutygodniowe.
+   */
+  const nastepnySprint = useMemo(() => {
+    if (!activeSprint?.dateStart || !activeSprint.dateEnd) return null;
+    const odMs = Date.parse(activeSprint.dateStart);
+    const doMs = Date.parse(activeSprint.dateEnd);
+    if (!Number.isFinite(odMs) || !Number.isFinite(doMs) || doMs <= odMs) return null;
+
+    const dni = Math.max(1, Math.round((doMs - odMs) / 86400000));
+    const start = new Date(doMs);
+    const koniec = new Date(doMs);
+    koniec.setDate(koniec.getDate() + dni);
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    /* „Sprint 68" -> „Sprint 69". Gdy w nazwie nie ma liczby, nie zgadujemy. */
+    const m = /^(.*?)(\d+)\s*$/.exec(activeSprint.name);
+    return m
+      ? { name: `${m[1]}${Number(m[2]) + 1}`, dateStart: iso(start), dateEnd: iso(koniec), dni }
+      : null;
+  }, [activeSprint]);
+
+  /*
+   * DZIALY do kolejki — epiki grupy, w kolejnosci zapisanej przez uzytkownika.
+   *
+   * „Ogolne" wypada: to epik na tematy wielodzialowe, wiec nie ma kogo wyslac po
+   * zadanie. Epiki spoza zapisu dopisujemy na koniec (doszedl nowy dzial),
+   * a zapisane, ktorych juz nie ma, po cichu znikaja.
+   */
+  const dzialy = useMemo(() => {
+    const pula = epics.filter((e) => e.name.trim().toLowerCase() !== 'ogólne');
+    const wg = new Map(pula.map((e) => [e.id, e]));
+    const zapisane = planKolejka.filter((id) => wg.has(id));
+    const reszta = pula.filter((e) => !zapisane.includes(e.id)).map((e) => e.id);
+    const pomin = new Set(planPominieci);
+    return [...zapisane, ...reszta].map((id) => ({
+      id,
+      nazwa: wg.get(id)!.name,
+      color: wg.get(id)!.color,
+      obecny: !pomin.has(id),
+    }));
+  }, [epics, planKolejka, planPominieci]);
+
+  /** Dzial, ktorego JEST tura — liczony po obecnych, wiec pominiecie nie zostawia dziury. */
+  const teraz = useMemo(() => {
+    const obecni = dzialy.filter((d) => d.obecny);
+    return obecni.length ? obecni[planTura % obecni.length] : null;
+  }, [dzialy, planTura]);
+
+  /*
+   * Losowanie kolejnosci — Fisher-Yates na PELNEJ liscie, razem z nieobecnymi.
+   * Nieobecnosc jest chwilowa (ktos nie przyszedl), a kolejnosc ma przezyc jego
+   * powrot; wyrzucenie go z losowania kazaloby losowac jeszcze raz nazajutrz.
+   * Tura wraca na poczatek, bo po przelosowaniu stara pozycja nic nie znaczy.
+   */
+  const losujKolejnosc = useCallback(() => {
+    const ids = dzialy.map((d) => d.id);
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    setPlanKolejka(ids);
+    setPlanTura(0);
+  }, [dzialy]);
+
+  /** Przestawienie dzialu w kolejce (przeciagniecie). */
+  const przestawDzial = useCallback(
+    (z: number, na: number) => {
+      const ids = dzialy.map((d) => d.id);
+      if (z < 0 || z >= ids.length || na < 0 || na >= ids.length || z === na) return;
+      const [ruszony] = ids.splice(z, 1);
+      ids.splice(na, 0, ruszony);
+      setPlanKolejka(ids);
+      setPlanTura(0);
+    },
+    [dzialy],
+  );
+
+  /** Obecnosc dzialu — pominiety nie dostaje tury. */
+  const przelaczObecnosc = useCallback((id: number) => {
+    setPlanPominieci((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  }, []);
+
+  /** Zalozenie kolejnego sprintu — z potwierdzeniem, bo to zapis widoczny dla calego zespolu. */
+  const zalozSprint = useCallback(() => {
+    /* `me` jest wymagane przez Bitrix jako `createdBy` — bez niego nie ma kogo
+       wpisac jako zakladajacego, wiec przycisku po prostu nie pokazujemy. */
+    if (!nastepnySprint || groupId === null || me === null) return;
+    const { name, dateStart, dateEnd, dni } = nastepnySprint;
+    setConfirm({
+      title: `Założyć „${name}"?`,
+      body: `Powstanie w Bitriksie i będzie widoczny dla całego zespołu: od ${shortDate(dateStart)} do ${shortDate(dateEnd)} (${dni} dni), zaraz po „${activeSprint?.name}".`,
+      confirmLabel: 'Załóż sprint',
+      onYes: () => {
+        void createSprint(groupId, name, dateStart, dateEnd, me)
+          .then(() => {
+            toast(`Założono „${name}".`);
+            void reload(true);
+          })
+          /*
+           * OPIS, nie kod. Scrumowe metody oddaja `error: "0"` przy kazdej
+           * odmowie i cala tresc trzymaja w `description` — komunikat „Nie udalo
+           * sie zalozyc sprintu: 0" nie mowil nic i sam wymagal sledztwa.
+           */
+          .catch((e) =>
+            toast(
+              `Nie udało się założyć sprintu: ${
+                (e instanceof BxError && e.description) || (e instanceof Error ? e.message : String(e))
+              }`,
+            ),
+          );
+      },
+    });
+  }, [nastepnySprint, groupId, activeSprint, me, reload]);
+
+  /*
+   * Kolejny sprint do planowania: najwczesniejszy ze statusem `planned`.
+   * Sprinty przychodza posortowane po dacie startu, wiec wystarczy pierwszy.
+   */
+  const nextSprint = useMemo(
+    () => sprints.find((sp) => sp.status === 'planned') ?? null,
+    [sprints],
+  );
+
+  /**
+   * SAMO przeniesienie — jedyne miejsce, w ktorym zadanie zmienia sprint w tym
+   * widoku. Wchodzi sie tu dwiema drogami: wprost (nie bylo brakow) albo przez
+   * „Wrzuć tak czy siak" w oknie brakow. Wczesniej ta druga droga miala WLASNA
+   * kopie tego kodu — i kopia nie przesuwala kolejki, wiec pominiecie brakow
+   * zabieralo zadanie, a tura zostawala przy tym samym dziale.
+   */
+  const planApply = useCallback(
+    (list: number[], sprintId: number | null) => {
+      /*
+       * WZIECIE ZADANIA KONCZY TURE. Kolejka przechodzi dalej dopiero tutaj —
+       * w miejscu, w ktorym zadanie naprawde idzie do planowanego sprintu.
+       * Nie przy samym upuszczeniu, bo droga przez okno „uzupelnij braki"
+       * daje sie jeszcze anulowac, a wtedy dzial nic nie wybral i tura
+       * nalezy nadal do niego.
+       *
+       * Tylko sprint PLANOWANY: przelozenie czegos do aktywnego albo z
+       * powrotem do rejestru nie jest wyborem w tej rundzie.
+       */
+      if (nextSprint !== null && sprintId === nextSprint.id) {
+        setPlanTura((t) => t + list.length);
+      }
+      return Promise.all(
+        list.map((id) =>
+          mutate(
+            id,
+            { sprintId, stageId: null },
+            () => moveToSprint(id, sprintId ?? backlogId ?? 0),
+            'sprint',
+          ),
+        ),
+      ).then(() => reload(true));
+    },
+    [nextSprint, mutate, backlogId, reload],
+  );
+
+  /**
+   * Zmiana przynaleznosci do sprintu z widoku planowania.
+   *
+   * Wejscie do sprintu idzie przez `moveToSprint`, ktory sam prowadzi karte przez
+   * kolumne wejsciowa — tam wisi automatyzacja nadajaca numer IT-NNN.
+   *
+   * Zanim cokolwiek wyslemy, sprawdzamy BRAKI (story pointy, osoba, tag/epik).
+   * Zadanie bez oszacowania nie istnieje dla wykresu ani dla zadnej sumy SP, a
+   * bez osoby nie da sie rozlozyc obciazenia — czyli dokladnie tego, po co ten
+   * widok powstal. Okno tylko PYTA: da sie je pominac jednym klikiem, bo czasem
+   * chodzi o to, zeby wrzucic szybko i brudno.
+   */
+  const planMove = useCallback(
+    (ids: number[], sprintId: number | null) => {
+      /* Wyjscie do backlogu niczego nie wymaga — nie ma czego uzupelniac. */
+      if (sprintId === null) {
+        void planApply(ids, sprintId);
+        return;
+      }
+
+      const incomplete = ids
+        .map((id) => tasks.find((t) => t.id === id))
+        .filter((t): t is Task => Boolean(t))
+        .filter((t) => {
+          const g = gapsOf(t);
+          return g.points || g.assignee || g.label;
+        });
+
+      if (incomplete.length === 0) {
+        void planApply(ids, sprintId);
+        return;
+      }
+
+      setGapPrompt({ tasks: incomplete, all: ids, sprintId });
+    },
+    [tasks, gapsOf, planApply],
+  );
+
+  /*
+   * Ile zespol NAPRAWDE dowiozl ostatnio — odniesienie dla planowanego sprintu.
+   *
+   * Liczymy z zadan, ktore ZOSTALY w domknietym sprincie. To nie jest skrot:
+   * przenoszac ogon do kolejnego sprintu Bitrix zabiera zadanie ze starego, wiec
+   * w zamknietym sprincie zostaje dokladnie to, co w nim dowieziono (sprawdzone
+   * na Sprincie 65: 109 SP, tyle samo pokazuje wykres Bitriksa).
+   *
+   * Uwaga: z tego samego powodu NIE da sie tak odtworzyc, ile bylo ZAPLANOWANE —
+   * i dlatego pokazujemy tylko "dowiezione".
+   */
+  const lastDone = useMemo(() => {
+    const done = [...sprints].reverse().find((sp) => sp.status === 'completed');
+    if (!done) return null;
+    const points = tasks
+      .filter((t) => t.sprintId === done.id)
+      .reduce((a, t) => a + (t.storyPoints ?? 0), 0);
+    return points > 0 ? { name: done.name, points } : null;
+  }, [sprints, tasks]);
+
+  /*
+   * WLASNA baza planowania: te same filtry i wyszukiwanie co lista, ale BEZ
+   * dwoch przelacznikow panelu — „Pokaż zakończone" i „Pokaż do zatwierdzenia".
+   *
+   * Bez tego planowanie filtrowalo dwa razy: raz globalnie (w `base`), raz swoim
+   * chipem. Gdy przelacznik panelu byl juz wylaczony, zadania znikaly zanim
+   * planowanie je zobaczylo — i jego wlasny chip nie robil nic. Wygladalo to na
+   * zepsuty przycisk, a bylo podwojne sito.
+   */
+  const planBase = useMemo(
+    () =>
+      tasks.filter((t) => {
+        const mineOrFree =
+          t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
+        if (onlyMine && !mineOrFree) return false;
+        if (!matchFilters(t, filters, stageNames)) return false;
+        return true;
+      }),
+    [tasks, onlyMine, withUnassigned, filters, stageNames, me],
+  );
+
+  /*
+   * Komparator zlozony ze STOSU kluczy: pierwszy rozstrzyga, kolejny wchodzi
+   * dopiero przy remisie. Skladamy go z tego samego `taskComparator`, ktorego
+   * uzywa lista — inaczej "po priorytecie" znaczyloby tu co innego niz tam.
+   */
+  const planCmp = useMemo(() => {
+    /*
+     * Pozycja zadania w procesie. Zadanie poza sprintem nie ma etapu — laduje na
+     * koncu, bo "jeszcze nigdzie nie doszlo" jest dalej niz kazda kolumna.
+     */
+    const rank = (t: Task): number => {
+      if (!t.stageId) return Number.MAX_SAFE_INTEGER;
+      const name = stageNames.get(t.stageId);
+      const at = name === undefined ? undefined : stageOrder.get(name);
+      return at ?? Number.MAX_SAFE_INTEGER;
+    };
+
+    /* Oba ROSNACO — kierunek doklada dopiero `odwroc`, jak przy reszcie osi.
+       Dla tagu ranga 0 znaczy „ma tag", wiec rosnaco stawia go na poczatku. */
+    const wysoki = (a: Task, b: Task) => {
+      const ma = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki') ? 0 : 1);
+      return ma(a) - ma(b);
+    };
+    const sp = (a: Task, b: Task) => (a.storyPoints ?? 0) - (b.storyPoints ?? 0);
+
+    const levels = planSort.map((lvl) => {
+      const odwroc = (f: (a: Task, b: Task) => number) =>
+        lvl.dir === 'asc' ? f : (a: Task, b: Task) => -f(a, b);
+      if (lvl.by === 'stage') return odwroc((a: Task, b: Task) => rank(a) - rank(b));
+      if (lvl.by === 'wysoki') return odwroc(wysoki);
+      if (lvl.by === 'sp') return odwroc(sp);
+      return taskComparator({ ...sort, ...(lvl as { by: SortBy; dir: 'asc' | 'desc' }) }, me);
+    });
+    return (a: Task, b: Task) => {
+      for (const cmp of levels) {
+        const r = cmp(a, b);
+        if (r !== 0) return r;
+      }
+      return 0;
+    };
+  }, [planSort, sort, me, stageNames, stageOrder]);
+
+  /*
+   * Odsiew po statusie NIE jest tu robiony — robi go `Planning`, bo rozni sie
+   * miedzy panelami: rejestr zawsze pomija prace domknieta i oddana do
+   * akceptacji (nie ma czego planowac), a sprinty slucha przelacznikow.
+   *
+   * KOPIA przed sortowaniem — tak samo jak w liscie (`[...filtered].sort(...)`).
+   *
+   * Bez niej sortowanie w tym widoku nie dzialalo wcale. Przy pustej frazie
+   * `matchQuery` oddaje TE SAMA tablice, ktora dostalo, wiec `.sort()` ukladal
+   * `planBase` w miejscu i zwracal niezmieniona referencje. Memo w `Planning`
+   * jest kluczowane po `tasks`, wiec nie mialo po czym poznac zmiany i nadal
+   * pokazywalo poprzednia kolejnosc — chip zmienial sie na „Tytuł", lista nie
+   * drgnela. Przy okazji przestajemy mutowac wynik cudzego `useMemo`.
+   */
+  const planTasks = useMemo(
+    () => [...matchQuery(planBase, query)].sort(planCmp),
+    [planBase, query, planCmp],
+  );
+
   const onDragEnd = useCallback(
     (e: DragEndEvent) => {
       setDraggingId(null);
@@ -9408,6 +9959,14 @@ export default function App() {
         dropOnGroup(target.groupKey, targetsFor(id), target.subKey);
         return;
       }
+      /*
+       * Widok planowania. Cel to caly sprint albo backlog — kolumne wejsciowa
+       * dobiera `moveToSprint`, bo to ona odpala automatyzacje nadajaca IT-NNN.
+       */
+      if (target.kind === 'plan') {
+        planMove(targetsFor(id), target.sprintId);
+        return;
+      }
       // Upuszczenie w tej samej sekcji nic nie zmienia — nie wysylamy zapytania.
       const source = groupNodes.find((x) =>
         x.subs.some((s) => s.nodes.some((n) => n.task.id === id)),
@@ -9415,7 +9974,7 @@ export default function App() {
       if (source?.key === target.groupKey) return;
       dropOnGroup(target.groupKey, targetsFor(id));
     },
-    [applyStage, dropOnGroup, groupNodes, targetsFor, stages, tasks, mutate], // TEMP-TEST-UNLOCK: + stages, tasks, mutate
+    [applyStage, dropOnGroup, groupNodes, targetsFor, stages, tasks, mutate, planMove], // TEMP-TEST-UNLOCK: + stages, tasks, mutate
   );
 
   /** Podglad pod kursorem: przeciagamy zaznaczenie, jesli zadanie do niego nalezy. */
@@ -9533,6 +10092,12 @@ export default function App() {
         section: 'Widok',
         label: 'Wykresy (spalanie i prędkość zespołu)',
         run: () => setViewMode('charts'),
+      },
+      {
+        id: 'view-planning',
+        section: 'Widok',
+        label: 'Planowanie (rejestr obok sprintów)',
+        run: () => setViewMode('planning'),
       },
       ...scopes.map((s) => ({
         id: `scope-${s.key}`,
@@ -10100,6 +10665,7 @@ export default function App() {
                 { key: 'list', icon: <ListIcon />, label: 'Lista (1)' },
                 { key: 'board', icon: <BoardIcon />, label: 'Tablica (2)' },
                 { key: 'charts', icon: <ChartIcon />, label: 'Wykresy (3)' },
+                { key: 'planning', icon: <PlanIcon />, label: 'Planowanie (4)' },
               ] as const
             ).map((m) => (
               <button
@@ -10198,13 +10764,42 @@ export default function App() {
         {/* Zakres jest zawsze na wierzchu — wyjscie poza aktywny sprint to jedno klikniecie. */}
         {/* Wybor Lista/Tablica siedzi wylacznie w panelu widoku (zakladki na gorze) —
             tu byl duplikat tej samej kontrolki. */}
-        <div className="scopebar">
+        {/*
+          Na WYKRESACH caly pasek jest martwy: `Dashboard` dostaje tylko `groupId`
+          i `people`, wiec ani zakres, ani filtry, ani szukanie do niego nie
+          docieraja. Zamiast go chowac — co przesuwaloby cala tresc przy kazdym
+          przelaczeniu widoku — wygaszamy go i odcinamy od klikniec.
+        */}
+        <div
+          className={`scopebar${viewMode === 'charts' ? ' scopebar-locked' : ''}`}
+          title={viewMode === 'charts' ? 'Na wykresach te ustawienia nic nie zmieniają' : undefined}
+          aria-disabled={viewMode === 'charts' || undefined}
+        >
+          {/*
+            Przezroczysta warstwa na czas wykresow. Sam pasek ma odciete klikanie,
+            a `pointer-events: none` zabija razem z nim najechanie — wiec dymek
+            musi siedziec na czyms, co kursor nadal lapie. Przy okazji warstwa
+            przechwytuje klikniecia, ktore inaczej trafialyby w kontrolki.
+          */}
+          {viewMode === 'charts' && (
+            <HoverNote
+              className="scopebar-veil"
+              przyKursorze
+              label="Pasek nieczynny"
+              value="Wykresy liczą cały projekt"
+              note="zakres, filtry i szukanie ich nie dotyczą"
+            >
+              <span />
+            </HoverNote>
+          )}
+
           <ScopePicker
             scope={scope}
             scopes={scopes}
             counts={scopeCounts}
             activeSprint={activeSprint}
             onPick={setScope}
+            blokada={blokadaZakresu}
           />
 
           {!activeSprint && <span className="sprint-dates">brak aktywnego sprintu</span>}
@@ -10380,6 +10975,84 @@ export default function App() {
         >
         {viewMode === 'charts' ? (
           <Dashboard groupId={groupId} people={people} />
+        ) : viewMode === 'planning' ? (
+          /*
+           * Planowanie dostaje zadania PO filtrach i wyszukiwaniu — dzieki temu
+           * sumy w panelach mowia o tym, co widac. To byla glowna pretensja do
+           * planowania Bitriksa: filtrujesz, a liczby dalej dotycza calosci.
+           */
+          <Planning
+            /*
+             * `planTasks`: wszystkie filtry i wyszukiwanie BEZ zakresu i BEZ
+             * odsiewu po statusie, posortowane wlasnym stosem kluczy. Zakres
+             * (sprint / poza sprintem / wszystkie) jest tu bez sensu — ten widok
+             * sam dzieli zadania na rejestr i sprinty; status odsiewa `Planning`,
+             * bo rozni sie miedzy panelami.
+             */
+            tasks={planTasks}
+            activeSprint={activeSprint}
+            nextSprint={nextSprint}
+            onCreateSprint={nastepnySprint && me !== null ? zalozSprint : undefined}
+            lastDone={lastDone}
+            people={people}
+            showReview={planReview}
+            onToggleReview={() => setPlanReview((v) => !v)}
+            showDone={planDone}
+            onToggleDone={() => setPlanDone((v) => !v)}
+            moce={planMoce}
+            onMoce={setPlanMoce}
+            dzialy={dzialy}
+            teraz={teraz}
+            onLosuj={losujKolejnosc}
+            onPomin={() => setPlanTura((t) => t + 1)}
+            onPrzestaw={przestawDzial}
+            onObecny={przelaczObecnosc}
+            tylkoDoStartu={planTylkoDoStartu}
+            onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
+            sort={planSort}
+            sortFields={PLAN_SORTS}
+            onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}
+            /*
+             * Wiersz rysuje TEN SAM komponent co lista. Wlasny, gestszy wiersz
+             * wygladal jak inna aplikacja i gubil polowe informacji (epik, podzadania,
+             * termin, zdjecie osoby) — a to wlasnie po nich poznaje sie, czy zadanie
+             * nadaje sie do sprintu.
+             */
+            /* Limit tagow przychodzi Z PANELU — on zna swoja szerokosc.
+               Gdy go nie poda, zostaje globalny, liczony z szerokosci listy. */
+            renderRow={(t, limitTagow) => (
+              <TaskRow
+                task={t}
+                fraza={query}
+                deadlineLook={deadlineLook}
+                active={false}
+                selected={openId === t.id}
+                busy={pending.has(t.id)}
+                depth={0}
+                childCount={0}
+                hiddenSubCount={childStats.get(t.id)?.hidden ?? 0}
+                elsewhereSubCount={0}
+                collapsed={false}
+                onToggle={() => {}}
+                marked={marked.has(t.id)}
+                isNew={newIds.has(t.id)}
+                hasRelated={relatedIds.has(t.id)}
+                epic={epicOf(t)}
+                onEpic={toggleEpicFilter}
+                stage={t.stageId ? stageMeta.get(t.stageId) : undefined}
+                parentRef={t.parentId ? parentInfo(t.parentId) : undefined}
+                tagLimit={limitTagow ?? tagLimit}
+                onCopied={(code) =>
+                  toast(code ? `Skopiowano ${code}` : 'Nie udało się skopiować do schowka')
+                }
+                onOpenParent={setOpenId}
+                onMark={(e) => markRow(e, t.id)}
+                onSelect={(e) => clickRow(e, t.id)}
+                onMenu={(anchor) => setMenu({ taskId: t.id, targets: targetsFor(t.id), anchor })}
+                onTag={(name) => toggleTag(name)}
+              />
+            )}
+          />
         ) : viewMode === 'board' ? (
           <Board
             tasks={boardTasks}
@@ -10946,7 +11619,25 @@ export default function App() {
           }}
         />
       )}
-
+      {gapPrompt && (
+        <GapPrompt
+          tasks={gapPrompt.tasks}
+          sprintName={
+            sprints.find((sp) => sp.id === gapPrompt.sprintId)?.name ?? 'sprintu'
+          }
+          onOpen={(id) => {
+            setGapPrompt(null);
+            setOpenId(id);
+          }}
+          onCancel={() => setGapPrompt(null)}
+          /* Ta sama droga co bez brakow — razem z przejsciem kolejki dalej. */
+          onSkip={() => {
+            const { all, sprintId } = gapPrompt;
+            setGapPrompt(null);
+            void planApply(all, sprintId);
+          }}
+        />
+      )}
 
       <UpdateBanner />
 

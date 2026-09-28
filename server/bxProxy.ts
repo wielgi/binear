@@ -19,6 +19,7 @@ const ALLOWED = new Set([
   'tasks.task.getFields',
   'tasks.api.scrum.kanban.getStages',
   'tasks.api.scrum.sprint.list',
+  'tasks.api.scrum.sprint.add', // zalozenie kolejnego sprintu z widoku planowania
   'tasks.api.scrum.backlog.get', // id backlogu — bez niego nie ma jak wyjac zadania ze sprintu
   'tasks.api.scrum.epic.list', // epiki grupy — nadrzedne tematy scruma (badge + filtr)
   'tasks.api.scrum.task.get', // scrumowa czesc zadania: entityId, storyPoints, kod nadany przez Bitrix

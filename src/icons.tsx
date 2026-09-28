@@ -196,6 +196,22 @@ export function BoardIcon() {
   );
 }
 
+/**
+ * Planowanie — rysunek samego ukladu: rejestr po lewej, dwa sprinty po prawej.
+ *
+ * Nie bierzemy tu `ColumnsIcon` (wymiar filtra „etap"), bo to glif konturowy
+ * z zupelnie innego zestawu — obok wypelnionych ikon widoku wygladal jak
+ * wklejka z innej aplikacji.
+ */
+export function PlanIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+      <rect x="1" y="1" width="6" height="14" rx="1.2" fill="currentColor" />
+      <rect x="9" y="1" width="6" height="6" rx="1.2" fill="currentColor" />
+      <rect x="9" y="9" width="6" height="6" rx="1.2" fill="currentColor" />
+    </svg>
+  );
+}
 
 /** Wykresy sprintu — slupki rosnace, czytelne w 16px bez zadnych detali. */
 export function ChartIcon() {

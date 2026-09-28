@@ -32,6 +32,7 @@ export function HoverNote({
   note,
   noteColor,
   className,
+  przyKursorze,
   children,
 }: {
   /**
@@ -49,6 +50,15 @@ export function HoverNote({
   /** Kolor dopisku — dowolna wartosc CSS, zwykle wyliczona (patrz `dueFill`). */
   noteColor?: string;
   className?: string;
+  /**
+   * Zaczep kartę o KURSOR, nie o element.
+   *
+   * Dla plakietki w wierszu prawa krawedz elementu jest dobrym punktem — element
+   * jest maly i karta wypada tuz przy nim. Dla powierzchni szerokiej na caly
+   * pasek to samo doklejenie wyrzuca karte na koniec wiersza, kilkaset pikseli
+   * od miejsca, w ktore ktos patrzy.
+   */
+  przyKursorze?: boolean;
   children: ReactNode;
 }) {
   /** Prostokat elementu, nad ktorym stoi kursor — punkt odniesienia dla karty. */
@@ -86,7 +96,16 @@ export function HoverNote({
   return (
     <span
       className={className}
-      onMouseEnter={(e) => setKotwica(e.currentTarget.getBoundingClientRect())}
+      onMouseEnter={(e) =>
+        setKotwica(
+          przyKursorze
+            ? new DOMRect(e.clientX, e.clientY, 0, 0)
+            : e.currentTarget.getBoundingClientRect(),
+        )
+      }
+      /* Przy zaczepieniu o kursor karta ma za nim isc — inaczej zostaje tam,
+         gdzie mysz weszla na powierzchnie, czyli zwykle przy jej krawedzi. */
+      onMouseMove={przyKursorze ? (e) => setKotwica(new DOMRect(e.clientX, e.clientY, 0, 0)) : undefined}
       onMouseLeave={() => setKotwica(null)}
     >
       {children}

@@ -1366,6 +1366,18 @@ input[type='search']::-webkit-search-decoration {
 
 /* Zakres + „+ Filtr" + chipy filtrow + przelacznik widoku — wszystko w JEDNEJ linii.
    `position: relative`, bo wlasny pasek przewijania chipow kotwiczy sie do jej dolu. */
+/*
+ * Pasek wygaszony — widok wykresow. Kontrolki zostaja na swoim miejscu (inaczej
+ * tresc skakalaby przy kazdym przelaczeniu widoku), ale nie da sie ich ruszyc
+ * i widac, ze sa nieczynne. To uczciwsze niz przelacznik, ktory klika sie
+ * normalnie i nic nie robi.
+ */
+.scopebar-locked {
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+}
+
 .scopebar {
   position: relative;
   display: flex;
@@ -5321,6 +5333,19 @@ a.mention:hover {
  * sie sprintu do nastepnego to jeden gest, a nie przelaczanie zakladek.
  */
 /* Pasek planowania + dwie kolumny pod nim. */
+.plan {
+  /* Szerokosc uchwytu podzialu — i zarazem odstep w pasku nad kolumnami,
+     zeby jedno nie rozjechalo sie z drugim przy zmianie. */
+  --plan-grip: 10px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  overflow: hidden;
+}
+
 /*
  * Pasek jest podzielony TAK SAMO jak kolumny pod nim: `gap` rowny szerokosci
  * uchwytu, obie polowki na tych samych ulamkach `flex-grow`. Dzieki temu
@@ -5331,6 +5356,30 @@ a.mention:hover {
  * naglowka karty, z `margin-left: auto`) i nie bylo z czego wyczytac,
  * ze filtry dotycza wylacznie prawej strony.
  */
+.plan-bar {
+  display: flex;
+  align-items: center;
+  /* Odstep = szerokosc uchwytu, wiec obie polowki startuja dokladnie tam,
+     gdzie kolumny pod nimi. */
+  gap: var(--plan-grip);
+  flex: 0 0 auto;
+}
+
+.plan-bar-side {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  /*
+   * Ten sam wciec, co w naglowku panelu (`.plan-head`), zeby „Sortuj:" staneło
+   * w jednej linii pionowej z „Rejestr", a „Pokaż:" z nazwa sprintu. Rownanie
+   * do KRAWEDZI panelu nie wystarczy: tytul jest odsuniety od niej o `--s3`,
+   * wiec kontrolki wychodzily o te 12 px za daleko w lewo.
+   */
+  padding-left: var(--s3);
+  /* Bez tego dluga nazwa sortowania rozpycha polowke ponad jej ulamek. */
+  min-width: 0;
+}
+
 /*
  * Kontrolki mowia TYM SAMYM jezykiem, co pasek zakresu tuz nad nimi
  * („Widok: Własny ›"): bez ramki, przygaszone, 24 px, podswietlenie dopiero pod
@@ -5338,13 +5387,62 @@ a.mention:hover {
  * maja obok siebie tytul i liczby. Puszczone samopas w osobnym wierszu
  * wygladaly jak wklejone z innego ekranu.
  */
+/*
+ * Kurczyc sie wolno TYLKO chipowi sortowania — on jeden niesie dluga wartosc
+ * („Priorytet, potem Tag „Wysoki”, potem…") i ma wlasne wielokropki w
+ * `.plan-sort-val`. Reszta ma krotkie, stale napisy i ma zostac w calosci.
+ *
+ * `overflow: hidden` jako bezpiecznik: przy `white-space: nowrap` scisniety
+ * przycisk NIE zawija napisu, tylko wylewa go poza wlasne pudelko — a tlo
+ * najechania konczy sie na pudelku. Wygladalo to jak podswietlenie urwane
+ * z prawej strony, tuz przed koncem napisu.
+ */
+.plan-bar-side > .views-btn {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.plan-bar-side > .plan-sort {
+  flex: 0 1 auto;
+}
+
 /* `.views-btn` ma wlasny `padding`, wiec zeby to TRESC przycisku (a nie jego
    pudelko) trafila w linie tytulu, pudelko cofa sie o dokladnie ten padding. */
+.plan-bar-side > :first-child {
+  margin-left: calc(var(--s2) * -1);
+}
+
+.plan-show {
+  font-size: var(--t-mini);
+}
+
+.plan-bar-side > .plan-show:first-child {
+  margin-left: 0;
+}
+
 /*
  * Wartosc sortowania jest jedynym miejscem w pasku, ktore niesie tresc, wiec
  * jako jedyna dostaje pelny kolor — reszta (ikona, „Sortuj:", strzalka) to
  * obudowa. Bez tego caly przycisk czytal sie jednakowo szaro.
  */
+.plan-sort-val {
+  /* Odstepy w zdaniu „Tytuł ↓, potem Priorytet ↓" naleza do tresci, nie do
+     siatki — `.views-btn` rozsuwa swoje dzieci, ale wnetrze wartosci juz nie. */
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-secondary);
+}
+
+.plan-sort:hover .plan-sort-val {
+  color: var(--fg);
+}
+
 /*
  * Przelacznik dwustanowy w jezyku paska zakresu: bez ramki, przygaszony, a caly
  * stan niesie kwadrat z lewej. Uzywaja go i panele planowania, i naglowki kart
@@ -5389,38 +5487,216 @@ a.mention:hover {
   margin-left: auto;
 }
 
+.plan-sort-dir {
+  margin-left: 2px;
+  color: var(--fg-dim);
+}
+
 /* Przecinek ma sie kleic do poprzedniego poziomu, nie wisiec w powietrzu. */
+.plan-sort-lvl + .plan-sort-lvl {
+  margin-left: 0;
+}
+
 /* „potem" przygaszone — to spojnik, nie nazwa wymiaru. */
+.plan-sort-then {
+  margin-right: var(--s1);
+  color: var(--fg-dim);
+}
+
 /*
  * Flex, nie grid: szerokosc kolumn ustawia uzytkownik uchwytem, a `flex-grow`
  * przyjmuje ulamek wprost. W gridzie trzeba by przepisywac `grid-template-columns`
  * przy kazdym ruchu myszy.
  */
+.plan-cols {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  /* Bez odstepu: rozdziela je sam uchwyt, dzieki czemu poziomy zaczyna sie
+     dokladnie na wysokosci pionowego i linie sie spotykaja. */
+  gap: 0;
+  overflow: hidden;
+}
+
+.plan-right {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
 /*
  * Panele DZIELA sie wysokoscia po rowno (`flex: 1 1 0`), zamiast rosnac z
  * trescia. Zwiniety oddaje swoja czesc pozostalym — patrz `.plan-pane-shut`.
  */
+.plan-pane {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 0 0 1px var(--border);
+  overflow: hidden;
+}
+
 /* Cel upuszczania podswietlamy dopiero, gdy cos naprawde jest w reku — samo
    najechanie myszą nie ma nic zapowiadac. */
+.plan-pane-armed {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.plan-pane-over {
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.plan-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s3) var(--s3) var(--s2);
+}
+
+.plan-head h2 {
+  margin: 0;
+  font-size: var(--t-regular);
+  font-weight: var(--w-semibold);
+}
+
+.plan-sub {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
 /* Liczby lecą na prawo — jedna kolumna dla wszystkich paneli, da sie porownac
    wzrokiem bez czytania kazdej z osobna. */
 /* Pary "liczba + jednostka" rozsuniete, nie sklejone kropka. */
+.plan-nums {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s4);
+  font-size: var(--t-mini);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Jednostka trzyma sie swojej liczby i nie lamie sie na koniec wiersza. */
+.plan-num {
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+
+.plan-nums b {
+  color: var(--fg);
+  font-weight: var(--w-semibold);
+}
+
+.plan-fold {
+  padding: 0;
+  color: var(--fg-dim);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
 /* Braki — to samo pomaranczowe co bledy w dzienniku: "cos tu jest nie tak". */
+.plan-miss {
+  color: var(--accent-orange);
+}
+
 /* --- odniesienie do ostatnio dowiezionego --- */
 
+.plan-compare {
+  padding: 0 var(--s3) var(--s2);
+}
+
+.plan-compare-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.plan-compare-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+}
+
 /* Kreska na 100% — czyli tam, gdzie sprint dorownuje ostatnio dowiezionemu. */
+.plan-compare-mark {
+  position: absolute;
+  right: 0;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--fg-dim);
+}
+
+.plan-compare-note {
+  display: block;
+  margin-top: var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.plan-over {
+  color: var(--accent-orange);
+  font-weight: var(--w-semibold);
+}
+
 /* --- rozklad obciazenia --- */
+
+.plan-load {
+  padding: 0 var(--s3) var(--s2);
+}
 
 /*
  * BEZ `overflow: hidden`. Kiedys bylo — do zaokraglenia koncow — i obcinalo
  * dwie rzeczy naraz: podpis pod kursorem (stoi NAD paskiem) oraz powiekszone
  * pole chwytu kawalkow. Zaokraglenie robia teraz same kawalki, skrajne.
  */
+.plan-load-bar {
+  position: relative;
+  display: flex;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+}
+
+.plan-load-seg {
+  position: relative;
+  min-width: 2px;
+  box-shadow: 1px 0 0 var(--bg-panel);
+}
+
+.plan-load-seg:first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.plan-load-seg:last-child {
+  border-radius: 0 999px 999px 0;
+}
+
 /*
  * Pole najechania siegajace poza pasek. Sam pasek ma 4 px — trafienie w niego
  * mysza jest przypadkiem, a to on ma odpowiadac na pytanie "czyje to SP".
  */
+.plan-load-seg::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8px;
+  bottom: -8px;
+}
+
 /*
  * Odczyt pod kursorem — ta sama zasada co na wykresie spalania: przygaszona
  * nazwa i mocna liczba, bo szuka sie tu wartosci, a nie podpisu.
@@ -5428,7 +5704,43 @@ a.mention:hover {
  * Wisi NAD paskiem: pasek ma 4 px i siedzi tuz pod naglowkiem, wiec podpis pod
  * nim wchodzilby na pierwszy wiersz listy.
  */
+.plan-load-tip {
+  position: absolute;
+  bottom: calc(100% + var(--s1));
+  z-index: 3;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s1);
+  padding: 2px var(--s2);
+  white-space: nowrap;
+  font-size: var(--t-mini);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-dim);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop), inset 0 0 0 1px var(--border-strong);
+  pointer-events: none;
+}
+
+.plan-load-tip b {
+  color: var(--fg);
+  font-weight: var(--w-medium);
+}
+
 /* --- wiersze --- */
+
+.plan-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--s2) var(--s2);
+}
+
+.plan-empty {
+  padding: var(--s4) var(--s3);
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+}
 
 /*
  * Uchwyt podzialu miedzy sprintami. Cienki, ale z wiekszym polem chwytu przez
@@ -5439,13 +5751,70 @@ a.mention:hover {
  * lewej krawedzi kolumny ze sprintami, a poziomy zaczyna sie dokladnie tam,
  * gdzie on stoi. Wczesniej rozdzielal je odstep siatki i linie sie mijaly.
  */
+.plan-grip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--plan-grip);
+  /*
+   * To samo, co `min-width: 0` przy uchwycie pionowym, tylko dla drugiej osi.
+   * Bez tego `min-height: auto` nie pozwala pudelku zejsc ponizej wysokosci
+   * wlasnej ikony: chwyt mial 20 px zamiast 10, przez co pozioma kreska
+   * wypadala nizej niz punkt, w ktorym konczy sie pionowa, i obie mijaly sie
+   * w skrzyzowaniu. Ikona ma z niego WYSTAWAC — po to zakrywa kawalek kreski.
+   */
+  min-height: 0;
+  color: var(--fg-dim);
+  cursor: row-resize;
+}
+
 /* Sama kreska — cienka, rysowana w srodku szerszego pola chwytu. */
+.plan-grip::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
 /* Pole chwytu wieksze niz kreska — w 2 px trafia sie tylko przypadkiem. */
+.plan-grip::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  bottom: -4px;
+}
+
 /*
  * Poziomy uchwyt siedzi WEWNATRZ prawej kolumny, a pionowy tuz przed nia — sama
  * kreska musi wiec siegnac kawalek w lewo, poza swoje pudelko, zeby obie linie
- * spotkaly sie w jednym punkcie zamiast mijac o kilka pikseli.
+ * sie spotkaly.
+ *
+ * Dokladnie POLOWA szerokosci uchwytu, nie cala. Przy calej (-10px) pozioma
+ * kreska zaczynala sie na lewej krawedzi pionowego uchwytu, czyli 5 px PRZED
+ * pionowa kreska — przechodzila przez nia na wylot i zostawiala wystajacy
+ * ogonek w pustej rynnie miedzy kolumnami. Polowa konczy ja rowno na pionowej:
+ * zlaczenie czyta sie jako „T", a nie jako krzyzyk z doklejonym wasem.
  */
+.plan-right .plan-grip::before {
+  left: calc(var(--plan-grip) / -2);
+}
+
+.plan-grip:hover {
+  color: var(--fg);
+}
+
+.plan-grip:hover::before {
+  background: var(--accent);
+}
+
 /*
  * Kropki chwytu na tle karty, zeby kreska za nimi nie przeswitywala.
  *
@@ -5453,22 +5822,130 @@ a.mention:hover {
  * obracamy je o cwierc obrotu; na PIONOWEJ zostaje jak jest. Wczesniej bylo
  * odwrotnie i oba stały w poprzek swojej kreski.
  */
+.plan-grip-dots {
+  position: relative;
+  display: inline-flex;
+  padding: 2px 0;
+  background: var(--bg-base);
+  line-height: 0;
+  transform: rotate(90deg);
+}
+
 /*
  * Pionowy uchwyt lezy NAD poziomym. W skrzyzowaniu obie linie i oba chwyty
  * wypadaja w jednym punkcie; bez tego pozioma kreska przechodzila przez kropki
  * pionowego uchwytu, bo jej panel stoi w drzewie pozniej. Teraz to pionowy
  * przerywa poziomy — jeden chwyt jest wtedy jednoznacznie "ten na wierzchu".
  */
+.plan-grip-v {
+  flex: 0 0 var(--plan-grip);
+  /*
+   * Bez tego `min-width: auto` rozpychalo pudelko do szerokosci samej ikony
+   * (28 px zamiast 10) i kolumny zaczynaly sie 9 px dalej, niz mowi `--plan-grip`
+   * — przez co pasek nad nimi liczyl podzial z innej liczby niz one same.
+   * Ikona ma wystawac poza chwyt: po to zakrywa kawalek poziomej kreski.
+   */
+  min-width: 0;
+  z-index: 2;
+  cursor: col-resize;
+}
+
+.plan-grip-v::before {
+  left: 50%;
+  right: auto;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  height: auto;
+  margin-top: 0;
+  margin-left: -1px;
+}
+
+.plan-grip-v::after {
+  left: -4px;
+  right: -4px;
+  top: 0;
+  bottom: 0;
+}
+
 /*
  * Na kresce pionowej tlo kropek siega tez w GORE i w DOL — kreska ma sie urwac
  * kawalek przed ikona i podjac za nia. Bez tego przechodzi tuz przy kropkach
  * i chwyt zlewa sie z linia zamiast na niej siedziec.
  */
+.plan-grip-v .plan-grip-dots {
+  /* Na tyle szerokie, zeby zakryc kawalek poziomej kreski po obu stronach. */
+  padding: 5px 6px;
+  transform: none;
+}
+
 /* Zwiniety panel to sam naglowek — nie zabiera juz miejsca sasiadowi. */
+.plan-pane-shut {
+  flex: 0 0 auto;
+}
+
+.plan-pane-none {
+  flex: 0 0 auto;
+}
+
 /* --- okno "uzupelnij braki" --- */
+
+.gap-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s1) var(--s2);
+  text-align: left;
+  font: inherit;
+  font-size: var(--t-mini);
+  color: var(--fg-secondary);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.gap-row:hover {
+  background: var(--bg-hover);
+}
+
+.gap-code {
+  flex: 0 0 58px;
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.gap-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gap-what {
+  flex: 0 0 auto;
+  color: var(--accent-orange);
+  font-size: var(--t-micro);
+}
 
 /* Oba wyjscia rownorzedne: pominiecie nie jest schowanym linkiem, bo czasem
    naprawde chodzi o szybko i brudno. */
+.gap-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.gap-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: var(--s2);
+  white-space: nowrap;
+}
+
 /* --- Osoby: per-user staty sprintu (issue #1) ----------------------------- */
 
 /*
@@ -7027,3 +7504,400 @@ a.mention:hover {
 .tint-rail > .group-head {
   box-shadow: inset 2px 0 0 color-mix(in oklab, var(--bg-base), var(--group-tint) 62%);
 }
+
+/* Przycisk zakladania sprintu w pustym panelu planowania — pod zdaniem,
+   nie obok, zeby czytalo sie jako odpowiedz na nie, a nie jako ozdoba. */
+.plan-new-sprint {
+  display: block;
+  margin: var(--s3) auto 0;
+}
+
+/* --- moce zespolu w pasku planowania --- */
+
+.plan-moce {
+  width: 58px;
+  height: 22px;
+  padding: 0 var(--s1);
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: var(--t-micro);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.plan-moce:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.plan-moce-unit {
+  margin-left: 3px;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+/*
+ * Kolor paska zmienia sie DOPIERO na granicy. Niepelny sprint to stan normalny,
+ * a nie ostrzezenie — swiecenie na zolto przez wiekszosc planowania nauczyloby
+ * tylko ignorowac ten pasek.
+ */
+.plan-compare-fill.plan-compare-rowno {
+  background: var(--accent-amber);
+}
+
+.plan-compare-fill.plan-compare-ponad {
+  background: var(--danger);
+}
+
+
+/*
+ * Zadanie, ktore nie miesci sie w pozostalych punktach. Leza na DOLE rejestru
+ * (sortowanie w `Planning`), a tu dostaja kolor — zeby granica „to juz sie nie
+ * zmiesci" byla widoczna od razu, bez liczenia w glowie.
+ *
+ * Wygaszenie, nie zaczerwienienie calego wiersza: to nadal zwykle zadanie, tylko
+ * nie na ten sprint. Czerwony zostaje na PASKU z lewej, ktory zaznacza granice.
+ */
+.plan-row-ponad {
+  position: relative;
+  opacity: 0.6;
+}
+
+.plan-row-ponad::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent-orange);
+}
+
+.plan-row-ponad:hover {
+  opacity: 1;
+}
+
+/*
+ * Granica „od tego miejsca juz sie nie zmiesci". Stoi RAZ, nad pierwszym
+ * zadaniem ponad limit — wygaszenie wierszy mowi „to inne", a dopiero kreska
+ * mowi GDZIE przebiega granica i dlaczego.
+ */
+.plan-granica {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s2) 0 var(--s1);
+  font-size: var(--t-micro);
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.plan-granica::before,
+.plan-granica::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+/* Krotki odcinek z lewej, dlugi z prawej — napis ma sie czytac od poczatku
+   wiersza, a nie stac dokladnie na srodku jak tytul rozdzialu. */
+.plan-granica::before {
+  flex: 0 0 var(--s3);
+}
+
+/* Warstwa nad wygaszonym paskiem — patrz komentarz w App.tsx. `pointer-events`
+   wracaja do `auto`, bo rodzic je odcina i dymek by sie nie pokazal. */
+.scopebar-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: auto;
+  cursor: default;
+}
+
+/* Nieczynny przelacznik zakresu: te same opcje, ta sama szerokosc — tylko
+   przygaszony. Opcji NIE wycinamy, zeby nie wygladalo na awarie. */
+.scope-picker-locked {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Stopka listy sortowania: przycisk powrotu do domyslnej kolejnosci i podpowiedz
+   o Ctrl. Przycisk pierwszy, bo to czynnosc — podpowiedz jest tylko opisem. */
+.plan-sort-reset {
+  display: block;
+  width: 100%;
+  height: 24px;
+  margin-bottom: var(--s1);
+  font-size: var(--t-micro);
+}
+
+.plan-sort-hint {
+  display: block;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+/* --- kolejka dzialow: pasek + rozwijany panel --- */
+
+/* Nazwa dzialu, ktorego jest tura — jedyna rzecz z kolejki, ktora zmienia sie
+   w trakcie spotkania, wiec jedyna, ktora zostaje na wierzchu. */
+/*
+ * STALA szerokosc, mimo ze nazwa dzialu jest zmienna. Bez tego „Kolejka"
+ * i „Pomiń" przeskakiwaly w bok przy kazdej turze — „IT" jest o polowe wezsze
+ * niz „Dział Produktu", a przycisk, ktory ucieka spod kursora, klika sie zle.
+ * Szerokosc na najdluzsza nazwe; krotsze zostawiaja pusty margines i dobrze.
+ */
+.plan-teraz {
+  flex: 0 0 auto;
+  min-width: 118px;
+  font-weight: var(--w-semibold);
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-kolejka-btn {
+  gap: 2px;
+}
+
+/* Pionowa kreska rozdzielajaca grupe „kto wybiera" od „ile mocy / co pokazac" —
+   bez niej pasek czyta sie jak jeden dlugi ciag kontrolek. */
+.plan-bar-div {
+  width: 1px;
+  height: 14px;
+  margin-right: var(--s1);
+  background: var(--border);
+}
+
+/*
+ * Panel leci PORTALEM na `body` i jest pozycjonowany od przycisku (`position:
+ * fixed` dziedziczy z `.menu`).
+ *
+ * Wczesniej byl `absolute` wzgledem prawej polowy paska: doklejal sie wiec do
+ * krawedzi EKRANU zamiast do przycisku, a jego `z-index` liczyl sie tylko
+ * wewnatrz paska — panel szczegolow przykrywal go razem z checkboxami.
+ */
+.plan-kolejka {
+  width: 240px;
+  padding-bottom: var(--s2);
+}
+
+.plan-kolejka-list {
+  max-height: 46vh;
+  margin: 0;
+  padding: 0 var(--s2);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.plan-kolejka-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 3px var(--s1);
+  border-radius: var(--radius);
+  font-size: var(--t-mini);
+  cursor: grab;
+}
+
+.plan-kolejka-item:hover {
+  background: var(--bg-hover);
+}
+
+.plan-kolejka-item.is-now {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+/* Pominiety dzial ZOSTAJE widoczny — nieobecnosc jest chwilowa i ma dac sie
+   cofnac jednym kliknieciem, a znikniecie kazaloby szukac go na nowo. */
+.plan-kolejka-item.is-off {
+  opacity: 0.45;
+}
+
+.plan-kolejka-chk {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.plan-kolejka-nr {
+  flex: none;
+  width: 14px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.plan-kolejka-nazwa {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-kolejka-losuj {
+  width: calc(100% - 2 * var(--s2));
+  height: 26px;
+  margin: var(--s2) var(--s2) 0;
+  font-size: var(--t-micro);
+}
+
+
+/*
+ * Opakowanie dymka wokol przelacznika zakresu MUSI byc pelnej szerokosci.
+ * `.scope-picker` ma `width: 100%`, a te 100% liczy sie od najblizszego rodzica —
+ * po opakowaniu w `HoverNote` byl nim span, ktory kurczyl sie do tresci. Przycisk
+ * robil sie przez to o kilkadziesiat pikseli wezszy, co bylo widac jako
+ * podswietlenie urwane z prawej strony.
+ */
+.scope-picker-note {
+  display: block;
+  width: 100%;
+}
+
+/* --- „Pokaż": moce i przelaczniki widocznosci --- */
+
+.plan-pokaz {
+  width: 250px;
+  padding-bottom: var(--s2);
+}
+
+.plan-pokaz-moce {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0 var(--s2);
+}
+
+/* W menu pole ma wiecej miejsca niz w ciasnym pasku — liczba jest tu trescia,
+   nie drobiazgiem wciśnietym miedzy przyciski. */
+.plan-pokaz .plan-moce {
+  width: 72px;
+  height: 26px;
+}
+
+/*
+ * CALA prawa grupa (tura, kolejka, pominiecie, opcje) siedzi przy PRAWEJ
+ * krawedzi paska. Startujac od lewej krawedzi swojej polowy, wisiala w srodku
+ * ekranu — daleko i od tytulu sprintu nad nia, i od krawedzi, z ktora sie ja
+ * kojarzy. Razem ze stala szerokoscia nazwy dzialu daje to uklad, w ktorym nic
+ * nie przeskakuje przy zmianie tury.
+ */
+.plan-bar-right {
+  justify-content: flex-end;
+}
+
+/*
+ * W PLANOWANIU nie ma zagniezdzania — kazde zadanie jest osobnym wierszem
+ * (`depth=0`, `childCount=0`), wiec miejsce na strzalke rozwijania podzadan
+ * stoi puste. Te 14 px plus odstep robily wyrwe miedzy checkboxem a ikona
+ * priorytetu, ktorej nic nie wypelnia.
+ */
+.plan-pane .row-twisty-spacer {
+  display: none;
+}
+
+/* Bez rozpornika ujemny margines checkboxa skleilby go z ikona priorytetu —
+   przywracamy zwykly odstep wiersza. */
+.plan-pane .row-check {
+  margin-right: 0;
+}
+
+/* Bardzo waski panel planowania: data ustepuje, zeby awatar i tytul zmiescily
+   sie w kadrze. Patrz komentarz przy `plan-pane-ciasny` w Planning.tsx. */
+.plan-pane-ciasny .row-meta {
+  display: none;
+}
+
+/*
+ * Przy bardzo waskim panelu ustepuja jeszcze dwie rzeczy, w kolejnosci od
+ * najmniej potrzebnej: przycisk „...” (to samo menu otwiera prawy przycisk
+ * myszy) i kod zadania (stoi w panelu szczegolow, a tytul mowi wiecej).
+ * Dopiero to daje awatarowi miejsce w kadrze.
+ */
+.plan-pane-ciasny .row-more,
+.plan-pane-ciasny .row-code {
+  display: none;
+}
+
+
+/*
+ * Dwa warianty licznika: „zaplanowane" i „z przeniesieniem". Stoja jeden pod
+ * drugim, bo to dwa odczyty TEJ SAMEJ miary — obok siebie kazalyby porownywac
+ * dlugosci w poziomie, przy roznych skalach.
+ *
+ * Wariant to PARA paskow (moce + rozklad po osobach) pod jednym podpisem. Podpis
+ * na grupie, nie na kazdym pasku: inaczej „Z przeniesieniem" stalo dwa razy pod
+ * rzad i czytalo sie jak dwie rozne miary.
+ */
+.plan-wariant + .plan-wariant {
+  margin-top: var(--s3);
+}
+
+/* Odstep i wciecie sa na wariancie — paski w srodku juz go nie dubluja. */
+.plan-wariant > .plan-compare,
+.plan-wariant > .plan-load {
+  padding: 0;
+}
+
+.plan-liczniki {
+  padding: 0 var(--s3) var(--s2);
+}
+
+.plan-compare-row + .plan-compare-row {
+  margin-top: var(--s2);
+}
+
+/* Rozklad po osobach tuz pod odczytem mocy — to dalej ten sam wariant. */
+.plan-wariant > .plan-compare + .plan-load {
+  margin-top: var(--s2);
+}
+
+/*
+ * Kawalek paska, ktorego nikt nie wybieral — niedomknieta praca z trwajacego
+ * sprintu. Kreski, a nie inny kolor: kolor na tym pasku znaczy „ile zostalo", a
+ * dwa znaczenia w jednej wlasciwosci nie dalyby sie odczytac. Przygaszenie
+ * dopowiada, ze to punkty wzięte z góry, nie decyzja.
+ */
+.plan-compare-carry {
+  opacity: 0.55;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgb(255 255 255 / 0.55) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+/* Nazwa wariantu — pelnym glosem, bo bez niej pary sa nieodroznialne. */
+.plan-wariant-podpis {
+  display: block;
+  margin-bottom: var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg);
+  font-weight: var(--w-semibold);
+}
+
+/* Skad wzielo sie przeniesienie — osobna linijka, nizej niz samo zdanie. */
+.plan-compare-skad {
+  display: block;
+  opacity: 0.8;
+}
+

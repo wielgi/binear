@@ -21,6 +21,12 @@ export const groupDropId = (groupKey: string) => `group:${encodeURIComponent(gro
 export const subDropId = (groupKey: string, subKey: string) =>
   `sub:${encodeURIComponent(groupKey)}/${encodeURIComponent(subKey)}`;
 export const colDropId = (stageId: number) => `col:${stageId}`;
+/*
+ * Widok planowania. Cel to CALY sprint (albo backlog), a nie konkretna kolumna:
+ * planujac decyduje sie "to idzie do Sprintu 67", a nie "to idzie do W toku".
+ * Kolumne wejsciowa dobiera juz `moveToSprint`.
+ */
+export const planDropId = (sprintId: number | null) => `plan:${sprintId ?? 'backlog'}`;
 
 export type DropTarget =
   /** Sekcja listy — ustawia os glowna (grupowanie). */
@@ -28,7 +34,9 @@ export type DropTarget =
   /** Podsekcja listy — ustawia obie osi naraz. */
   | { kind: 'sub'; groupKey: string; subKey: string }
   /** Kolumna tablicy — etap sprintu. */
-  | { kind: 'col'; stageId: number };
+  | { kind: 'col'; stageId: number }
+  /** Panel widoku planowania: sprint albo backlog (`sprintId === null`). */
+  | { kind: 'plan'; sprintId: number | null };
 
 export function parseDrag(id: UniqueIdentifier): number | null {
   const raw = String(id);
@@ -51,11 +59,17 @@ export function parseDrop(id: UniqueIdentifier): DropTarget | null {
     const n = Number(raw.slice(4));
     return Number.isFinite(n) ? { kind: 'col', stageId: n } : null;
   }
+  if (raw.startsWith('plan:')) {
+    const rest = raw.slice(5);
+    if (rest === 'backlog') return { kind: 'plan', sprintId: null };
+    const n = Number(rest);
+    return Number.isFinite(n) ? { kind: 'plan', sprintId: n } : null;
+  }
   return null;
 }
 
 /** Im wyzej, tym bardziej szczegolowy cel. Podgrupa lezy WEWNATRZ grupy. */
-const RANK: Record<string, number> = { sub: 3, col: 2, group: 1 };
+const RANK: Record<string, number> = { sub: 3, col: 2, plan: 2, group: 1 };
 
 const rank = (id: UniqueIdentifier) => RANK[String(id).split(':')[0] ?? ''] ?? 0;
 

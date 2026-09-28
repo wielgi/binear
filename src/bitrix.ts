@@ -854,6 +854,36 @@ export async function fetchActiveSprint(groupId: number): Promise<Sprint | null>
 }
 
 /**
+ * Zaklada KOLEJNY sprint w grupie.
+ *
+ * Nazwa i daty sa wyliczane po stronie wolajacego (patrz `nastepnySprint` w App),
+ * bo to decyzja o tresci, nie o transporcie — tutaj zostaje samo wyslanie.
+ *
+ * Komplet pol ustalony na zywo, bo dokumentacja ich nie wymienia, a metoda oddaje
+ * je pojedynczo, przy kazdej probie inny komunikat:
+ *  - bez `groupId`   -> „Group id not found"
+ *  - bez dat         -> „Incorrect dateStart/dateEnd format" (format pobłażliwy:
+ *                       `YYYY-MM-DD` i pelny ISO przechodza tak samo)
+ *  - bez `status`    -> „Incorrect sprint status"; jedyna przyjmowana wartosc to
+ *                       `planned` (`new` i `draft` sa odrzucane)
+ *  - bez `createdBy` -> „Unable to add sprint", czyli komunikat NIE wskazujacy
+ *                       brakujacego pola — to on kosztowal najwiecej prob
+ */
+export async function createSprint(
+  groupId: number,
+  name: string,
+  dateStart: string,
+  dateEnd: string,
+  createdBy: number,
+): Promise<number | null> {
+  const res = await call<any>('tasks.api.scrum.sprint.add', {
+    fields: { groupId, name, dateStart, dateEnd, status: 'planned', createdBy },
+  });
+  const id = Number(res?.id ?? res?.sprint?.id);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+/**
  * WSZYSTKIE sprinty grupy — wykres predkosci potrzebuje kilku ostatnich, nie tylko
  * biezacego. Ten sam filtr UPPER_CASE co w `fetchActiveSprint`: `groupId` pisane
  * malymi literami po cichu oddaje pusta liste.
