@@ -559,6 +559,8 @@ interface Settings {
    * nie ma skonczonego zbioru grup do domalowania.
    */
   showEmpty: boolean;
+  /** Karty licznikow pod naglowkiem (patrz `CountersBar`). */
+  showCounters: boolean;
   /**
    * PUSTE kategorie (kolumny/grupy), ktore mimo braku zadan maja byc widoczne —
    * po NAZWIE, bo te same etapy maja rozne id w kazdym sprincie (patrz stageOrder).
@@ -612,6 +614,7 @@ const DEFAULT_SETTINGS: Settings = {
   planTura: 0,
   planTylkoDoStartu: true,
   showEmpty: false,
+  showCounters: true,
   shownEmpty: [],
   detailWidth: 520,
   collapsed: [],
@@ -6447,6 +6450,7 @@ function ViewMenu({
     tint: ListTint;
     deadline: DeadlineLook;
     empty: boolean;
+    counters: boolean;
     filtersOn: boolean;
     theme: Theme;
     font: Font;
@@ -6470,6 +6474,7 @@ function ViewMenu({
     tint: (v: ListTint) => void;
     deadline: (v: DeadlineLook) => void;
     empty: () => void;
+    counters: () => void;
     toggleColumn: (name: string) => void;
     clearFilters: () => void;
     reload: () => void;
@@ -6676,6 +6681,8 @@ function ViewMenu({
           zamiast zostawiac przycisk, ktory nic nie robi.
         */}
         {check('Pokaż zakończone', state.done, on.done, planMode)}
+        {/* Liczniki sa tylko nad lista i tablica — w planowaniu nie ma ich czym chowac. */}
+        {check('Pokaż liczniki', state.counters, on.counters, planMode)}
 
         <div className="menu-sep" />
         {/* „Kolumny/Grupy" otwiera OSOBNY panel obok — w dolnej sekcji, obok akcji. */}
@@ -8039,6 +8046,7 @@ export default function App() {
     LIST_TINTS.some((t) => t.key === saved.listTint) ? saved.listTint : 'fade',
   );
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
+  const [showCounters, setShowCounters] = useState(saved.showCounters ?? true);
   const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
@@ -8451,10 +8459,35 @@ export default function App() {
     () => (card ? tasks.filter((t) => counterDef(card).match(t, counterCtx)) : null),
     [card, tasks, counterCtx],
   );
-  // Zmiana filtrow, zakresu albo przelacznikow = wracasz do zwyklego widoku.
+  /*
+   * Karta USTAWIA pasek pod siebie: zakres, „Pokaż zakończone" i filtry maja
+   * mowic, co naprawde jest na liscie. Wczesniej karta podmieniala liste, a pasek
+   * dalej pokazywal np. „Aktywny sprint" nad zadaniami spoza sprintu.
+   *
+   * Karta liczy cala grupe, wiec filtry i „Tylko moje" schodza; zakonczone widac
+   * tylko przy „W sprincie" (tylko ona je liczy).
+   */
+  const stanKarty = (k: CounterKey) => ({
+    scope: (k === 'sprint' ? 'sprint' : k === 'poza' || k === 'wycena' ? 'outside' : 'all') as Scope,
+    done: k === 'sprint',
+  });
+  const pickCard = useCallback((k: CounterKey | null) => {
+    setCard(k);
+    if (!k) return;
+    const st = stanKarty(k);
+    setScope(st.scope);
+    setShowDone(st.done);
+    setOnlyMine(false);
+    setFilters(EMPTY_FILTERS);
+  }, []);
+  /* Kazda RECZNA zmiana paska rozjezdza go z karta — wtedy wracasz do zwyklego
+     widoku. Porownujemy ze stanem karty zamiast reagowac na sama zmiane, bo
+     ustawienie paska przez karte tez jest zmiana. */
   useEffect(() => {
-    setCard(null);
-  }, [filters, onlyMine, withUnassigned, showDone, scopePref]);
+    if (!card) return;
+    const st = stanKarty(card);
+    if (scopePref !== st.scope || showDone !== st.done || onlyMine || anyFilter(filters)) setCard(null);
+  }, [card, filters, onlyMine, showDone, scopePref]);
 
   // Przelaczniki dzialaja niezaleznie od zakresu, zeby liczniki przy zakresach
   // pokazywaly to, co faktycznie zobaczysz po klliknieciu.
@@ -9083,6 +9116,7 @@ export default function App() {
       deadlineLook,
       szukajWOpisach: wOpisach,
       showEmpty,
+      showCounters,
       shownEmpty,
       detailWidth,
       collapsed: [...collapsed],
@@ -9093,7 +9127,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, listTint, deadlineLook, wOpisach, showEmpty, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -10842,14 +10876,14 @@ export default function App() {
 
         {/* Liczniki pod samym naglowkiem, nad zakresem i filtrami: licza cala grupe,
             wiec stoja ponad tym, co pasek nizej zaweza. */}
-        {(viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
+        {showCounters && (viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
           <CountersBar
             defs={counterDefs}
             values={counterValues}
             pending={counterPending}
             prev={counterPrev}
             active={card}
-            onPick={setCard}
+            onPick={pickCard}
           />
         )}
 
@@ -11649,6 +11683,7 @@ export default function App() {
             tint: listTint,
             deadline: deadlineLook,
             empty: showEmpty,
+            counters: showCounters,
             filtersOn: anyFilter(filters),
             theme,
             font,
@@ -11678,6 +11713,11 @@ export default function App() {
             tint: setListTint,
             deadline: setDeadlineLook,
             empty: () => setShowEmpty((v) => !v),
+            /* Schowane karty nie zostawiaja wybranej — nie byloby jak z niej wyjsc. */
+            counters: () => {
+              setShowCounters((v) => !v);
+              setCard(null);
+            },
             toggleColumn,
             clearFilters: () => setFilters(EMPTY_FILTERS),
             reload: () => void reload(),
