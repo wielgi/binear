@@ -112,25 +112,31 @@ also a palette section with usage counts.
 ## Counters
 
 A row of cards under the header answers "what is there to do in the register",
-following the steps of the task audit, then what is ready to go. Left to right:
+following the steps of the task audit. Left to right:
 
 | card | counts |
 | --- | --- |
-| **Outside sprint** | open tasks outside the active sprint, deferred included |
-| **No epic** | open, not deferred, no epic |
-| **To interview** | open, not deferred, tagged `DO-WYWIADU` |
-| **Answers to read** | tagged `OCZEKUJE-NA-ODPOWIEDZ`, and someone outside IT wrote in the chat after our last round of questions |
-| **To estimate** | outside the sprint, tagged `DO-STARTU`, no story points |
-| **Ready to start** | outside the sprint, not deferred, tagged `DO-STARTU`, with story points — what can be pulled into a sprint |
+| **Outside sprint** | open tasks outside the active sprint, **deferred excluded** |
+| **To interview** | outside the sprint, tagged `DO-WYWIADU` **or with no readiness tag at all** (new tasks, or ones tagged only `BUG`, `Wysoki`…) |
+| **Waiting for an answer** | outside the sprint, tagged `OCZEKUJE-NA-ODPOWIEDZ`, nobody outside IT has answered yet |
+| **Answers to read** | the same tag, and someone outside IT answered with substance after our last round of questions |
+| **To estimate** | outside the sprint, `DO-STARTU`, no story points |
+| **Ready to start** | outside the sprint, `DO-STARTU`, with story points — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
+
+**The five middle cards add up to "Outside sprint" exactly.** A task outside the
+sprint is in exactly one of those states; "To interview" is the remainder, so the
+sum holds by construction, also for a task with two readiness tags (`DO-STARTU`
+wins over `OCZEKUJE-NA-ODPOWIEDZ`) or a tag outside the list. Deferred tasks
+(status 6) are left out of the sum and of every card; a greyed note under the
+row counts them (`Odłożone (poza sumą): 5`) and clicking it lists them.
 
 The numbers are **global**: the whole group, regardless of scope, `Only mine`,
 `Completed` and filters. The point is to see whether the register holds 200 or 220
 tasks, not how many the current view shows. Clicking a card replaces the list
 with exactly the tasks it counts (search still applies); clicking it again, or
 changing scope, filters or toggles, returns to the normal view. Tag names match
-case-insensitively, as in Bitrix. Deferred tasks (status 6) stay out of the audit
-cards because the audit leaves them alone until someone resumes them.
+case-insensitively, as in Bitrix.
 
 **Answers.** The anchor is the last comment by IT that looks like interview
 questions (a line starting with `[B]1.`). An answer is a later message from someone outside IT that has substance: numbered

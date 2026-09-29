@@ -1,24 +1,41 @@
 /*
  * Liczniki nad lista — „co mam dzis do zrobienia" w rejestrze zadan.
  *
- * Kazda karta to jedno pytanie z audytu zadan: ktore DO-STARTU czekaja na wycene,
- * gdzie zglaszajacy juz odpowiedzial na pytania, co czeka na wywiad, co nie ma epika.
  * Liczby sa GLOBALNE — licza cala grupe, niezaleznie od zakresu, przelacznikow
  * („Tylko moje", „Zakonczone") i filtrow. Inaczej „ile mamy poza sprintem" zmienialoby
  * sie od tego, jak akurat patrzysz, a o to pytanie chodzi: czy jest 200, czy 220.
+ *
+ * ROZBICIE „POZA SPRINTEM"
+ * Otwarte zadania spoza aktywnego sprintu, BEZ odlozonych, dziela sie na stany, ktore
+ * sie wykluczaja i razem daja dokladnie „Poza sprintem":
+ *
+ *   DO-STARTU, z wycena             → Gotowe do startu
+ *   DO-STARTU, bez wyceny           → Do wyceny
+ *   OCZEKUJE-NA-ODPOWIEDZ + wpis    → Do analizy odpowiedzi
+ *   OCZEKUJE-NA-ODPOWIEDZ           → Czeka na odpowiedz
+ *   cala reszta                     → Do wywiadu (DO-WYWIADU albo brak tagu gotowosci)
+ *
+ * „Do wywiadu" jest dopelnieniem, wiec suma zgadza sie z definicji — takze gdy zadanie
+ * ma dwa tagi gotowosci (pierwszenstwo: DO-STARTU, potem OCZEKUJE) albo tag spoza
+ * listy (BUG, Wysoki). Zadanie nowe, bez zadnego tagu gotowosci, to zadanie, o ktore
+ * trzeba dopiero zapytac.
+ *
+ * Odlozone (status 6) leza poza kolejka audytu i poza suma; pokazuje je osobna,
+ * wyszarzona notka pod kafelkami.
  *
  * Modul jest czysty (bez Reacta i bez zapytan), zeby dalo sie go przetestowac.
  */
 import type { Task } from './bitrix';
 
 export type CounterKey =
-  | 'sprint'
   | 'poza'
+  | 'wywiad'
+  | 'czeka'
+  | 'odpowiedzi'
   | 'wycena'
   | 'gotowe'
-  | 'odpowiedzi'
-  | 'wywiad'
-  | 'epik';
+  | 'sprint'
+  | 'odlozone';
 
 export const TAG_DO_STARTU = 'DO-STARTU';
 export const TAG_CZEKA = 'OCZEKUJE-NA-ODPOWIEDZ';
@@ -44,80 +61,88 @@ export interface CounterDef {
   /** Po co ta karta — w dymku, zeby liczba nie wymagala znajomosci audytu. */
   hint: string;
   match: (t: CounterTask, ctx: CounterCtx) => boolean;
-  /** Liczba zalezy od story pointow albo epika — dopoki nie doszly, jest niepewna. */
+  /** Liczba zalezy od story pointow — dopoki nie doszly, jest niepewna. */
   needsMeta?: boolean;
   /** Karta istnieje tylko w projekcie ze sprintami (scrum). */
   needsSprint?: boolean;
+  /** Nie jest kafelkiem, tylko wyszarzona notka pod paskiem — poza suma „Poza sprintem". */
+  note?: boolean;
   /** Wzrost to zla wiadomosc (wiecej roboty). Dla sprintu kierunek nic nie znaczy. */
   riseIsBad: boolean;
 }
 
 const isOpen = (t: CounterTask, ctx: CounterCtx) => !ctx.closed.has(t.status);
 /**
- * Status „Odlozone" (6). Audyt odlozonych nie rusza — lezy poza kolejka, dopoki ktos
- * go swiadomie nie wznowi — wiec karty audytowe ich nie licza. „Poza sprintem" tak:
- * to dalej zadania w rejestrze.
+ * Status „Odlozone" (6). Audyt odlozonych nie rusza — leza poza kolejka, dopoki ktos
+ * ich swiadomie nie wznowi — wiec nie wchodza do „Poza sprintem" ani do zadnego stanu.
  */
 export const DEFERRED_STATUS = '6';
 /** Otwarte i nieodlozone — to, czym audyt sie zajmuje. */
 const inAudit = (t: CounterTask, ctx: CounterCtx) => isOpen(t, ctx) && t.status !== DEFERRED_STATUS;
 const inSprint = (t: CounterTask, ctx: CounterCtx) =>
   ctx.sprintId !== null && t.sprintId === ctx.sprintId;
+/** Rejestr do przerobienia: otwarte, nieodlozone, spoza aktywnego sprintu. */
+const outside = (t: CounterTask, ctx: CounterCtx) => inAudit(t, ctx) && !inSprint(t, ctx);
+
+const isStartu = (t: CounterTask) => hasTag(t, TAG_DO_STARTU);
+/** DO-STARTU ma pierwszenstwo — zadanie z dwoma tagami gotowosci liczy sie raz. */
+const isCzeka = (t: CounterTask) => !isStartu(t) && hasTag(t, TAG_CZEKA);
+const wasAnswered = (t: CounterTask, ctx: CounterCtx) => ctx.answered?.has(t.id) ?? false;
 
 /*
- * Kolejnosc = kolejnosc pracy w audycie: najpierw skala rejestru, potem porzadki
- * (epik, wywiad, odpowiedzi, wycena), potem to, co juz gotowe do wziecia do sprintu,
- * na koncu sprint jako punkt odniesienia.
+ * Kolejnosc = kolejnosc pracy w audycie: skala rejestru, potem stany od „trzeba zapytac"
+ * po „gotowe", na koncu sprint jako punkt odniesienia i notka o odlozonych.
  */
 export const COUNTERS: CounterDef[] = [
   {
     key: 'poza',
     label: 'Poza sprintem',
-    hint: 'Otwarte zadania spoza aktywnego sprintu — cały rejestr, niezależnie od widoku i filtrów.',
-    match: (t, ctx) => isOpen(t, ctx) && !inSprint(t, ctx),
-    riseIsBad: true,
-  },
-  {
-    key: 'epik',
-    label: 'Bez epika',
-    hint: 'Otwarte zadania bez epika (bez odłożonych) — nie trafiają do kolejki żadnego działu.',
-    match: (t, ctx) => inAudit(t, ctx) && t.epicId == null,
-    needsMeta: true,
+    hint:
+      'Otwarte zadania spoza aktywnego sprintu, bez odłożonych — cały rejestr, niezależnie ' +
+      'od widoku i filtrów. Kafelki obok rozbijają tę liczbę co do sztuki.',
+    match: (t, ctx) => outside(t, ctx),
     riseIsBad: true,
   },
   {
     key: 'wywiad',
     label: 'Do wywiadu',
-    hint: 'Z tagiem DO-WYWIADU — wiadomo, o co zapytać, pytania jeszcze nie padły.',
-    match: (t, ctx) => inAudit(t, ctx) && hasTag(t, TAG_WYWIAD),
+    hint:
+      'Poza sprintem: z tagiem DO-WYWIADU albo jeszcze bez tagu gotowości (nowe) — ' +
+      'trzeba zadać pytania.',
+    match: (t, ctx) => outside(t, ctx) && !isStartu(t) && !hasTag(t, TAG_CZEKA),
+    riseIsBad: true,
+  },
+  {
+    key: 'czeka',
+    label: 'Czeka na odpowiedź',
+    hint:
+      'Poza sprintem, z tagiem OCZEKUJE-NA-ODPOWIEDZ, a po naszych pytaniach nikt spoza IT ' +
+      'jeszcze nie odpisał — piłka po stronie zgłaszającego.',
+    match: (t, ctx) => outside(t, ctx) && isCzeka(t) && !wasAnswered(t, ctx),
     riseIsBad: true,
   },
   {
     key: 'odpowiedzi',
     label: 'Do analizy odpowiedzi',
     hint:
-      'OCZEKUJE-NA-ODPOWIEDZ, a po naszych pytaniach ktoś spoza IT już napisał w czacie — ' +
+      'OCZEKUJE-NA-ODPOWIEDZ, a po naszych pytaniach ktoś spoza IT odpisał z treścią — ' +
       'daj DO-STARTU albo dopytaj.',
-    match: (t, ctx) =>
-      inAudit(t, ctx) && hasTag(t, TAG_CZEKA) && (ctx.answered?.has(t.id) ?? false),
+    match: (t, ctx) => outside(t, ctx) && isCzeka(t) && wasAnswered(t, ctx),
     riseIsBad: true,
   },
   {
     key: 'wycena',
     label: 'Do wyceny',
     hint: 'Poza sprintem, z tagiem DO-STARTU, bez story pointów — uzupełnij wycenę.',
-    match: (t, ctx) =>
-      inAudit(t, ctx) && !inSprint(t, ctx) && hasTag(t, TAG_DO_STARTU) && t.storyPoints == null,
+    match: (t, ctx) => outside(t, ctx) && isStartu(t) && t.storyPoints == null,
     needsMeta: true,
     riseIsBad: true,
   },
   {
     key: 'gotowe',
     label: 'Gotowe do startu',
-    hint:
-      'Poza sprintem, z tagiem DO-STARTU i z wyceną — można je wziąć do sprintu (bez odłożonych).',
-    match: (t, ctx) =>
-      inAudit(t, ctx) && !inSprint(t, ctx) && hasTag(t, TAG_DO_STARTU) && t.storyPoints != null,
+    hint: 'Poza sprintem, z tagiem DO-STARTU i z wyceną — można je wziąć do sprintu.',
+    match: (t, ctx) => outside(t, ctx) && isStartu(t) && t.storyPoints != null,
     needsMeta: true,
     // Wiecej gotowych to dobra wiadomosc — nie kolorujemy wzrostu na bursztynowo.
     riseIsBad: false,
@@ -128,6 +153,14 @@ export const COUNTERS: CounterDef[] = [
     hint: 'Wszystkie zadania aktywnego sprintu, także zakończone, i suma ich story pointów.',
     match: (t, ctx) => inSprint(t, ctx),
     needsSprint: true,
+    riseIsBad: false,
+  },
+  {
+    key: 'odlozone',
+    label: 'Odłożone',
+    hint: 'Zadania odłożone (status „Odłożone”) spoza sprintu — nie wchodzą do sumy „Poza sprintem”.',
+    match: (t, ctx) => isOpen(t, ctx) && t.status === DEFERRED_STATUS && !inSprint(t, ctx),
+    note: true,
     riseIsBad: false,
   },
 ];

@@ -1394,14 +1394,39 @@ input[type='search']::-webkit-search-decoration {
  * przewijany w bok na waskim oknie. Karta to przycisk — klikniecie filtruje liste,
  * wlaczona dostaje akcent, tak jak aktywny segment zakresu.
  */
+/* Blok: rzad kafelkow + wyszarzona notka pod nim. Kreska pod caloscia, nie pod rzedem. */
+.counters-block {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+
 .counters {
   display: flex;
   gap: var(--s2);
-  flex: 0 0 auto;
   padding: var(--s2) var(--s4);
-  border-bottom: 1px solid var(--border);
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+/* Odlozone — liczba spoza sumy „Poza sprintem", stad wyszarzona i pod kafelkami. */
+.counters-note {
+  padding: 0 var(--s4) var(--s2);
+  font-size: var(--t-micro);
+}
+
+.counters-note-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.counters-note-btn:hover,
+.counters-note-on {
+  color: var(--fg-secondary);
+  text-decoration: underline;
 }
 
 /*
@@ -1439,7 +1464,7 @@ input[type='search']::-webkit-search-decoration {
 }
 
 .counter-poza { --c: var(--accent); }
-.counter-epik { --c: var(--danger); }
+.counter-czeka { --c: #e879a6; }
 .counter-wywiad { --c: var(--accent-orange); }
 .counter-odpowiedzi { --c: var(--accent-amber); }
 .counter-wycena { --c: #a371f7; }

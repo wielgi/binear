@@ -25,7 +25,7 @@ import {
   CheckIcon,
   CommentIcon,
   HashIcon,
-  LayersIcon,
+  HistoryIcon,
   ListIcon,
   PenIcon,
 } from './icons';
@@ -174,12 +174,13 @@ export function useCounterHistory(groupId: number | null, snap: DaySnapshot) {
 /** Ikona karty; kolor siedzi w CSS (`.counter-<klucz>`), zeby motywy mogly go nadpisac. */
 const ICONS: Record<CounterKey, ReactNode> = {
   poza: <ListIcon />,
-  epik: <LayersIcon />,
   wywiad: <PenIcon />,
+  czeka: <HistoryIcon />,
   odpowiedzi: <CommentIcon />,
   wycena: <HashIcon />,
   gotowe: <CheckIcon />,
   sprint: <CalendarIcon />,
+  odlozone: null, // notka pod paskiem, bez ikony
 };
 
 function dayLabel(day: string, today: Date): string {
@@ -229,9 +230,13 @@ export function CountersBar({
   active: CounterKey | null;
   onPick: (key: CounterKey | null) => void;
 }) {
+  const tiles = defs.filter((d) => !d.note);
+  // Notka (odlozone) stoi pod kafelkami, wyszarzona: to liczba spoza sumy „Poza sprintem".
+  const note = defs.find((d) => d.note);
   return (
+    <div className="counters-block">
     <div className="counters" role="toolbar" aria-label="Liczniki zadań">
-      {defs.map((d) => {
+      {tiles.map((d) => {
         const v = values[d.key];
         const isPending = pending.has(d.key);
         const on = active === d.key;
@@ -261,6 +266,19 @@ export function CountersBar({
           </button>
         );
       })}
+    </div>
+    {note && !pending.has(note.key) && (
+      <div className="counters-note">
+        <button
+          className={`counters-note-btn${active === note.key ? ' counters-note-on' : ''}`}
+          aria-pressed={active === note.key}
+          title={note.hint}
+          onClick={() => onPick(active === note.key ? null : note.key)}
+        >
+          {note.label} (poza sumą): {values[note.key].count}
+        </button>
+      </div>
+    )}
     </div>
   );
 }

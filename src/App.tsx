@@ -8442,7 +8442,9 @@ export default function App() {
   const counterPending = useMemo(() => {
     const s = new Set<CounterKey>();
     for (const d of counterDefs) {
-      if (!metaReady || (d.key === 'odpowiedzi' && answered === null)) s.add(d.key);
+      if (!metaReady || ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null)) {
+        s.add(d.key);
+      }
     }
     return s;
   }, [counterDefs, metaReady, answered]);
