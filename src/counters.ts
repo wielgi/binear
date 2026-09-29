@@ -23,6 +23,9 @@
  * Odlozone (status 6) leza poza kolejka audytu i poza suma; pokazuje je osobna,
  * wyszarzona notka pod kafelkami.
  *
+ * BUG to CECHA, nie stan: zadanie z tagiem BUG jest jednoczesnie w jednym ze stanow,
+ * wiec jego kafelek stoi za pionowym separatorem, poza rozbiciem, i nie dodaje sie do sumy.
+ *
  * Modul jest czysty (bez Reacta i bez zapytan), zeby dalo sie go przetestowac.
  */
 import type { Task } from './bitrix';
@@ -35,11 +38,13 @@ export type CounterKey =
   | 'wycena'
   | 'gotowe'
   | 'sprint'
+  | 'bug'
   | 'odlozone';
 
 export const TAG_DO_STARTU = 'DO-STARTU';
 export const TAG_CZEKA = 'OCZEKUJE-NA-ODPOWIEDZ';
 export const TAG_WYWIAD = 'DO-WYWIADU';
+export const TAG_BUG = 'BUG';
 
 /** Bitrix nie rozroznia wielkosci liter w tagach — „do-startu" to ten sam tag. */
 export const hasTag = (t: Pick<Task, 'tags'>, tag: string): boolean =>
@@ -67,6 +72,8 @@ export interface CounterDef {
   needsSprint?: boolean;
   /** Nie jest kafelkiem, tylko wyszarzona notka pod paskiem — poza suma „Poza sprintem". */
   note?: boolean;
+  /** Cecha, nie stan: kafelek stoi za pionowym separatorem, poza rozbiciem „Poza sprintem". */
+  separate?: boolean;
   /** Wzrost to zla wiadomosc (wiecej roboty). Dla sprintu kierunek nic nie znaczy. */
   riseIsBad: boolean;
 }
@@ -154,6 +161,16 @@ export const COUNTERS: CounterDef[] = [
     match: (t, ctx) => inSprint(t, ctx),
     needsSprint: true,
     riseIsBad: false,
+  },
+  {
+    key: 'bug',
+    label: 'Błędy',
+    hint:
+      'Otwarte zadania z tagiem BUG (bez odłożonych) — w sprincie i poza nim. To cecha, a nie ' +
+      'stan: zadanie z BUG jest też w jednym ze stanów obok, więc kafelek nie wchodzi do sumy.',
+    match: (t, ctx) => inAudit(t, ctx) && hasTag(t, TAG_BUG),
+    separate: true,
+    riseIsBad: true,
   },
   {
     key: 'odlozone',

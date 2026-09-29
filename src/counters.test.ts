@@ -93,6 +93,26 @@ describe('countAll', () => {
     expect([wynik.czeka.count, wynik.odpowiedzi.count]).toEqual([1, 1]);
   });
 
+  it('bug: otwarte z tagiem BUG w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 60, tags: ['BUG'] }),
+        zadanie({ id: 61, tags: ['bug'], sprintId: 70 }),
+        zadanie({ id: 62, tags: ['BUG'], status: '5' }),
+        zadanie({ id: 63, tags: ['BUG'], status: '6' }),
+        zadanie({ id: 64, tags: ['Wysoki'] }),
+      ],
+      ctx(),
+    );
+    expect(w.bug.count).toBe(2);
+  });
+
+  it('bug to cecha: zadanie z BUG jest tez w swoim stanie, wiec suma stanow sie nie zmienia', () => {
+    const w = countAll([zadanie({ id: 70, tags: ['BUG', 'DO-STARTU'], storyPoints: 4 })], ctx());
+    expect([w.bug.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);
+    expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
+  });
+
   it('odlozone nie wchodza do sumy, tylko do notki', () => {
     expect(wynik.odlozone.count).toBe(1);
     expect(wynik.poza.count).toBe(7); // id 12 (odlozone, DO-STARTU + wycena) nie liczy sie

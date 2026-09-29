@@ -88,6 +88,38 @@ export function StageIcon({ progress, color }: { progress: number | null; color:
 }
 
 /** Dymek przy liczniku nieprzeczytanych komentarzy. */
+/** Robak — kafelek BUG. Ten sam kaligraficzny rys (kreska 1.2, okragle konce) co reszta ikon. */
+export function BugIcon() {
+  return (
+    <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden>
+      <path
+        d="M5.2 4.3a1.8 1.8 0 0 1 3.6 0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      <rect
+        x="3.9"
+        y="4.5"
+        width="6.2"
+        height="6.6"
+        rx="3.1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+      />
+      <path
+        d="M7 4.9v6M3.9 7.4H1.8M10.1 7.4h2.1M4.4 5.6 2.7 4.3M9.6 5.6l1.7-1.3M4.4 9.5 2.7 10.8M9.6 9.5l1.7 1.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function CommentIcon() {
   return (
     <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden>

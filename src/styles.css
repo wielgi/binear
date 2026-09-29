@@ -1465,11 +1465,21 @@ input[type='search']::-webkit-search-decoration {
 
 .counter-poza { --c: var(--accent); }
 .counter-czeka { --c: #e879a6; }
+.counter-bug { --c: var(--danger); }
 .counter-wywiad { --c: var(--accent-orange); }
 .counter-odpowiedzi { --c: var(--accent-amber); }
 .counter-wycena { --c: #a371f7; }
 .counter-gotowe { --c: #2bb8c9; }
 .counter-sprint { --c: var(--accent-green); }
+
+/* Pionowy separator: kafelki za nim to cechy, nie stany — nie wchodza do sumy. */
+.counters-divider {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 0 var(--s3);
+  background: var(--border-strong);
+}
 
 .counter-icon {
   display: grid;

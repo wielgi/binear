@@ -21,6 +21,7 @@ import {
   type DaySnapshot,
 } from './counters';
 import {
+  BugIcon,
   CalendarIcon,
   CheckIcon,
   CommentIcon,
@@ -180,6 +181,7 @@ const ICONS: Record<CounterKey, ReactNode> = {
   wycena: <HashIcon />,
   gotowe: <CheckIcon />,
   sprint: <CalendarIcon />,
+  bug: <BugIcon />,
   odlozone: null, // notka pod paskiem, bez ikony
 };
 
@@ -236,11 +238,11 @@ export function CountersBar({
   return (
     <div className="counters-block">
     <div className="counters" role="toolbar" aria-label="Liczniki zadań">
-      {tiles.map((d) => {
+      {tiles.flatMap((d, i) => {
         const v = values[d.key];
         const isPending = pending.has(d.key);
         const on = active === d.key;
-        return (
+        const tile = (
           <button
             key={d.key}
             className={`counter counter-${d.key}${on ? ' counter-on' : ''}`}
@@ -265,6 +267,10 @@ export function CountersBar({
             </span>
           </button>
         );
+        // Kafelki spoza rozbicia (cechy) stoja za pionowym separatorem.
+        return d.separate && !tiles[i - 1]?.separate
+          ? [<span key={`${d.key}-divider`} className="counters-divider" aria-hidden />, tile]
+          : [tile];
       })}
     </div>
     {note && !pending.has(note.key) && (
