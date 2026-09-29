@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   answerState,
   countAll,
+  COUNTERS,
   isSubstantiveAnswer,
   MIN_ANSWER_CHARS,
   plainBody,
@@ -36,50 +37,128 @@ describe('countAll', () => {
     zadanie({ id: 5, tags: ['DO-STARTU'], sprintId: 70 }),
     zadanie({ id: 6, tags: ['OCZEKUJE-NA-ODPOWIEDZ'] }),
     zadanie({ id: 7, tags: ['OCZEKUJE-NA-ODPOWIEDZ'] }),
-    zadanie({ id: 8, tags: ['DO-WYWIADU'], epicId: null }),
-    zadanie({ id: 9, status: '5', epicId: null, tags: ['DO-WYWIADU'] }),
+    zadanie({ id: 8, tags: ['DO-WYWIADU'] }),
+    zadanie({ id: 9, status: '5', tags: ['DO-WYWIADU'] }),
     zadanie({ id: 10, sprintId: 69 }),
+    zadanie({ id: 11, tags: ['BUG'] }),
+    zadanie({ id: 12, status: '6', tags: ['DO-STARTU'], storyPoints: 3 }),
   ];
-  const wynik = countAll(lista, ctx({ answered: new Set([7]) }));
+  const c = ctx({ answered: new Set([7]) });
+  const wynik = countAll(lista, c);
+  /* Z flagi `inSum`, nie z recznej listy: ta sama flaga ustawia grupe „Rozbicie”
+     w `CountersBar`, wiec test pilnuje tez tego, co ekran pokazuje jako sume. */
+  const stany = COUNTERS.filter((d) => d.inSum).map((d) => d.key);
+
+  it('do sumy wchodza dokladnie stany rozbicia', () => {
+    expect(stany).toEqual(['wywiad', 'czeka', 'odpowiedzi', 'wycena', 'gotowe']);
+  });
 
   it('sprint liczy tez zakonczone i sumuje ich story pointy', () => {
     expect(wynik.sprint).toEqual({ count: 3, points: 12 });
   });
 
-  it('poza sprintem to otwarte spoza AKTYWNEGO sprintu, takze z innych sprintow', () => {
-    expect(wynik.poza.count).toBe(6);
+  it('poza sprintem to otwarte, nieodlozone, spoza AKTYWNEGO sprintu (takze z innych sprintow)', () => {
+    expect(wynik.poza.count).toBe(7); // id 3, 4, 6, 7, 8, 10, 11
   });
 
-  it('do wyceny: DO-STARTU poza sprintem bez story pointow, bez wzgledu na wielkosc liter tagu', () => {
-    expect(wynik.wycena.count).toBe(1);
+  it('stany rozbijaja „poza sprintem” co do sztuki', () => {
+    expect(stany.reduce((s, k) => s + wynik[k].count, 0)).toBe(wynik.poza.count);
+    expect(stany.map((k) => wynik[k].count)).toEqual([3, 1, 1, 1, 1]); // wywiad: 8, 10 (bez tagu), 11 (BUG)
   });
 
-  it('do analizy: tylko OCZEKUJE z odpowiedzia', () => {
-    expect(wynik.odpowiedzi.count).toBe(1);
+  it('kazde zadanie poza sprintem wpada do dokladnie jednego stanu', () => {
+    const bezStanu: number[] = [];
+    const wieleStanow: number[] = [];
+    for (const t of lista) {
+      const w = countAll([t], c);
+      if (!w.poza.count) continue;
+      const n = stany.filter((k) => w[k].count === 1).length;
+      if (n === 0) bezStanu.push(t.id);
+      if (n > 1) wieleStanow.push(t.id);
+    }
+    expect([bezStanu, wieleStanow]).toEqual([[], []]);
   });
 
-  it('wywiad i epik pomijaja zamkniete', () => {
-    expect(wynik.wywiad.count).toBe(1);
-    expect(wynik.epik.count).toBe(1);
+  it('nowe bez tagu i z tagiem spoza listy (BUG, Wysoki) traktowane sa jak do wywiadu', () => {
+    const w = countAll(
+      [zadanie({ id: 30 }), zadanie({ id: 31, tags: ['BUG'] }), zadanie({ id: 32, tags: ['Wysoki'] })],
+      ctx(),
+    );
+    expect(w.wywiad.count).toBe(3);
   });
 
-  it('bez aktywnego sprintu wszystko otwarte jest poza sprintem', () => {
-    expect(countAll(lista, ctx({ sprintId: null })).poza.count).toBe(8);
+  it('dwa tagi gotowosci licza sie raz: DO-STARTU wygrywa z OCZEKUJE', () => {
+    const w = countAll([zadanie({ id: 40, tags: ['DO-STARTU', 'OCZEKUJE-NA-ODPOWIEDZ'] })], ctx());
+    expect([w.wycena.count, w.czeka.count, w.odpowiedzi.count, w.wywiad.count]).toEqual([1, 0, 0, 0]);
   });
 
-  it('odlozone wypadaja z kart audytu, ale zostaja w rejestrze poza sprintem', () => {
-    const odlozone = [
-      zadanie({ id: 20, status: '6', tags: ['DO-WYWIADU'], epicId: null }),
-      zadanie({ id: 21, status: '6', tags: ['OCZEKUJE-NA-ODPOWIEDZ'] }),
-      zadanie({ id: 22, status: '6', tags: ['DO-STARTU'] }),
-    ];
-    const w = countAll(odlozone, ctx({ answered: new Set([21]) }));
-    expect([w.wywiad.count, w.epik.count, w.odpowiedzi.count, w.wycena.count]).toEqual([0, 0, 0, 0]);
-    expect(w.poza.count).toBe(3);
+  it('do wyceny i gotowe dziela DO-STARTU poza sprintem, bez wzgledu na wielkosc liter tagu', () => {
+    expect([wynik.wycena.count, wynik.gotowe.count]).toEqual([1, 1]);
   });
 
-  it('odpowiedzi jeszcze nieprzeliczone daja zero, a nie blad', () => {
-    expect(countAll(lista, ctx({ answered: null })).odpowiedzi.count).toBe(0);
+  it('czeka i do analizy dziela OCZEKUJE wg tego, czy ktos odpisal', () => {
+    expect([wynik.czeka.count, wynik.odpowiedzi.count]).toEqual([1, 1]);
+  });
+
+  it('bug: otwarte z tagiem BUG w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 60, tags: ['BUG'] }),
+        zadanie({ id: 61, tags: ['bug'], sprintId: 70 }),
+        zadanie({ id: 62, tags: ['BUG'], status: '5' }),
+        zadanie({ id: 63, tags: ['BUG'], status: '6' }),
+        zadanie({ id: 64, tags: ['Wysoki'] }),
+      ],
+      ctx(),
+    );
+    expect(w.bug.count).toBe(2);
+  });
+
+  it('koncept: nowy tag KONCEPT i starszy KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 70, tags: ['KONCEPT'] }),
+        zadanie({ id: 71, tags: ['KONCEPCJA'] }),
+        zadanie({ id: 72, tags: ['koncepcja'], sprintId: 70 }),
+        zadanie({ id: 73, tags: ['KONCEPT'], status: '5' }),
+        zadanie({ id: 74, tags: ['KONCEPT'], status: '6' }),
+        zadanie({ id: 75, tags: ['KONCEPTY'] }),
+      ],
+      ctx(),
+    );
+    expect(w.koncept.count).toBe(3);
+  });
+
+  it('koncept to cecha: nie wchodzi do sumy, a zadanie zostaje w swoim stanie', () => {
+    const w = countAll([zadanie({ id: 80, tags: ['KONCEPCJA'] })], ctx());
+    expect(w.koncept.count).toBe(1);
+    expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
+    expect(w.wywiad.count).toBe(1);
+  });
+
+  it('bug to cecha: zadanie z BUG jest tez w swoim stanie, wiec suma stanow sie nie zmienia', () => {
+    const w = countAll([zadanie({ id: 70, tags: ['BUG', 'DO-STARTU'], storyPoints: 4 })], ctx());
+    expect([w.bug.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);
+    expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
+  });
+
+  it('odlozone nie wchodza do sumy, tylko do notki', () => {
+    expect(wynik.odlozone.count).toBe(1);
+    expect(wynik.poza.count).toBe(7); // id 12 (odlozone, DO-STARTU + wycena) nie liczy sie
+  });
+
+  it('odlozone w sprincie zostaja w sprincie, a nie w notce', () => {
+    const w = countAll([zadanie({ id: 50, status: '6', sprintId: 70 })], ctx());
+    expect([w.sprint.count, w.odlozone.count, w.poza.count]).toEqual([1, 0, 0]);
+  });
+
+  it('bez aktywnego sprintu wszystko otwarte i nieodlozone jest poza sprintem', () => {
+    expect(countAll(lista, ctx({ sprintId: null })).poza.count).toBe(9); // dochodzi id 1 i 5 z „sprintu", ktorego juz nie ma
+  });
+
+  it('odpowiedzi jeszcze nieprzeliczone: nikt nie jest „do analizy", wszyscy „czekaja"', () => {
+    const w = countAll(lista, ctx({ answered: null }));
+    expect([w.odpowiedzi.count, w.czeka.count]).toEqual([0, 2]);
   });
 });
 

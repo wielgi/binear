@@ -3,7 +3,7 @@
  * Definicje i logika w `counters.ts`; tu tylko React: pobranie czatow do karty
  * odpowiedzi, dzienna historia (strzalki „od wczoraj") i sam widok.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { fetchChatTail, type ChatTail, type Task } from './bitrix';
 import {
   answerState,
@@ -20,7 +20,18 @@ import {
   type CounterValue,
   type DaySnapshot,
 } from './counters';
-import { CalendarIcon, CommentIcon, HashIcon, LayersIcon, ListIcon, PenIcon } from './icons';
+import {
+  BugIcon,
+  BulbIcon,
+  CalendarIcon,
+  CheckIcon,
+  CommentIcon,
+  HashIcon,
+  HistoryIcon,
+  LayersIcon,
+  ListIcon,
+  PenIcon,
+} from './icons';
 
 /** Czaty dociagamy ponownie co tyle, nawet gdy lista sie nie zmienila. */
 const ANSWERS_REFRESH_MS = 5 * 60_000;
@@ -166,11 +177,15 @@ export function useCounterHistory(groupId: number | null, snap: DaySnapshot) {
 /** Ikona karty; kolor siedzi w CSS (`.counter-<klucz>`), zeby motywy mogly go nadpisac. */
 const ICONS: Record<CounterKey, ReactNode> = {
   poza: <ListIcon />,
-  epik: <LayersIcon />,
   wywiad: <PenIcon />,
+  czeka: <HistoryIcon />,
   odpowiedzi: <CommentIcon />,
   wycena: <HashIcon />,
+  gotowe: <CheckIcon />,
   sprint: <CalendarIcon />,
+  bug: <BugIcon />,
+  koncept: <BulbIcon />,
+  odlozone: <LayersIcon />,
 };
 
 function dayLabel(day: string, today: Date): string {
@@ -220,38 +235,110 @@ export function CountersBar({
   active: CounterKey | null;
   onPick: (key: CounterKey | null) => void;
 }) {
-  return (
-    <div className="counters" role="toolbar" aria-label="Liczniki zadań">
-      {defs.map((d) => {
-        const v = values[d.key];
-        const isPending = pending.has(d.key);
-        const on = active === d.key;
-        return (
-          <button
-            key={d.key}
-            className={`counter counter-${d.key}${on ? ' counter-on' : ''}`}
-            aria-pressed={on}
-            title={on ? `${d.hint}\n\nKliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
-            onClick={() => onPick(on ? null : d.key)}
-          >
-            <span className="counter-icon">{ICONS[d.key]}</span>
-            <span className="counter-body">
-              <span className="counter-top">
-                <span className={`counter-value${isPending ? ' counter-pending' : ''}`}>
-                  {isPending ? '…' : v.count}
-                </span>
-                {d.key === 'sprint' && v.points !== null && !isPending && (
-                  <span className="counter-points">{v.points} SP</span>
-                )}
-              </span>
-              <span className="counter-label">{d.label}</span>
-              {!isPending && prev && (
-                <Delta now={v.count} before={prev.snap[d.key]} day={prev.day} riseIsBad={d.riseIsBad} />
-              )}
+  const tiles = defs.filter((d) => !d.note);
+  // Notka (odlozone) stoi pod kafelkami, wyszarzona: to liczba spoza sumy „Poza sprintem".
+  const note = defs.find((d) => d.note);
+
+  /*
+   * Kolko myszy nad rzedem kafelkow przewija go W POZIOMIE — ale tylko wtedy,
+   * gdy kafelki sie nie mieszcza i jest jeszcze dokad przewinac. W kazdym innym
+   * wypadku kolko zostaje stronie. Nasluch reczny, bo React podpina `wheel`
+   * jako pasywny i `preventDefault` by nie zadzialal.
+   */
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const onWheel = (e: WheelEvent) => {
+      if (row.scrollWidth <= row.clientWidth) return;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // gest poziomy dziala sam
+      const max = row.scrollWidth - row.clientWidth;
+      if ((e.deltaY < 0 && row.scrollLeft <= 0) || (e.deltaY > 0 && row.scrollLeft >= max - 1)) return;
+      e.preventDefault();
+      row.scrollLeft += e.deltaY;
+    };
+    row.addEventListener('wheel', onWheel, { passive: false });
+    return () => row.removeEventListener('wheel', onWheel);
+  }, []);
+
+  /*
+   * Trzy grupy z podpisami, zeby bylo widac, co sie z czym sumuje:
+   *  - ROZBICIE: „Poza sprintem" i stany, ktore sie na nie skladaja (`inSum`).
+   *    Podpis grupy przechodzi w linie siegajaca do konca tych kafelkow,
+   *  - SPRINT: kafelek sprintu, osobna miara,
+   *  - POZA SUMA: odlozone (status 6 nie wchodzi do „Poza sprintem") i cechy
+   *    (`separate`, np. bledy — bug jest tez w ktoryms ze stanow).
+   * Wczesniej byl jeden rzad z golym pionowym separatorem, a odlozone wisialy
+   * pod nim jako szara notka — nic nie mowilo, co sie sumuje, a co nie.
+   */
+  const total = tiles.find((d) => d.key === 'poza');
+  const parts = tiles.filter((d) => d.inSum);
+  const sprint = tiles.filter((d) => d.key !== 'poza' && !d.inSum && !d.separate);
+  const outside = [...(note ? [note] : []), ...tiles.filter((d) => d.separate)];
+
+  const tile = (d: CounterDef) => {
+    const v = values[d.key];
+    const isPending = pending.has(d.key);
+    const on = active === d.key;
+    return (
+      <button
+        key={d.key}
+        className={`counter counter-${d.key}${on ? ' counter-on' : ''}`}
+        aria-pressed={on}
+        title={on ? `${d.hint}
+
+Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
+        onClick={() => onPick(on ? null : d.key)}
+      >
+        <span className="counter-icon">{ICONS[d.key]}</span>
+        <span className="counter-body">
+          <span className="counter-top">
+            <span className={`counter-value${isPending ? ' counter-pending' : ''}`}>
+              {isPending ? '…' : v.count}
             </span>
-          </button>
-        );
-      })}
+            {d.key === 'sprint' && v.points !== null && !isPending && (
+              <span className="counter-points">{v.points} SP</span>
+            )}
+          </span>
+          <span className="counter-label">{d.label}</span>
+          {!isPending && prev && (
+            <Delta now={v.count} before={prev.snap[d.key]} day={prev.day} riseIsBad={d.riseIsBad} />
+          )}
+        </span>
+      </button>
+    );
+  };
+  /* Liczba kafelkow grupy — z niej arkusz liczy minimum grupy (`--n`). */
+  const nStyle = (n: number) => ({ ['--n' as string]: n }) as CSSProperties;
+  const cap = (text: string) => (
+    <span className="counters-cap">
+      <span className="counters-cap-text">{text}</span>
+    </span>
+  );
+
+  return (
+    <div className="counters" role="toolbar" aria-label="Liczniki zadań" ref={rowRef}>
+      {(total || parts.length > 0) && (
+        <div className="counters-group counters-group-sum" style={nStyle((total ? 1 : 0) + parts.length)}>
+          {cap('Rozbicie „Poza sprintem”')}
+          <div className="counters-group-row">
+            {total && tile(total)}
+            {parts.map((d) => tile(d))}
+          </div>
+        </div>
+      )}
+      {sprint.length > 0 && (
+        <div className="counters-group" style={nStyle(sprint.length)}>
+          {cap('Sprint')}
+          <div className="counters-group-row">{sprint.map((d) => tile(d))}</div>
+        </div>
+      )}
+      {outside.length > 0 && (
+        <div className="counters-group counters-group-outside" style={nStyle(outside.length)}>
+          {cap('Poza sumą')}
+          <div className="counters-group-row">{outside.map((d) => tile(d))}</div>
+        </div>
+      )}
     </div>
   );
 }
