@@ -22,7 +22,7 @@
  * decyzje podejmuje `onDragEnd` w App.tsx, w jednym wspolnym `DndContext`.
  */
 
-import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useDroppable } from '@dnd-kit/core';
 
@@ -57,16 +57,26 @@ interface PaneStats {
   count: number;
   /** Ile zadan nie ma oszacowania — o tyle `points` jest zanizone. */
   unestimated: number;
-  /** Rozklad SP po osobach, malejaco. Nieprzypisane zostaja jako `id: null`. */
-  load: { id: number | null; name: string; photo: string | null; points: number }[];
+  /**
+   * Rozklad SP po osobach, malejaco. Nieprzypisane zostaja jako `id: null`.
+   *
+   * `carry` to ta czesc punktow osoby, ktora przyjdzie z trwajacego sprintu —
+   * pasek rysuje ja kreskowaniem, zeby bylo widac, ile z czyjegos obciazenia to
+   * praca wybrana teraz, a ile zaleglosc.
+   */
+  load: { id: number | null; name: string; photo: string | null; points: number; carry: number }[];
 }
+
+type Udzial = { id: number | null; name: string; photo: string | null; points: number; carry: number };
 
 function statsOf(
   tasks: Task[],
   people: { id: number; name: string; photo: string | null }[],
+  /** Identyfikatory zadan PRZENIESIONYCH — patrz `load[].carry`. */
+  przeniesione?: Set<number>,
 ): PaneStats {
   const byId = new Map(people.map((p) => [p.id, p]));
-  const load = new Map<number | null, { id: number | null; name: string; photo: string | null; points: number }>();
+  const load = new Map<number | null, Udzial>();
 
   let points = 0;
   let unestimated = 0;
@@ -88,8 +98,10 @@ function statsOf(
       name: known?.name ?? t.responsibleName ?? (key === null ? 'Nieprzypisane' : `#${key}`),
       photo: known?.photo ?? null,
       points: 0,
+      carry: 0,
     };
     cur.points += sp;
+    if (przeniesione?.has(t.id)) cur.carry += sp;
     load.set(key, cur);
   }
 
@@ -102,51 +114,146 @@ function statsOf(
 }
 
 /**
- * Pasek rozkladu SP po osobach — od razu widac, czy sprint jest wyrownany.
+ * Zdanie pod paskiem: ile zostalo, ile ponad, albo ze wypelnione co do punktu.
+ *
+ * Etykieta w NAWIASIE, a nie wpleciona w zdanie: „ostatnio dowiezione
+ * (Sprint 67)" nie odmienia sie po polsku razem z reszta, wiec kazde wplecenie
+ * wychodzilo koslawo („do ostatnio dowiezione").
+ */
+function opisMocy(points: number, compare: { label: string; points: number }): string {
+  if (points > compare.points)
+    return `+${points - compare.points} SP ponad ${compare.points} SP — ${compare.label}`;
+  if (points === compare.points)
+    return `Wypełnione co do punktu: ${compare.points} SP — ${compare.label}`;
+  return `Zostało ${compare.points - points} SP z ${compare.points} SP — ${compare.label}`;
+}
+
+/**
+ * JEDEN pasek na panel: rozklad SP po osobach, w skali mocy zespolu.
+ *
+ * Wczesniej byly dwa, jeden pod drugim — pasek mocy („ile z limitu") i pasek osob
+ * („czyje to"). Kazdy odpowiadal na pol pytania i zaden nie odpowiadal na cale:
+ * po pasku mocy nie bylo widac, kto jest obciazony, a po pasku osob nie bylo
+ * widac, ile jeszcze wolno wziac. Zlozone razem: kolor to osoba, dlugosc to
+ * punkty, a caly tor to moce zespolu.
+ *
+ * Skala: tor ma dlugosc `max(limit, suma)`. Dopoki sprint sie miesci, kreska
+ * stoi na prawej krawedzi (100% mocy) i pusty ogon jest miejscem, ktore zostalo.
+ * Po przekroczeniu tor rozciaga sie do sumy, a kreska wjezdza w glab paska — to,
+ * co za nia, jest nadmiarem, i wtedy kreska robi sie czerwona.
+ *
+ * `limit` rowny zeru znaczy „brak odniesienia" (rejestr, sprint aktywny) — tor
+ * jest wtedy sama suma, czyli pasek zachowuje sie jak zwykly rozklad po osobach.
  *
  * Podpis pod kursorem, a nie natywny `title`: ten pokazuje sie z sekundowym
  * opoznieniem i rysuje go system, wiec przy pasku, po ktorym wodzi sie mysza,
  * jest bezuzyteczny. Ten sam wybor i ten sam wyglad co odczyt na wykresie
  * spalania.
  */
-function Load({ stats, zawsze }: { stats: PaneStats; zawsze?: boolean }) {
-  const [hover, setHover] = useState<{ name: string; points: number; at: number } | null>(null);
+function Pasek({
+  stats,
+  limit = 0,
+  zawsze,
+  note,
+  dopisek,
+}: {
+  stats: PaneStats;
+  /** Moce zespolu w SP; 0 = bez odniesienia. */
+  limit?: number;
+  /** Rysuj sam tor, gdy nie ma czego rozkladac (zeby warianty sie zgadzaly). */
+  zawsze?: boolean;
+  /** Zdanie pod paskiem: ile zostalo albo ile ponad. */
+  note?: string;
+  /** Druga linijka — skad wziely sie punkty przeniesione. */
+  dopisek?: string;
+}) {
+  const [hover, setHover] = useState<{ name: string; points: number; carry: number; at: number } | null>(
+    null,
+  );
   const barRef = useRef<HTMLDivElement>(null);
 
-  /*
-   * Pusty panel nie dostaje paska — nie ma czego rozkladac. WYJATEK: gdy paski
-   * stoja w dwoch wariantach, brak jednego przesuwal wszystko do gory i pary
-   * przestawaly sie zgadzac („zaplanowane" mialo jeden pasek, „z przeniesieniem"
-   * dwa, choc to te same dwie miary). Wtedy zostaje sam tor — i to tez jest
-   * odpowiedz: nikt jeszcze nic nie wzial.
-   */
   if (stats.points <= 0 && !zawsze) return null;
+
+  /* Tor: moce zespolu, a gdy sprint je przekracza — cala suma, zeby nadmiar mial
+     gdzie sie zmiescic. Bez odniesienia tor jest sama suma. */
+  const tor = Math.max(limit, stats.points) || 1;
+  const pct = (v: number) => (v / tor) * 100;
+  const ponad = limit > 0 && stats.points > limit;
+  /*
+   * Przy przekroczeniu kawalki osob SCISKAMY do pola przed kreska mocy — kolor
+   * konczy sie na kresce, a tor za nia zostaje pusty i pokazuje sam nadmiar.
+   * Proporcje miedzy osobami zostaja, zmienia sie tylko skala kawalkow.
+   */
+  const skala = ponad ? limit / stats.points : 1;
+  const szer = (v: number) => pct(v * skala);
+
+  /*
+   * Zaokraglenie PRAWEGO konca dostaje ostatni kawalek, i tylko gdy wypelnienie
+   * naprawde dochodzi do konca toru. Nie da sie tego zrobic przez `:last-child`:
+   * po kawalkach w pasku stoja jeszcze kreska i podpis, tez jako `span`. A gdy
+   * sprint nie wypelnia mocy, koniec wypelnienia ma byc PROSTY — jak w kazdym
+   * pasku postepu, ktory sie jeszcze nie skonczyl.
+   */
+  const pelny = limit === 0 || stats.points === limit;
+  const ostatni = [...stats.load].reverse().find((p) => p.points > 0);
+  const koniec = (p: (typeof stats.load)[number], czyCarry: boolean) =>
+    pelny && p === ostatni && (p.carry > 0 ? czyCarry : !czyCarry);
 
   return (
     <div className="plan-load">
-      <div
-        className="plan-load-bar"
-        ref={barRef}
-        onMouseLeave={() => setHover(null)}
-      >
-        {stats.load.map((p) => (
+      <div className="plan-load-bar" ref={barRef} onMouseLeave={() => setHover(null)}>
+        {stats.load.map((p) => {
+          const kolor = p.id === null ? 'var(--fg-dim)' : personColor(p.name);
+          const pokaz = (e: React.MouseEvent) => {
+            const box = barRef.current?.getBoundingClientRect();
+            if (!box) return;
+            /* Pozycja WZGLEDEM paska — podpis ma isc za kursorem, nie stac na
+               srodku kawalka, ktory bywa szerszy niz pol panelu. */
+            setHover({ name: p.name, points: p.points, carry: p.carry, at: e.clientX - box.left });
+          };
+
+          /*
+           * Osoba moze miec DWA kawalki: wybrane teraz i przeniesione. Oba w jej
+           * kolorze, drugi kreskowany — inaczej nie da sie odczytac, czy ktos jest
+           * obciazony wyborem, czy zaleglocia, a to zmienia decyzje przy dokladaniu.
+           */
+          const wybrane = Math.max(0, p.points - p.carry);
+          return (
+            <Fragment key={String(p.id)}>
+              {wybrane > 0 && (
+                <span
+                  className={`plan-load-seg${koniec(p, false) ? ' plan-load-seg-koniec' : ''}`}
+                  style={{ width: `${szer(wybrane)}%`, background: kolor }}
+                  onMouseMove={pokaz}
+                />
+              )}
+              {p.carry > 0 && (
+                <span
+                  className={`plan-load-seg plan-load-carry${koniec(p, true) ? ' plan-load-seg-koniec' : ''}`}
+                  style={{ width: `${szer(p.carry)}%`, background: kolor }}
+                  onMouseMove={pokaz}
+                />
+              )}
+            </Fragment>
+          );
+        })}
+
+        {/*
+          Gdzie KONCZY sie wypelnienie — czerwona kreska, jak na pasku postepu.
+          Tylko ponizej mocy: przy przekroczeniu wypelnienie siega konca toru,
+          a granice pokazuje kreska mocy (tez czerwona).
+        */}
+        {limit > 0 && !ponad && stats.points > 0 && stats.points < limit && (
+          <span className="plan-load-mark plan-load-mark-ponad" style={{ left: `${pct(stats.points)}%` }} />
+        )}
+
+        {/* Kreska mocy zespolu. Na prawej krawedzi, dopoki sprint sie miesci. */}
+        {limit > 0 && (
           <span
-            key={String(p.id)}
-            className="plan-load-seg"
-            style={{
-              flex: `${p.points} 1 0`,
-              /* Nieprzypisane celowo BEZ koloru osoby — to nie jest osoba. */
-              background: p.id === null ? 'var(--fg-dim)' : personColor(p.name),
-            }}
-            onMouseMove={(e) => {
-              const box = barRef.current?.getBoundingClientRect();
-              if (!box) return;
-              /* Pozycja WZGLEDEM paska — podpis ma isc za kursorem, nie stac
-                 na srodku kawalka, ktory bywa szerszy niz pol panelu. */
-              setHover({ name: p.name, points: p.points, at: e.clientX - box.left });
-            }}
+            className={`plan-load-mark${ponad ? ' plan-load-mark-ponad' : ''}`}
+            style={{ left: `${pct(limit)}%` }}
           />
-        ))}
+        )}
 
         {hover && (
           /*
@@ -163,76 +270,36 @@ function Load({ stats, zawsze }: { stats: PaneStats; zawsze?: boolean }) {
           >
             {hover.name}
             <b>{hover.points} SP</b>
+            {hover.carry > 0 && <span className="plan-load-tip-carry">z tego {hover.carry} z przeniesienia</span>}
           </span>
         )}
       </div>
+
+      {note && (
+        <span className="plan-compare-note">
+          {note}
+          {dopisek && <span className="plan-compare-skad">{dopisek}</span>}
+        </span>
+      )}
     </div>
   );
 }
 
-/**
- * Pasek odniesienia: suma SP panelu wzgledem mocy zespolu.
- *
- * Wypelnienie to suma SP wzgledem `compare.points`, a kreska po prawej stoi na
- * 100% — czyli tam, gdzie sprint dorownuje mocom zespolu (albo temu, co dowiozl
- * ostatnio, gdy mocy nie wpisano). Kolor zmienia sie dopiero na granicy i po jej
- * przekroczeniu, zeby zwykly, niepelny sprint nie swiecil ostrzegawczo.
- *
- * `carry` to ta czesc sumy, ktora NIE jest zaplanowana, tylko przyjdzie sama —
- * niedomknieta praca z trwajacego sprintu. Rysujemy ja jako osobny, kreskowany
- * kawalek tego samego paska, bo to nie druga miara, tylko druga skladowa jednej:
- * te punkty zajma moce zespolu dokladnie tak samo jak wybrane recznie.
- */
-function CompareBar({
-  points,
-  carry = 0,
-  compare,
-  dopisek,
-}: {
-  points: number;
-  carry?: number;
-  compare: { label: string; points: number };
-  /** Druga linijka — skad wziely sie punkty przeniesione. */
-  dopisek?: string;
-}) {
-  const pct = (v: number) => Math.min(100, (v / compare.points) * 100);
-  /* Zaplanowane recznie, czyli suma bez przeniesienia. */
-  const wybrane = Math.max(0, points - carry);
-  const stan =
-    points > compare.points
-      ? ' plan-compare-ponad'
-      : points === compare.points
-        ? ' plan-compare-rowno'
-        : '';
+/** Kolejnosc waznosci: priorytet Bitriksa, tag „Wysoki", story pointy malejaco. */
+/** Kursor blizej gory kolumny niz tyle = na naglowku sprintu aktywnego, czyli zwin go. */
+const FOLD_PX = 56;
+/** Tyle trzeba przesunac mysz, zeby wcisniecie uchwytu stalo sie przeciaganiem. */
+const DRAG_PX = 4;
 
-  return (
-    <div className="plan-compare-row">
-      <div className="plan-compare-bar">
-        <i className={`plan-compare-fill${stan}`} style={{ width: `${pct(wybrane)}%` }} />
-        {carry > 0 && (
-          <i
-            className={`plan-compare-fill plan-compare-carry${stan}`}
-            style={{ left: `${pct(wybrane)}%`, width: `${Math.max(0, pct(points) - pct(wybrane))}%` }}
-          />
-        )}
-        <span className="plan-compare-mark" />
-      </div>
-      <span className="plan-compare-note">
-        {/*
-          Etykieta w NAWIASIE, a nie wpleciona w zdanie: „ostatnio dowiezione
-          (Sprint 67)" nie odmienia sie po polsku razem z reszta, wiec kazde
-          wplecenie wychodzilo koslawo („do ostatnio dowiezione").
-        */}
-        {points > compare.points
-          ? `+${points - compare.points} SP ponad ${compare.points} SP — ${compare.label}`
-          : points === compare.points
-            ? `Wypełnione co do punktu: ${compare.points} SP — ${compare.label}`
-            : `Zostało ${compare.points - points} SP z ${compare.points} SP — ${compare.label}`}
-        {dopisek && <span className="plan-compare-skad">{dopisek}</span>}
-      </span>
-    </div>
-  );
-}
+export const SORT_DOMYSLNY: { by: string; dir: 'asc' | 'desc' }[] = [
+  { by: 'priority', dir: 'asc' },
+  { by: 'wysoki', dir: 'asc' },
+  { by: 'sp', dir: 'desc' },
+];
+
+const jestDomyslne = (sort: { by: string; dir: string }[]) =>
+  sort.length === SORT_DOMYSLNY.length &&
+  sort.every((l, i) => l.by === SORT_DOMYSLNY[i].by && l.dir === SORT_DOMYSLNY[i].dir);
 
 /** Panel: naglowek z liczbami, pasek osob i lista wierszy. Jest celem upuszczania. */
 function Pane({
@@ -248,6 +315,8 @@ function Pane({
   carry,
   wMoce,
   grow,
+  zwiniety = false,
+  onZwin,
 }: {
   title: string;
   subtitle?: string;
@@ -297,8 +366,11 @@ function Pane({
   /** Udzial w wysokosci kolumny (0-1). Brak = panel dzieli sie po rowno. */
   /** Ulamek miejsca. Tekst (`var(--plan-cols)`) pozwala ciagnac uchwyt bez renderu. */
   grow?: number | string;
+  /** Zwiniecie trzyma App — lokalny stan ginal przy kazdym przelaczeniu widoku. */
+  zwiniety?: boolean;
+  onZwin?: () => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const open = !zwiniety;
   const stats = useMemo(() => statsOf(tasks, people), [tasks, people]);
   /*
    * Wariant „z przeniesieniem" liczymy z SUMY obu zestawow, a nie z samego
@@ -313,7 +385,10 @@ function Pane({
     [wMoce, doMocy, people, stats],
   );
   const carryStats = useMemo(
-    () => (carry && carry.tasks.length > 0 ? statsOf([...doMocy, ...carry.tasks], people) : null),
+    () =>
+      carry && carry.tasks.length > 0
+        ? statsOf([...doMocy, ...carry.tasks], people, new Set(carry.tasks.map((t) => t.id)))
+        : null,
     [carry, doMocy, people],
   );
   const { setNodeRef, isOver, active } = useDroppable({ id: planDropId(sprintId) });
@@ -357,12 +432,23 @@ function Pane({
        * „czyje to" i „co to".
        */
       className={`plan-pane${open ? '' : ' plan-pane-shut'}${armed ? ' plan-pane-armed' : ''}${isOver && armed ? ' plan-pane-over' : ''}${szerokosc > 0 && szerokosc < 480 ? ' plan-pane-ciasny' : ''}`}
-      /* Zwiniety panel ignoruje podzial — ma byc samym naglowkiem. */
-      style={grow !== undefined && open ? { flexGrow: grow, flexBasis: 0 } : undefined}
+      /*
+       * Udzial w wysokosci idzie ZMIENNA, nie wprost przez `flex-grow`.
+       *
+       * Styl w atrybucie bije kazda regule arkusza, wiec przy wprost wpisanym
+       * `flex-grow` nie dalo sie go nadpisac — a trzeba, gdy sasiad jest zwiniety
+       * (patrz regula `:has` przy `.plan-right`). Zmienna arkusz odczytuje i moze
+       * zignorowac.
+       *
+       * Zwiniety panel nie dostaje zadnego udzialu — ma byc samym naglowkiem.
+       */
+      style={
+        grow !== undefined && open ? ({ ['--plan-grow']: grow } as React.CSSProperties) : undefined
+      }
     >
       <header className="plan-head">
         {collapsible && (
-          <button className="plan-fold" onClick={() => setOpen((v) => !v)} title="Zwiń / rozwiń">
+          <button className="plan-fold" onClick={onZwin} title="Zwiń / rozwiń">
             <ChevronIcon open={open} />
           </button>
         )}
@@ -406,34 +492,31 @@ function Pane({
       </header>
 
       {/*
-        LICZNIKI panelu: pasek mocy i rozklad po osobach. Gdy jest przeniesienie,
-        oba sa POWTORZONE w dwoch wariantach — i wtedy nazwa wariantu stoi RAZ,
-        nad swoja para. Wczesniej podpisywalismy kazdy pasek osobno, wiec
-        „Z przeniesieniem" pojawialo sie dwa razy pod rzad i czytalo sie jak dwie
-        rozne rzeczy, a nie dwa widoki jednej.
+        LICZNIK panelu — jeden pasek na wariant. Gdy jest przeniesienie, wariantow
+        jest dwa: „zaplanowane" i to samo z doliczona zaleglocia. Kazdy ma swoj
+        podpis, bo bez niego dwa takie same paski sa nieodroznialne.
       */}
       {open && (
         <div className="plan-liczniki">
           <div className="plan-wariant">
             {carryStats && <span className="plan-wariant-podpis">Zaplanowane</span>}
-            {compare && compare.points > 0 && (
-              <CompareBar points={statsMoc.points} compare={compare} />
-            )}
-            <Load stats={statsMoc} zawsze={Boolean(carryStats)} />
+            <Pasek
+              stats={statsMoc}
+              limit={compare?.points ?? 0}
+              zawsze={Boolean(carryStats) || (compare?.points ?? 0) > 0}
+              note={compare && compare.points > 0 ? opisMocy(statsMoc.points, compare) : undefined}
+            />
           </div>
 
           {carryStats && (
             <div className="plan-wariant">
               <span className="plan-wariant-podpis">Z przeniesieniem</span>
-              {compare && compare.points > 0 && (
-                <CompareBar
-                  points={carryStats.points}
-                  carry={carryStats.points - statsMoc.points}
-                  compare={compare}
-                  dopisek={`${carry!.tasks.length} ${plural(carry!.tasks.length)} bez zakończenia w ${carry!.label} — ${carryStats.points - statsMoc.points} SP`}
-                />
-              )}
-              <Load stats={carryStats} />
+              <Pasek
+                stats={carryStats}
+                limit={compare?.points ?? 0}
+                note={compare && compare.points > 0 ? opisMocy(carryStats.points, compare) : undefined}
+                dopisek={`${carry!.tasks.length} ${plural(carry!.tasks.length)} bez zakończenia w ${carry!.label} — ${carryStats.points - statsMoc.points} SP`}
+              />
             </div>
           )}
         </div>
@@ -481,6 +564,7 @@ export function Planning({
   lastDone,
   people,
   renderRow,
+  rejestrTasks,
   showReview,
   onToggleReview,
   showDone,
@@ -489,18 +573,35 @@ export function Planning({
   onMoce,
   dzialy,
   teraz,
+  kolejkaWl,
+  onKolejkaWl,
+  podzial,
+  onPodzial,
+  zwiniete,
+  onZwin,
   onLosuj,
   onPomin,
   onPrzestaw,
   onObecny,
   tylkoDoStartu,
   onTylkoDoStartu,
+  przeniesienie,
+  onPrzeniesienie,
   sort,
   sortFields,
   onSort,
 }: {
-  /** Zadania JUZ przefiltrowane widokiem — stad liczby ida za filtrem. */
+  /**
+   * Zadania do SPRINTOW — wszystkie, bez filtrow i bez szukania.
+   *
+   * Filtr zaweza wylacznie rejestr (`rejestrTasks`). Gdyby dotykal takze paneli
+   * sprintu, kazdy filtr zmienialby sumy SP i licznik mocy, choc w sprincie nic
+   * sie nie zmienilo — a to wlasnie liczby sprintu maja tu byc prawda. Rejestr
+   * przeciwnie: tam sie SZUKA, wiec zawezanie jest cala jego robota.
+   */
   tasks: Task[];
+  /** Zadania do REJESTRU — po filtrach i po szukaniu. */
+  rejestrTasks: Task[];
   activeSprint: Sprint | null;
   nextSprint: Sprint | null;
   /**
@@ -522,8 +623,33 @@ export function Planning({
    * epiki grupy, wiec nie ma tu drugiego slownika do utrzymywania.
    */
   dzialy: { id: number; nazwa: string; color: string | null; obecny: boolean }[];
-  /** Dzial, ktorego jest tura. `null`, gdy nikt nie jest obecny. */
+  /** Dzial, ktorego jest tura. `null`, gdy nikt nie jest obecny albo kolejka jest wylaczona. */
   teraz: { id: number; nazwa: string } | null;
+  /**
+   * Czy KOLEJKA jest w uzyciu.
+   *
+   * Wylaczona: rejestr przestaje sie zawezac do epiku i do `DO-STARTU`, a same
+   * kontrolki kolejki gasna. Planuje sie tak poza spotkaniem — gdy nikt nie
+   * wybiera po kolei, a chodzi o przejrzenie calego rejestru.
+   */
+  kolejkaWl: boolean;
+  onKolejkaWl: () => void;
+  /**
+   * PODZIAL WIDOKU, zapamietany miedzy wejsciami: `cols` to rejestr kontra
+   * kolumna sprintow, `split` to sprint aktywny kontra planowany.
+   *
+   * Trzymane poza tym komponentem, bo przelaczenie widoku go ODMONTOWUJE — a
+   * wtedy stan wewnetrzny przepada i przy kazdym powrocie panele wracaly do
+   * proporcji domyslnych. Wygladalo to, jakby uklad sam sie przestawial.
+   *
+   * Ulamki, nie piksele: okno bywa zmieniane, a proporcja przezywa to bez
+   * przeliczania.
+   */
+  podzial: { cols: number; split: number };
+  onPodzial: (v: { cols: number; split: number }) => void;
+  /** Zwiniete panele sprintow (ID). Z gory z tego samego powodu co `podzial`. */
+  zwiniete: number[];
+  onZwin: (sprintId: number) => void;
   onLosuj: () => void;
   onPomin: () => void;
   onPrzestaw: (z: number, na: number) => void;
@@ -531,6 +657,9 @@ export function Planning({
   /** Czy rejestr w trakcie tury pokazuje tylko zadania z tagiem `DO-STARTU`. */
   tylkoDoStartu: boolean;
   onTylkoDoStartu: () => void;
+  /** Wlicz do mocy kolejnego sprintu to, czego nie domknieto w trwajacym. */
+  przeniesienie: boolean;
+  onPrzeniesienie: () => void;
   people: { id: number; name: string; photo: string | null }[];
   /** Wiersz rysuje App — tym samym komponentem co lista. */
   /** Jak wyzej w `Pane`: drugi argument to limit tagow policzony przez panel. */
@@ -582,14 +711,14 @@ export function Planning({
    * pusty rejestr wygladalby na awarie, a nie na stan kolejki.
    */
   const backlog = useMemo(() => {
-    const wszystkie = tasks.filter((t) => t.sprintId === null && plannable(t));
+    const wszystkie = rejestrTasks.filter((t) => t.sprintId === null && plannable(t));
     if (!teraz) return wszystkie;
     return wszystkie.filter(
       (t) =>
         t.epicId === teraz.id &&
         (!tylkoDoStartu || t.tags.some((g) => g.toUpperCase() === 'DO-STARTU')),
     );
-  }, [tasks, plannable, teraz, tylkoDoStartu]);
+  }, [rejestrTasks, plannable, teraz, tylkoDoStartu]);
 
   const inActive = useMemo(
     () =>
@@ -618,7 +747,7 @@ export function Planning({
    * Doliczanie jej zawyzalo przeniesienie i kazalo planowac ponizej mozliwosci.
    */
   const carry = useMemo(() => {
-    if (!activeSprint) return undefined;
+    if (!activeSprint || !przeniesienie) return undefined;
     const zostajace = tasks.filter(
       (t) =>
         t.sprintId === activeSprint.id &&
@@ -626,7 +755,7 @@ export function Planning({
         !REVIEW_STATUSES.has(t.status),
     );
     return zostajace.length > 0 ? { tasks: zostajace, label: activeSprint.name } : undefined;
-  }, [tasks, activeSprint]);
+  }, [tasks, activeSprint, przeniesienie]);
 
   /*
    * Odniesienie dla sum SP. Recznie wpisane moce maja pierwszenstwo nad tym, co
@@ -655,7 +784,10 @@ export function Planning({
         .filter((t) => t.sprintId === nextSprint.id && plannable(t))
         .reduce((n, t) => n + (t.storyPoints ?? 0), 0)
     : 0;
-  const zostalo = Math.max(0, limit - sumaNext);
+  /* Wlaczone przeniesienie zajmuje moce tak samo jak wybrane recznie — inaczej
+     rejestr obiecywalby punkty, ktore i tak zjedza zaleglosci. */
+  const sumaCarry = carry ? carry.tasks.reduce((n, t) => n + (t.storyPoints ?? 0), 0) : 0;
+  const zostalo = Math.max(0, limit - sumaNext - sumaCarry);
 
   const backlogUlozony = useMemo(() => {
     /*
@@ -689,10 +821,19 @@ export function Planning({
      jednorazowa (raz na spotkanie), a stale zajmowala caly rzad. W pasku zostaje
      to, co zmienia sie w trakcie — czyja jest tura. */
   const [kolejkaAt, setKolejkaAt] = useState<{ left: number; top: number } | null>(null);
+  /* Wylaczenie kolejki zamyka jej liste — inaczej zostawalaby otwarta nad
+     przygaszonym przyciskiem, ktory juz jej nie otworzy ani nie zamknie. */
+  useEffect(() => {
+    if (!kolejkaWl) setKolejkaAt(null);
+  }, [kolejkaWl]);
   const [pokazAt, setPokazAt] = useState<{ left: number; top: number } | null>(null);
-  const [split, setSplit] = useState(SPLIT_DEFAULT);
-  /** Podzial POZIOMY: rejestr kontra kolumna ze sprintami. */
-  const [cols, setCols] = useState(0.5);
+  /*
+   * Podzial przychodzi Z GORY i tam wraca — patrz `podzial`. Lokalnego stanu tu
+   * nie ma: byl, ale ginal przy kazdym przelaczeniu widoku.
+   */
+  const { cols, split } = podzial;
+  const setSplit = useCallback((v: number) => onPodzial({ cols, split: v }), [onPodzial, cols]);
+  const setCols = useCallback((v: number) => onPodzial({ cols: v, split }), [onPodzial, split]);
   const rightRef = useRef<HTMLDivElement>(null);
   const colsRef = useRef<HTMLDivElement>(null);
   /* Korzen widoku — tu siedza OBIE zmienne podzialu, zeby odziedziczyl je takze
@@ -713,6 +854,15 @@ export function Planning({
       axis: 'x' | 'y',
       box: React.RefObject<HTMLDivElement | null>,
       set: (f: number) => void,
+      /**
+       * Zwijanie panelu nad uchwytem PRZECIAGNIECIEM: dociagniecie pod jego
+       * naglowek zwija go, odciagniecie w dol rozwija. Bez tego uchwyt przy
+       * zwinietym panelu dawal sie ciagnac, ale nic nie robil.
+       */
+      fold?: {
+        top?: { folded: boolean; toggle: () => void };
+        bottom?: { folded: boolean; toggle: () => void };
+      },
     ) =>
       (e: React.PointerEvent) => {
         e.preventDefault();
@@ -735,23 +885,92 @@ export function Planning({
            takze do paska, ktory lezy poza tym pudelkiem. */
         const cel = planRef.current ?? el;
         let ostatni: number | null = null;
+        /* Wartosc sprzed ciagniecia — wraca na miejsce, gdy nic nie zapisujemy. */
+        const przed = cel.style.getPropertyValue(zmienna);
+        let gora = fold?.top?.folded ?? false;
+        let dol = fold?.bottom?.folded ?? false;
+        /*
+         * Przeciaganie rusza dopiero po kilku pikselach. Wczesniej KAZDE
+         * wcisniecie bylo przeciaganiem: drgniecie reki przy podwojnym kliknieciu
+         * przestawialo podzial tam, gdzie akurat stal kursor, i dwuklik dawal
+         * raz jeden, raz drugi wynik.
+         */
+        const start = axis === 'y' ? e.clientY : e.clientX;
+        let ruszyl = false;
 
         const move = (ev: PointerEvent) => {
           const r = el.getBoundingClientRect();
+          /*
+           * Granica w PIKSELACH, nie w ulamku: chodzi o to, czy kursor wszedl na
+           * naglowek panelu, a naglowek ma stala wysokosc niezaleznie od okna.
+           * Stan Reacta ruszamy tylko na przejsciu przez granice — raz, a nie przy
+           * kazdym drgnieciu.
+           */
+          const teraz = axis === 'y' ? ev.clientY : ev.clientX;
+          if (!ruszyl) {
+            if (!Number.isFinite(teraz) || Math.abs(teraz - start) < DRAG_PX) return;
+            ruszyl = true;
+          }
+          if (fold && axis === 'y' && Number.isFinite(ev.clientY)) {
+            /* Pod naglowkiem gornego — zwin gorny; przy dolnej krawedzi — dolny. */
+            const naGore = Boolean(fold.top) && ev.clientY - r.top < FOLD_PX;
+            const naDol = Boolean(fold.bottom) && r.bottom - ev.clientY < FOLD_PX;
+            if (naGore !== gora) {
+              gora = naGore;
+              fold.top!.toggle();
+            }
+            if (naDol !== dol) {
+              dol = naDol;
+              fold.bottom!.toggle();
+            }
+            if (gora || dol) return;
+          }
           const f =
             axis === 'y' ? (ev.clientY - r.top) / r.height : (ev.clientX - r.left) / r.width;
-          /* Po 12% z kazdej strony zostaje nietykalne: panel scisniety do zera
-             nie ma juz za co zostac zlapany z powrotem. */
-          ostatni = Math.min(0.88, Math.max(0.12, f));
+          /*
+           * Nie-liczba KONCZY na tym kroku. Pudelko o zerowej wysokosci albo
+           * zdarzenie bez wspolrzednych daja `NaN`, a `Math.min/max` przepuszcza
+           * go dalej bez slowa. Trafial wtedy do zapisanych ustawien, gdzie `JSON`
+           * zamienia go na `null` — i po odswiezeniu panele dostawaly
+           * `flex-grow: NaN`, czyli uklad rozjechany NA STALE, bez sposobu na
+           * cofniecie inaczej niz czyszczeniem pamieci przegladarki.
+           */
+          if (!Number.isFinite(f)) return;
+          /*
+           * Po 12% z kazdej strony zostaje nietykalne: panel scisniety do zera
+           * nie ma juz za co zostac zlapany z powrotem. W poziomie dochodzi
+           * minimum w PIKSELACH z arkusza (`--plan-min-*`) — ulamek na szerokim
+           * ekranie zostawial sprintom ~220 px i panel sie zapadal.
+           */
+          let lo = 0.12;
+          let hi = 0.88;
+          if (axis === 'x' && r.width > 0) {
+            const css = getComputedStyle(cel);
+            const px = (v: string) => parseFloat(css.getPropertyValue(v)) || 0;
+            lo = Math.max(lo, px('--plan-min-left') / r.width);
+            hi = Math.min(hi, 1 - px('--plan-min-right') / r.width);
+          }
+          ostatni = Math.min(Math.max(lo, hi), Math.max(lo, f));
           cel.style.setProperty(zmienna, String(ostatni));
         };
         const up = () => {
           window.removeEventListener('pointermove', move);
           window.removeEventListener('pointerup', up);
           /* Dopiero teraz jeden render — i zdjecie nadpisania, zeby dalej rzadzil stan. */
-          if (ostatni !== null) {
-            cel.style.removeProperty(zmienna);
+          /*
+           * Zmienna WPISUJEMY, nie usuwamy. Ten sam atrybut `style` ustawia React
+           * i odtwarza go tylko przy ZMIANIE wartosci — puszczenie uchwytu na tej
+           * samej liczbie (drgniecie przy dwukliku) zostawialo zmienna usunieta,
+           * a panele bez niej dzielily sie pol na pol.
+           *
+           * Zwiniety zostawia zapisany podzial w spokoju — rozwiniecie ma wrocic
+           * do proporcji sprzed zwiniecia, a nie do 12%.
+           */
+          if (ostatni !== null && !gora && !dol) {
+            cel.style.setProperty(zmienna, String(ostatni));
             set(ostatni);
+          } else if (przed) {
+            cel.style.setProperty(zmienna, przed);
           }
         };
         window.addEventListener('pointermove', move);
@@ -795,14 +1014,26 @@ export function Planning({
           >
             <BarsIcon />
             <span className="display-label">Sortuj:</span>
+            {/*
+              Domyslna kolejnosc to trzy poziomy — wypisane zajmowaly pol paska.
+              Nazywamy ja wprost, a dowolny inny stos skracamy po DRUGIM poziomie:
+              pierwsze dwa rozstrzygaja prawie wszystko, reszta jest w liscie.
+            */}
             <span className="plan-sort-val">
-              {sort.map((lvl, i) => (
-                <span key={lvl.by} className="plan-sort-lvl">
-                  {i > 0 && <span className="plan-sort-then">, potem</span>}
-                  {sortFields.find((f) => f.key === lvl.by)?.label ?? lvl.by}
-                  <span className="plan-sort-dir">{lvl.dir === 'asc' ? '↑' : '↓'}</span>
-                </span>
-              ))}
+              {jestDomyslne(sort) ? (
+                <span className="plan-sort-lvl">Domyślna</span>
+              ) : (
+                <>
+                  {sort.slice(0, 2).map((lvl, i) => (
+                    <span key={lvl.by} className="plan-sort-lvl">
+                      {i > 0 && <span className="plan-sort-then">, potem</span>}
+                      {sortFields.find((f) => f.key === lvl.by)?.label ?? lvl.by}
+                      <span className="plan-sort-dir">{lvl.dir === 'asc' ? '↑' : '↓'}</span>
+                    </span>
+                  ))}
+                  {sort.length > 2 && <span className="plan-sort-then"> +{sort.length - 2}</span>}
+                </>
+              )}
             </span>
             <ChevronIcon open={Boolean(sortAt)} />
           </button>
@@ -839,12 +1070,19 @@ export function Planning({
                   return;
                 }
 
+                /*
+                 * Klucz JUZ w stosie — modyfikator odwraca jego kierunek. Kazdy
+                 * poziom tak samo.
+                 *
+                 * Wczesniej OSTATNI poziom byl wyjatkiem: to samo klikniecie go
+                 * usuwalo. Wygladalo to na zniknięcie bez powodu, bo nic nie
+                 * mowilo, ze ostatni zachowuje sie inaczej niz pozostale — a
+                 * odwrocenie kierunku jest tym, po co sie w niego klika.
+                 * Zwijanie stosu robi zwykly klik (zostawia jeden klucz) albo
+                 * przycisk domyslnej kolejnosci.
+                 */
                 if (at >= 0) {
-                  onSort(
-                    at === sort.length - 1 && sort.length > 1
-                      ? sort.filter((l) => l.by !== v)
-                      : sort.map((l) => (l.by === v ? { ...l, dir: flip(l.dir) } : l)),
-                  );
+                  onSort(sort.map((l) => (l.by === v ? { ...l, dir: flip(l.dir) } : l)));
                   return;
                 }
                 onSort([...sort, { by: v, dir: 'desc' }]);
@@ -855,19 +1093,14 @@ export function Planning({
                     className="btn plan-sort-reset"
                     /* Trzy poziomy, nie jeden — dokladnie te, ktore skladaja sie
                        na kolejnosc waznosci, zeby bylo je widac i dalo poprawic. */
-                    onClick={() =>
-                      onSort([
-                        { by: 'priority', dir: 'asc' },
-                        { by: 'wysoki', dir: 'asc' },
-                        { by: 'sp', dir: 'desc' },
-                      ])
-                    }
+                    onClick={() => onSort(SORT_DOMYSLNY)}
                     title="Priorytet Bitriksa, potem tag „Wysoki”, potem story pointy malejąco"
                   >
                     Domyślna kolejność ważności
                   </button>
                   <span className="plan-sort-hint">
-                    <kbd>Ctrl</kbd> lub <kbd>Shift</kbd> + klik — dołóż kolejny poziom
+                    <kbd>Ctrl</kbd> lub <kbd>Shift</kbd> + klik — dołóż poziom albo odwróć
+                    jego kierunek. Zwykły klik zostawia jeden klucz.
                   </span>
                 </>
               }
@@ -886,12 +1119,37 @@ export function Planning({
             Dlatego podpowiedz w polu pokazuje te liczbe: widac, co sie stanie po
             wyczyszczeniu, bez zgadywania.
           */}
+          {/*
+            WLACZNIK KOLEJKI. Kolejka ma sens na spotkaniu, gdy dzialy wybieraja po
+            kolei; poza nim zaweza rejestr do jednego epiku bez powodu. Przelacznik
+            stoi PRZED nia, bo rzadzi wszystkim, co po nim — a to, co wylaczone,
+            zostaje na miejscu przygaszone, zeby pasek nie zmienial szerokosci przy
+            przelaczaniu.
+          */}
+          <button
+            className={`views-btn plan-kolejka-wl tog${kolejkaWl ? ' tog-on' : ''}`}
+            onClick={onKolejkaWl}
+            title={
+              kolejkaWl
+                ? 'Kolejka działów włączona — rejestr pokazuje tylko zadania działu, którego jest tura'
+                : 'Kolejka działów wyłączona — rejestr pokazuje wszystko'
+            }
+          >
+            <span className="tog-box">
+              <CheckIcon />
+            </span>
+            Kolejka działów
+          </button>
+
           {/* Czyja tura + wejscie do kolejki. Nazwa dzialu stoi RAZ — wczesniej
               byla i tekstem, i podswietlona pastylka w tym samym rzedzie. */}
-          <span className="display-label plan-show">Teraz:</span>
-          <span className="plan-teraz">{teraz ? teraz.nazwa : 'nikt'}</span>
+          <span className={`display-label plan-show${kolejkaWl ? '' : ' plan-wyl'}`}>Teraz:</span>
+          <span className={`plan-teraz${kolejkaWl ? '' : ' plan-wyl'}`}>
+            {kolejkaWl ? (teraz ? teraz.nazwa : 'nikt') : '—'}
+          </span>
           <button
             className="views-btn plan-kolejka-btn"
+            disabled={!kolejkaWl}
             onClick={(e) => {
               if (kolejkaAt) {
                 setKolejkaAt(null);
@@ -911,7 +1169,12 @@ export function Planning({
             Kolejka
             <ChevronIcon open={Boolean(kolejkaAt)} />
           </button>
-          <button className="views-btn" onClick={onPomin} title="Ten dział nie wybiera — następny">
+          <button
+            className="views-btn"
+            disabled={!kolejkaWl}
+            onClick={onPomin}
+            title="Ten dział nie wybiera — następny"
+          >
             Pomiń
           </button>
 
@@ -1022,6 +1285,17 @@ export function Planning({
                       : 'Ile SP zespół jest w stanie wziąć na sprint.'}
                   </div>
 
+                  <button
+                    className={`menu-item tog${przeniesienie ? ' tog-on' : ''}`}
+                    onClick={onPrzeniesienie}
+                    title="Niedomknięte zadania z trwającego sprintu przejdą do kolejnego i zajmą jego moce"
+                  >
+                    <span className="tog-box">
+                      <CheckIcon />
+                    </span>
+                    licz przeniesione z {activeSprint?.name ?? 'trwającego sprintu'}
+                  </button>
+
                   <div className="ds-colhead">Pokaż w rejestrze i sprintach</div>
                   <button
                     className={`menu-item tog${tylkoDoStartu ? ' tog-on' : ''}`}
@@ -1097,6 +1371,8 @@ export function Planning({
             people={people}
             renderRow={renderRow}
             collapsible
+            zwiniety={zwiniete.includes(activeSprint.id)}
+            onZwin={() => onZwin(activeSprint.id)}
             /* Bez licznika mocy: w trwajacym sprincie nie ma juz czego planowac. */
           />
         )}
@@ -1107,9 +1383,17 @@ export function Planning({
             className="plan-grip"
             role="separator"
             aria-orientation="horizontal"
-            title="Przeciągnij, żeby zmienić podział wysokości"
-            onPointerDown={drag('y', rightRef, setSplit)}
-            onDoubleClick={() => setSplit(SPLIT_DEFAULT)}
+            title="Przeciągnij, żeby zmienić podział wysokości — do samej góry albo dołu zwija sprint. Dwuklik: 80/20."
+            onPointerDown={drag('y', rightRef, setSplit, {
+              top: { folded: zwiniete.includes(activeSprint.id), toggle: () => onZwin(activeSprint.id) },
+              bottom: { folded: zwiniete.includes(nextSprint.id), toggle: () => onZwin(nextSprint.id) },
+            })}
+            /* Dwuklik ZAWSZE daje to samo: oba rozwiniete, 80/20. */
+            onDoubleClick={() => {
+              if (zwiniete.includes(activeSprint.id)) onZwin(activeSprint.id);
+              if (zwiniete.includes(nextSprint.id)) onZwin(nextSprint.id);
+              setSplit(SPLIT_DEFAULT);
+            }}
           >
             {/* Kropki na srodku — bez nich pasek czyta sie jak zwykla kreska
                 rozdzielajaca i nikt nie zgaduje, ze da sie go chwycic. */}
@@ -1129,6 +1413,8 @@ export function Planning({
             people={people}
             renderRow={renderRow}
             collapsible
+            zwiniety={zwiniete.includes(nextSprint.id)}
+            onZwin={() => onZwin(nextSprint.id)}
             compare={compare}
             carry={carry}
             wMoce={plannable}
