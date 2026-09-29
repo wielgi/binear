@@ -8481,6 +8481,15 @@ export default function App() {
     setShowDone(st.done);
     setOnlyMine(false);
     setFilters(EMPTY_FILTERS);
+    /*
+     * Wyszukiwanie tez schodzi, tak jak przy wyborze widoku zapisanego (applyView):
+     * karta pokazuje to, co liczy, a wpisana wczesniej fraza zostawiala z niej pusta
+     * liste. SearchBox trzyma wlasny draft, wiec sam `setQuery` zostawilby w polu tekst.
+     * Po wybraniu karty mozna znowu szukac — fraza zaweza wtedy zawartosc karty.
+     */
+    setQuery('');
+    searchRef.current?.setValue('');
+    setEditingViewId(null);
   }, []);
   /* Kazda RECZNA zmiana paska rozjezdza go z karta — wtedy wracasz do zwyklego
      widoku. Porownujemy ze stanem karty zamiast reagowac na sama zmiane, bo
