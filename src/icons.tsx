@@ -88,6 +88,26 @@ export function StageIcon({ progress, color }: { progress: number | null; color:
 }
 
 /** Dymek przy liczniku nieprzeczytanych komentarzy. */
+/** Zarowka — kafelek KONCEPT (pomysl). Ta sama kreska co reszta ikon. */
+export function BulbIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M5.4 10.2A4.3 4.3 0 1 1 10.6 10.2c-.5.4-.8 1-.8 1.6V12H6.2v-.2c0-.6-.3-1.2-.8-1.6z" />
+      <path d="M6.4 14h3.2" />
+    </svg>
+  );
+}
+
 /** Robak — kafelek BUG. Ten sam kaligraficzny rys (kreska 1.2, okragle konce) co reszta ikon. */
 export function BugIcon() {
   return (

@@ -39,12 +39,18 @@ export type CounterKey =
   | 'gotowe'
   | 'sprint'
   | 'bug'
+  | 'koncept'
   | 'odlozone';
 
 export const TAG_DO_STARTU = 'DO-STARTU';
 export const TAG_CZEKA = 'OCZEKUJE-NA-ODPOWIEDZ';
 export const TAG_WYWIAD = 'DO-WYWIADU';
 export const TAG_BUG = 'BUG';
+/**
+ * Pomysl, a nie zadanie do zrobienia. Nowy tag to KONCEPT; starsze zadania
+ * maja KONCEPCJA — liczymy oba, zeby kafelek nie zgubil tych sprzed zmiany.
+ */
+export const TAGS_KONCEPT = ['KONCEPT', 'KONCEPCJA'];
 
 /** Bitrix nie rozroznia wielkosci liter w tagach — „do-startu" to ten sam tag. */
 export const hasTag = (t: Pick<Task, 'tags'>, tag: string): boolean =>
@@ -70,10 +76,15 @@ export interface CounterDef {
   needsMeta?: boolean;
   /** Karta istnieje tylko w projekcie ze sprintami (scrum). */
   needsSprint?: boolean;
-  /** Nie jest kafelkiem, tylko wyszarzona notka pod paskiem — poza suma „Poza sprintem". */
+  /**
+   * Poza suma „Poza sprintem" z innego powodu niz cecha: odlozone nie sa w ogole
+   * liczone do rejestru. Kafelek stoi w grupie „Poza sumą", jako pierwszy.
+   */
   note?: boolean;
-  /** Cecha, nie stan: kafelek stoi za pionowym separatorem, poza rozbiciem „Poza sprintem". */
+  /** Cecha, nie stan: kafelek stoi w grupie „Poza sumą", poza rozbiciem „Poza sprintem". */
   separate?: boolean;
+  /** Stan, ktory wchodzi do SUMY „Poza sprintem" — kafelki z tym znacznikiem sumuja sie do niej. */
+  inSum?: boolean;
   /** Wzrost to zla wiadomosc (wiecej roboty). Dla sprintu kierunek nic nie znaczy. */
   riseIsBad: boolean;
 }
@@ -112,6 +123,7 @@ export const COUNTERS: CounterDef[] = [
   },
   {
     key: 'wywiad',
+    inSum: true,
     label: 'Do wywiadu',
     hint:
       'Poza sprintem: z tagiem DO-WYWIADU albo jeszcze bez tagu gotowości (nowe) — ' +
@@ -121,6 +133,7 @@ export const COUNTERS: CounterDef[] = [
   },
   {
     key: 'czeka',
+    inSum: true,
     label: 'Czeka na odpowiedź',
     hint:
       'Poza sprintem, z tagiem OCZEKUJE-NA-ODPOWIEDZ, a po naszych pytaniach nikt spoza IT ' +
@@ -130,6 +143,7 @@ export const COUNTERS: CounterDef[] = [
   },
   {
     key: 'odpowiedzi',
+    inSum: true,
     label: 'Do analizy odpowiedzi',
     hint:
       'OCZEKUJE-NA-ODPOWIEDZ, a po naszych pytaniach ktoś spoza IT odpisał z treścią — ' +
@@ -139,6 +153,7 @@ export const COUNTERS: CounterDef[] = [
   },
   {
     key: 'wycena',
+    inSum: true,
     label: 'Do wyceny',
     hint: 'Poza sprintem, z tagiem DO-STARTU, bez story pointów — uzupełnij wycenę.',
     match: (t, ctx) => outside(t, ctx) && isStartu(t) && t.storyPoints == null,
@@ -147,6 +162,7 @@ export const COUNTERS: CounterDef[] = [
   },
   {
     key: 'gotowe',
+    inSum: true,
     label: 'Gotowe do startu',
     hint: 'Poza sprintem, z tagiem DO-STARTU i z wyceną — można je wziąć do sprintu.',
     match: (t, ctx) => outside(t, ctx) && isStartu(t) && t.storyPoints != null,
@@ -171,6 +187,17 @@ export const COUNTERS: CounterDef[] = [
     match: (t, ctx) => inAudit(t, ctx) && hasTag(t, TAG_BUG),
     separate: true,
     riseIsBad: true,
+  },
+  {
+    key: 'koncept',
+    label: 'Koncept',
+    hint:
+      'Otwarte zadania z tagiem KONCEPT (albo starszym KONCEPCJA), bez odłożonych — w sprincie i ' +
+      'poza nim. To cecha, a nie stan: takie zadanie jest też w jednym ze stanów obok, więc ' +
+      'kafelek nie wchodzi do sumy.',
+    match: (t, ctx) => inAudit(t, ctx) && TAGS_KONCEPT.some((g) => hasTag(t, g)),
+    separate: true,
+    riseIsBad: false,
   },
   {
     key: 'odlozone',

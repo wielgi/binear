@@ -561,6 +561,8 @@ interface Settings {
   showEmpty: boolean;
   /** Karty licznikow pod naglowkiem (patrz `CountersBar`). */
   showCounters: boolean;
+  /** Kafelki licznikow schowane przez uzytkownika (olowek przy „Pokaż liczniki"). */
+  hiddenCounters: string[];
   /**
    * PUSTE kategorie (kolumny/grupy), ktore mimo braku zadan maja byc widoczne —
    * po NAZWIE, bo te same etapy maja rozne id w kazdym sprincie (patrz stageOrder).
@@ -615,6 +617,7 @@ const DEFAULT_SETTINGS: Settings = {
   planTylkoDoStartu: true,
   showEmpty: false,
   showCounters: true,
+  hiddenCounters: [],
   shownEmpty: [],
   detailWidth: 520,
   collapsed: [],
@@ -6451,6 +6454,8 @@ function ViewMenu({
     deadline: DeadlineLook;
     empty: boolean;
     counters: boolean;
+    /** Kafelki do wyboru w panelu olowka — klucz, podpis, czy widoczny. */
+    counterTiles: { key: string; label: string; shown: boolean }[];
     filtersOn: boolean;
     theme: Theme;
     font: Font;
@@ -6475,6 +6480,7 @@ function ViewMenu({
     deadline: (v: DeadlineLook) => void;
     empty: () => void;
     counters: () => void;
+    counterTile: (key: string) => void;
     toggleColumn: (name: string) => void;
     clearFilters: () => void;
     reload: () => void;
@@ -6501,6 +6507,12 @@ function ViewMenu({
 
   // Panel „Kolumny/Grupy" wyskakuje jako OSOBNY panel obok (panel w panelu), nie sekcja.
   const [colsOpen, setColsOpen] = useState(false);
+  /* Panel olowka przy „Pokaż liczniki": ktore kafelki maja byc widoczne. */
+  const [tilesOpen, setTilesOpen] = useState(false);
+  const tilesOff = !state.counters || planMode;
+  useEffect(() => {
+    if (tilesOff) setTilesOpen(false);
+  }, [tilesOff]);
   const [permsOpen, setPermsOpen] = useState(false);
   // Nazwa mowi, po co ten panel jest: trzymac PUSTE kategorie widoczne mimo braku zadan.
   const colTitle = boardMode
@@ -6682,7 +6694,40 @@ function ViewMenu({
         */}
         {check('Pokaż zakończone', state.done, on.done, planMode)}
         {/* Liczniki sa tylko nad lista i tablica — w planowaniu nie ma ich czym chowac. */}
-        {check('Pokaż liczniki', state.counters, on.counters, planMode)}
+        {/*
+          Olowek obok: dobor kafelkow. Wygaszony, gdy licznikow nie ma — nie ma
+          wtedy czego dobierac.
+        */}
+        {/*
+          Kolejnosc: podpis, olowek, przelacznik — przelacznik zostaje na prawej
+          krawedzi, w jednej linii z pozostalymi. Olowek NIE moze siedziec w
+          `<label>`: przycisk jest kontrolka, wiec label przejalby go i klik w
+          podpis otwieralby panel zamiast przelaczac. Stad `htmlFor`.
+        */}
+        <div className={`ds-check ds-check-row${planMode ? ' ds-check-off' : ''}`}>
+          <label htmlFor="ds-show-counters" className="ds-check-row-label">
+            Pokaż liczniki
+          </label>
+          <button
+            className={`ds-check-edit${tilesOpen ? ' ds-check-edit-on' : ''}`}
+            disabled={tilesOff}
+            title={tilesOff ? 'Włącz liczniki, żeby wybrać kafelki' : 'Wybierz, które kafelki widać'}
+            onClick={() => {
+              setColsOpen(false);
+              setPermsOpen(false);
+              setTilesOpen((o) => !o);
+            }}
+          >
+            <PenIcon />
+          </button>
+          <input
+            id="ds-show-counters"
+            type="checkbox"
+            checked={state.counters}
+            disabled={planMode}
+            onChange={on.counters}
+          />
+        </div>
 
         <div className="menu-sep" />
         {/* „Kolumny/Grupy" otwiera OSOBNY panel obok — w dolnej sekcji, obok akcji. */}
@@ -6729,6 +6774,20 @@ function ViewMenu({
       </div>
 
       {permsOpen && <PermsFlyout left={flyLeft} top={top} width={flyW} />}
+
+      {/* Dobor kafelkow licznikow — ten sam panel obok co „Puste grupy". */}
+      {tilesOpen && (
+        <div className="menu view-cols-flyout" style={{ left: flyLeft, top, width: flyW }}>
+          <div className="ds-colhead">Kafelki liczników</div>
+          <div className="ds-colhint">Odznacz te, których nie potrzebujesz. Liczby się nie zmieniają.</div>
+          {state.counterTiles.map((t) => (
+            <label key={t.key} className="ds-check">
+              <span>{t.label}</span>
+              <input type="checkbox" checked={t.shown} onChange={() => on.counterTile(t.key)} />
+            </label>
+          ))}
+        </div>
+      )}
 
       {/* Panel w panelu — osobny, obok menu widoku; checkbox na kazda kolumne/grupe. */}
       {colsOpen && columns.length > 0 && (
@@ -8047,6 +8106,9 @@ export default function App() {
   );
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
   const [showCounters, setShowCounters] = useState(saved.showCounters ?? true);
+  const [hiddenCounters, setHiddenCounters] = useState<string[]>(() =>
+    Array.isArray(saved.hiddenCounters) ? saved.hiddenCounters.filter((k) => typeof k === 'string') : [],
+  );
   const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
@@ -9128,6 +9190,7 @@ export default function App() {
       szukajWOpisach: wOpisach,
       showEmpty,
       showCounters,
+      hiddenCounters,
       shownEmpty,
       detailWidth,
       collapsed: [...collapsed],
@@ -9138,7 +9201,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, listTint, deadlineLook, wOpisach, showEmpty, showCounters, hiddenCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -10889,7 +10952,7 @@ export default function App() {
             wiec stoja ponad tym, co pasek nizej zaweza. */}
         {showCounters && (viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
           <CountersBar
-            defs={counterDefs}
+            defs={counterDefs.filter((d) => !hiddenCounters.includes(d.key))}
             values={counterValues}
             pending={counterPending}
             prev={counterPrev}
@@ -11695,6 +11758,11 @@ export default function App() {
             deadline: deadlineLook,
             empty: showEmpty,
             counters: showCounters,
+            counterTiles: counterDefs.map((d) => ({
+              key: d.key,
+              label: d.label,
+              shown: !hiddenCounters.includes(d.key),
+            })),
             filtersOn: anyFilter(filters),
             theme,
             font,
@@ -11728,6 +11796,11 @@ export default function App() {
             counters: () => {
               setShowCounters((v) => !v);
               setCard(null);
+            },
+            /* Schowanie wybranej karty wychodzi z jej widoku — jak przy schowaniu wszystkich. */
+            counterTile: (key) => {
+              setHiddenCounters((h) => (h.includes(key) ? h.filter((k) => k !== key) : [...h, key]));
+              if (card === key) setCard(null);
             },
             toggleColumn,
             clearFilters: () => setFilters(EMPTY_FILTERS),

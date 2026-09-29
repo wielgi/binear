@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   answerState,
   countAll,
+  COUNTERS,
   isSubstantiveAnswer,
   MIN_ANSWER_CHARS,
   plainBody,
@@ -44,7 +45,13 @@ describe('countAll', () => {
   ];
   const c = ctx({ answered: new Set([7]) });
   const wynik = countAll(lista, c);
-  const stany = ['wywiad', 'czeka', 'odpowiedzi', 'wycena', 'gotowe'] as const;
+  /* Z flagi `inSum`, nie z recznej listy: ta sama flaga ustawia grupe „Rozbicie”
+     w `CountersBar`, wiec test pilnuje tez tego, co ekran pokazuje jako sume. */
+  const stany = COUNTERS.filter((d) => d.inSum).map((d) => d.key);
+
+  it('do sumy wchodza dokladnie stany rozbicia', () => {
+    expect(stany).toEqual(['wywiad', 'czeka', 'odpowiedzi', 'wycena', 'gotowe']);
+  });
 
   it('sprint liczy tez zakonczone i sumuje ich story pointy', () => {
     expect(wynik.sprint).toEqual({ count: 3, points: 12 });
@@ -105,6 +112,28 @@ describe('countAll', () => {
       ctx(),
     );
     expect(w.bug.count).toBe(2);
+  });
+
+  it('koncept: nowy tag KONCEPT i starszy KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 70, tags: ['KONCEPT'] }),
+        zadanie({ id: 71, tags: ['KONCEPCJA'] }),
+        zadanie({ id: 72, tags: ['koncepcja'], sprintId: 70 }),
+        zadanie({ id: 73, tags: ['KONCEPT'], status: '5' }),
+        zadanie({ id: 74, tags: ['KONCEPT'], status: '6' }),
+        zadanie({ id: 75, tags: ['KONCEPTY'] }),
+      ],
+      ctx(),
+    );
+    expect(w.koncept.count).toBe(3);
+  });
+
+  it('koncept to cecha: nie wchodzi do sumy, a zadanie zostaje w swoim stanie', () => {
+    const w = countAll([zadanie({ id: 80, tags: ['KONCEPCJA'] })], ctx());
+    expect(w.koncept.count).toBe(1);
+    expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
+    expect(w.wywiad.count).toBe(1);
   });
 
   it('bug to cecha: zadanie z BUG jest tez w swoim stanie, wiec suma stanow sie nie zmienia', () => {

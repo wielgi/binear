@@ -984,6 +984,48 @@ kbd {
   color: var(--fg);
 }
 
+/* Przelacznik z olowkiem obok (dobor kafelkow licznikow). */
+.ds-check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.ds-check-row {
+  justify-content: flex-start;
+}
+
+.ds-check-row-label {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.ds-check-edit {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.ds-check-edit:hover:not(:disabled),
+.ds-check-edit-on {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.ds-check-edit:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 /* „Kolumny/Grupy" jako osobny panel (flyout) obok menu widoku — panel w panelu. */
 .view-cols-flyout {
   z-index: 22;
@@ -1395,38 +1437,66 @@ input[type='search']::-webkit-search-decoration {
  * wlaczona dostaje akcent, tak jak aktywny segment zakresu.
  */
 /* Blok: rzad kafelkow + wyszarzona notka pod nim. Kreska pod caloscia, nie pod rzedem. */
-.counters-block {
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--border);
-}
-
 .counters {
+  /* Najwezszy kafelek — czyta go i kafelek, i minimum grupy nizej. */
+  --counter-min: 150px;
   display: flex;
-  gap: var(--s2);
+  align-items: flex-end;
+  gap: var(--s4);
   padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--border);
   overflow-x: auto;
-  scrollbar-width: none;
+  /* Cienki pasek przewijania, gdy kafelki sie nie mieszcza — wczesniej byl
+     ukryty i nie bylo widac, ze za krawedzia sa jeszcze kafelki. Kolko myszy
+     nad rzedem tez przewija go w poziomie (patrz `CountersBar`). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
-/* Odlozone — liczba spoza sumy „Poza sprintem", stad wyszarzona i pod kafelkami. */
-.counters-note {
-  padding: 0 var(--s4) var(--s2);
+/*
+ * Grupa kafelkow z podpisem nad nia: „Rozbicie „Poza sprintem””, „Sprint",
+ * „Poza sumą". Podpis mowi, co sie z czym sumuje — sam separator tego nie mowil.
+ */
+.counters-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Grupa kurczy sie razem z kafelkami (podpisy dostaja wielokropek), ale nie
+     ponizej ich minimum — ten ustawia `CountersBar` w stylu grupy. Bez tego
+     kafelki wystawaly z grupy, a podpis nastepnej wjezdzal na nie. Ponizej
+     minimum przewija sie caly rzad. */
+  flex: 0 1 auto;
+  min-width: calc(var(--n, 1) * var(--counter-min) + (var(--n, 1) - 1) * var(--s1));
+}
+
+/* Podpis grupy przechodzi w linie, ktora konczy sie razem z kafelkami grupy —
+   widac, co do niej nalezy, bez ramek i znakow. */
+.counters-cap {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.counters-cap::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.counters-cap-text {
   font-size: var(--t-micro);
-}
-
-.counters-note-btn {
-  padding: 0;
-  border: 0;
-  background: none;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--fg-dim);
-  font: inherit;
-  cursor: pointer;
+  white-space: nowrap;
 }
 
-.counters-note-btn:hover,
-.counters-note-on {
-  color: var(--fg-secondary);
-  text-decoration: underline;
+.counters-group-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
 }
 
 /*
@@ -1439,7 +1509,7 @@ input[type='search']::-webkit-search-decoration {
   display: flex;
   align-items: flex-start;
   gap: var(--s2);
-  min-width: 150px;
+  min-width: var(--counter-min);
   padding: var(--s2) var(--s3);
   border: 1px solid var(--border);
   border-left: 3px solid var(--c);
@@ -1466,19 +1536,17 @@ input[type='search']::-webkit-search-decoration {
 .counter-poza { --c: var(--accent); }
 .counter-czeka { --c: #e879a6; }
 .counter-bug { --c: var(--danger); }
+.counter-koncept { --c: #58a6ff; }
 .counter-wywiad { --c: var(--accent-orange); }
 .counter-odpowiedzi { --c: var(--accent-amber); }
 .counter-wycena { --c: #a371f7; }
 .counter-gotowe { --c: #2bb8c9; }
 .counter-sprint { --c: var(--accent-green); }
-
-/* Pionowy separator: kafelki za nim to cechy, nie stany — nie wchodza do sumy. */
-.counters-divider {
-  flex: 0 0 auto;
-  align-self: stretch;
-  width: 1px;
-  margin: 0 var(--s3);
-  background: var(--border-strong);
+/* Odlozone: poza suma „Poza sprintem" — przygaszone i z przerywana ramka. */
+.counter-odlozone {
+  --c: var(--fg-dim);
+  border-style: dashed;
+  border-left-style: solid;
 }
 
 .counter-icon {
@@ -1503,6 +1571,9 @@ input[type='search']::-webkit-search-decoration {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
+  /* Tresc karty moze sie scisnac — wtedy podpis dostaje wielokropek (nizej),
+     zamiast wystawac poza karte. */
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -1530,16 +1601,22 @@ input[type='search']::-webkit-search-decoration {
 }
 
 .counter-label {
+  max-width: 100%;
   font-size: var(--t-micro);
   color: var(--fg-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .counter-delta {
+  max-width: 100%;
   font-size: var(--t-micro);
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Wiecej roboty niz wczoraj — bursztyn; mniej — zielen. Sprint nie ma kierunku. */
