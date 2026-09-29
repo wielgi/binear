@@ -132,8 +132,12 @@ case-insensitively, as in Bitrix. Deferred tasks (status 6) stay out of the audi
 cards because the audit leaves them alone until someone resumes them.
 
 **Answers.** The anchor is the last comment by IT that looks like interview
-questions (a line starting with `[B]1.`). An answer is any later message from
-someone outside IT; system entries (`author_id 0`) don't count. A subtask with no
+questions (a line starting with `[B]1.`). An answer is a later message from someone outside IT that has substance: numbered
+points (`1.`, `2)`), or at least 120 characters of its own text once `[USER=…]`
+mentions and BBCode are stripped. A ping ("can you answer the questions?") or a
+lone mention is not an answer, so it does not turn a task that is still waiting
+into one to read. A one-word "yes" to a single question misses the bar — a
+deliberate trade-off. System entries (`author_id 0`) don't count. A subtask with no
 questions of its own reads its parent's chat, where the interview usually happened.
 IT means the webhook owner, the accounts in `BX_IT_USERS` and the people in the
 `BX_IT_DEPARTMENTS` departments. Departments come with the chat messages
