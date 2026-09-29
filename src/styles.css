@@ -5643,9 +5643,25 @@ a.mention:hover {
   overflow: hidden;
 }
 
+/*
+ * Najwezsze kolumny, na jakie pozwala uchwyt — w PIKSELACH. Kiedys byl sam
+ * ulamek (12%), a 12% szerokiego ekranu to ~220 px: panel sprintu zapadal sie
+ * i wiersze rozjezdzaly. Te same liczby czyta uchwyt (`--plan-min-*`), a
+ * arkusz trzyma je i tak — na wypadek starego zapisu albo zwezonego okna.
+ */
+.plan {
+  --plan-min-left: 320px;
+  --plan-min-right: 420px;
+}
+
+.plan-cols > .plan-pane,
+.plan-bar > .plan-bar-side:first-child {
+  min-width: var(--plan-min-left);
+}
+
 .plan-right {
   min-height: 0;
-  min-width: 0;
+  min-width: var(--plan-min-right);
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -5656,7 +5672,8 @@ a.mention:hover {
  * trescia. Zwiniety oddaje swoja czesc pozostalym — patrz `.plan-pane-shut`.
  */
 .plan-pane {
-  flex: 1 1 0;
+  /* Udzial przychodzi zmienna z komponentu; bez niej panele dziela sie po rowno. */
+  flex: var(--plan-grow, 1) 1 0;
   min-height: 0;
   min-width: 0;
   display: flex;
@@ -5734,36 +5751,6 @@ a.mention:hover {
 
 /* --- odniesienie do ostatnio dowiezionego --- */
 
-.plan-compare {
-  padding: 0 var(--s3) var(--s2);
-}
-
-.plan-compare-bar {
-  position: relative;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--bg-hover);
-  overflow: hidden;
-}
-
-.plan-compare-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  background: var(--accent);
-}
-
-/* Kreska na 100% — czyli tam, gdzie sprint dorownuje ostatnio dowiezionemu. */
-.plan-compare-mark {
-  position: absolute;
-  right: 0;
-  top: -2px;
-  bottom: -2px;
-  width: 2px;
-  background: var(--fg-dim);
-}
-
 .plan-compare-note {
   display: block;
   margin-top: var(--s1);
@@ -5790,22 +5777,43 @@ a.mention:hover {
 .plan-load-bar {
   position: relative;
   display: flex;
-  height: 4px;
+  /*
+   * 6 px, nie 4. Pasek niesie teraz DWIE rzeczy naraz — czyje sa punkty i ile
+   * ich zostalo do mocy — a przy czterech pikselach kreskowanie przeniesienia
+   * bylo nieczytelne, a pusty ogon zlewal sie z tlem panelu.
+   */
+  height: 10px;
   border-radius: 999px;
-  background: var(--bg-hover);
+  /*
+   * Pusta czesc toru jest PUSTA — tlo panelu i wyrazna obwodka, jak pasek
+   * postepu. Szary tor zlewal sie z kolorami osob i nie bylo widac, gdzie
+   * konczy sie wypelnienie.
+   */
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--fg-dim);
 }
 
+/*
+ * Szerokosc bierze sie z PROCENTOW, nie z `flex-grow`: pasek jest teraz w skali
+ * mocy zespolu, wiec kawalki musza zostawic pusty ogon tam, gdzie sprint jeszcze
+ * nie dobil do limitu. `flex: none`, zeby flexbox ich nie rozciagnal z powrotem.
+ */
 .plan-load-seg {
   position: relative;
+  flex: none;
   min-width: 2px;
-  box-shadow: 1px 0 0 var(--bg-panel);
+  /* Ciemna przegroda miedzy osobami — sama zmiana koloru nie odcinala
+     sasiednich kawalkow w podobnych barwach. */
+  box-shadow: inset -1px 0 0 rgb(0 0 0 / 0.55);
 }
 
 .plan-load-seg:first-child {
   border-radius: 999px 0 0 999px;
 }
 
-.plan-load-seg:last-child {
+/* Prawy koniec zaokraglony tylko wtedy, gdy wypelnienie dochodzi do konca toru
+   (patrz `pelny` w `Pasek`) — inaczej pasek postepu udawalby pelny. */
+.plan-load-seg-koniec {
   border-radius: 0 999px 999px 0;
 }
 
@@ -5820,6 +5828,49 @@ a.mention:hover {
   right: 0;
   top: -8px;
   bottom: -8px;
+}
+
+/*
+ * Praca PRZENIESIONA — w kolorze osoby, ale w kreski: to nie jej decyzja z tego
+ * spotkania, tylko zaleglosc, ktora i tak zajmie jej czas. Kolor musi zostac,
+ * bo pasek odpowiada na „czyje to".
+ */
+.plan-load-carry {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgb(255 255 255 / 0.5) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+/*
+ * Kreska mocy zespolu. Dopoki sprint sie miesci, stoi na prawej krawedzi toru;
+ * po przekroczeniu wjezdza w glab paska i to, co za nia, jest nadmiarem — wtedy
+ * robi sie czerwona. `translateX` cofa ja o polowe grubosci, zeby stala DOKLADNIE
+ * na wartosci, a nie obok niej.
+ */
+.plan-load-mark {
+  position: absolute;
+  /*
+   * WYRAZNA, nie delikatna. Wczesniej byla przygaszona i wystawala 2 px nad
+   * 4-pikselowy pasek — obok nasyconych kolorow osob po prostu jej nie bylo
+   * widac, a to ona niesie caly sens skali („tutaj koncza sie moce zespolu").
+   *
+   * Obwodka w kolorze panelu odcina ja od kawalka, na ktorym stoi: bez niej
+   * ciemna kreska na ciemnym kolorze osoby znikala.
+   */
+  top: -5px;
+  bottom: -5px;
+  width: 2px;
+  transform: translateX(-1px);
+  background: var(--fg);
+  box-shadow: 0 0 0 1px var(--bg-panel);
+  border-radius: 1px;
+  z-index: 2;
+}
+
+.plan-load-mark-ponad {
+  background: var(--danger);
 }
 
 /*
@@ -5850,6 +5901,11 @@ a.mention:hover {
 .plan-load-tip b {
   color: var(--fg);
   font-weight: var(--w-medium);
+}
+
+/* Ile z obciazenia osoby to zaleglosc — dopisek w podpisie, ciszej niz liczba. */
+.plan-load-tip-carry {
+  color: var(--fg-dim);
 }
 
 /* --- wiersze --- */
@@ -6007,6 +6063,21 @@ a.mention:hover {
 /* Zwiniety panel to sam naglowek — nie zabiera juz miejsca sasiadowi. */
 .plan-pane-shut {
   flex: 0 0 auto;
+}
+
+/*
+ * Gdy JEDEN z paneli sprintu nie rosnie — jest zwiniety albo w jego miejscu stoi
+ * napis „brak kolejnego sprintu" — drugi bierze CALA reszte kolumny.
+ *
+ * Bez tego zostawala dziura. Udzialy sa ulamkami sumujacymi sie do jednego
+ * (0,8 + 0,2), a `flex-grow` nizsze niz 1 rozdaje tylko SWOJ ulamek wolnego
+ * miejsca: panel z udzialem 0,2 po zwinieciu sasiada dostawal jedna piata
+ * kolumny, a cztery piate zostawaly puste. Najdotkliwiej przy zwinietym sprincie
+ * aktywnym, bo to on ma wieksza czesc.
+ */
+.plan-right:has(> .plan-pane-shut, > .plan-pane-none)
+  > .plan-pane:not(.plan-pane-shut):not(.plan-pane-none) {
+  flex-grow: 1;
 }
 
 .plan-pane-none {
@@ -7669,14 +7740,6 @@ a.mention:hover {
  * a nie ostrzezenie — swiecenie na zolto przez wiekszosc planowania nauczyloby
  * tylko ignorowac ten pasek.
  */
-.plan-compare-fill.plan-compare-rowno {
-  background: var(--accent-amber);
-}
-
-.plan-compare-fill.plan-compare-ponad {
-  background: var(--danger);
-}
-
 
 /*
  * Zadanie, ktore nie miesci sie w pozostalych punktach. Leza na DOLE rejestru
@@ -7927,6 +7990,7 @@ a.mention:hover {
  * nie przeskakuje przy zmianie tury.
  */
 .plan-bar-right {
+  min-width: var(--plan-min-right);
   justify-content: flex-end;
 }
 
@@ -7977,38 +8041,39 @@ a.mention:hover {
   margin-top: var(--s3);
 }
 
-/* Odstep i wciecie sa na wariancie — paski w srodku juz go nie dubluja. */
-.plan-wariant > .plan-compare,
-.plan-wariant > .plan-load {
-  padding: 0;
-}
-
 .plan-liczniki {
   padding: 0 var(--s3) var(--s2);
 }
 
-.plan-compare-row + .plan-compare-row {
-  margin-top: var(--s2);
-}
-
-/* Rozklad po osobach tuz pod odczytem mocy — to dalej ten sam wariant. */
-.plan-wariant > .plan-compare + .plan-load {
-  margin-top: var(--s2);
+/* Wciecie jest na grupie licznikow — pasek w srodku go nie dubluje. */
+.plan-wariant > .plan-load {
+  padding: 0;
 }
 
 /*
- * Kawalek paska, ktorego nikt nie wybieral — niedomknieta praca z trwajacego
- * sprintu. Kreski, a nie inny kolor: kolor na tym pasku znaczy „ile zostalo", a
- * dwa znaczenia w jednej wlasciwosci nie dalyby sie odczytac. Przygaszenie
- * dopowiada, ze to punkty wzięte z góry, nie decyzja.
+ * Kontrolki KOLEJKI po jej wylaczeniu: zostaja na miejscu, tylko przygaszone.
+ * Schowanie ich zmienialoby szerokosc paska przy kazdym przelaczeniu, a przy
+ * wlaczaniu trzeba by szukac, gdzie wrocily.
+ *
+ * Przyciski gasi sam `:disabled` (regula `.views-btn`), wiec tu zostaje tekst:
+ * podpis „Teraz:" i nazwa dzialu.
  */
-.plan-compare-carry {
-  opacity: 0.55;
-  background-image: repeating-linear-gradient(
-    -45deg,
-    rgb(255 255 255 / 0.55) 0 2px,
-    transparent 2px 4px
-  );
+.plan-wyl {
+  opacity: 0.45;
+}
+
+/*
+ * Przyciski kolejki po jej wylaczeniu. `.views-btn` nie mial wlasnej reguly dla
+ * stanu nieczynnego — bez niej wygladaly na czynne i klikalo sie w nie na prozno.
+ */
+.views-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.views-btn:disabled:hover {
+  background: transparent;
+  color: inherit;
 }
 
 /* Nazwa wariantu — pelnym glosem, bo bez niej pary sa nieodroznialne. */

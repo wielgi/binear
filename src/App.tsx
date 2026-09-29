@@ -16,6 +16,7 @@ import { createPortal } from 'react-dom';
 import { HoverNote } from './HoverNote';
 import {
   CLOSED_STATUSES,
+  REVIEW_STATUSES,
   FALLBACK_PRIORITY,
   FALLBACK_STATUS,
   addComment,
@@ -172,7 +173,8 @@ import {
 import { TaskCode } from './TaskCode';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
-import { Planning } from './Planning';
+import { Planning, SORT_DOMYSLNY } from './Planning';
+import { planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useCounterHistory } from './CountersBar';
 import {
   COUNTERS,
@@ -552,6 +554,26 @@ interface Settings {
    * (`DO-WYWIADU`, `OCZEKUJE-NA-ODPOWIEDZ`), ktorych nie ma sensu brac na sprint.
    */
   planTylkoDoStartu: boolean;
+  /** Czy niedomknieta praca z trwajacego sprintu wlicza sie do mocy kolejnego. */
+  planPrzeniesienie: boolean;
+  /**
+   * Czy KOLEJKA DZIALOW jest w uzyciu. Wylaczona zdejmuje zawezenie rejestru do
+   * epiku i do `DO-STARTU` — planowanie poza spotkaniem, gdy nikt nie wybiera po
+   * kolei, a chodzi o przejrzenie calego rejestru.
+   */
+  planKolejkaWl: boolean;
+  /**
+   * Podzial widoku planowania: `cols` rejestr kontra sprinty, `split` sprint
+   * aktywny kontra planowany. Siedzi TUTAJ, a nie w `Planning`, bo przelaczenie
+   * widoku odmontowuje ten komponent — proporcje ginely przy kazdym wyjsciu.
+   */
+  planPodzial: { cols: number; split: number };
+  /**
+   * Zwiniete panele sprintow w planowaniu, po ID sprintu. Z tego samego powodu co
+   * `planPodzial`: przelaczenie widoku odmontowuje `Planning` i zwiniecie ginelo.
+   * Po ID, nie „aktywny/planowany" — nowy sprint zaczyna rozwiniety.
+   */
+  planZwiniete: number[];
   /**
    * Puste grupy/kolumny. Lista: pokazuje naglowek etapu/statusu nawet bez zadan.
    * Tablica: gdy wylaczone, kolumna bez kart znika (np. "Wdrozone", gdy nic nie
@@ -613,6 +635,12 @@ const DEFAULT_SETTINGS: Settings = {
   planPominieci: [],
   planTura: 0,
   planTylkoDoStartu: true,
+  planPrzeniesienie: true,
+  planKolejkaWl: true,
+  /* 0,8 dla sprintu aktywnego: to w nim sie planuje, a kolejny jest na razie
+     miejscem odkladczym — patrz `SPLIT_DEFAULT` w `Planning`. */
+  planPodzial: { cols: 0.5, split: 0.8 },
+  planZwiniete: [],
   showEmpty: false,
   showCounters: true,
   shownEmpty: [],
@@ -3032,24 +3060,92 @@ function Tag({ name, onPick }: { name: string; onPick?: (name: string) => void }
 // ─── Wiersz ──────────────────────────────────────────────────────────────────
 
 /**
+ * Czy praca jest JUZ ODDANA — a wiec termin nikogo nie goni.
+ *
+ * Zamkniete (5) i oddane do kontroli (4). Wczesniej tonu pozbawialo tylko 5, wiec
+ * zadanie czekajace na czyjas akceptacje swiecilo gleboka czerwienia i liczylo
+ * „7 dni po", choc autor zrobil swoje i nie ma juz czego przyspieszac. Licznik
+ * rosl przy tym codziennie, mimo ze po stronie zadania nic sie nie dzialo — i to
+ * bylo w tym najbardziej mylace. Alarm ma dotyczyc pracy, ktora ktos jeszcze musi
+ * wykonac.
+ *
+ * Ta sama granica co przy mocach w planowaniu: „czeka na kontrole" liczy sie jak
+ * zrobione, bo nie zajmie juz niczyjego czasu.
+ */
+const oddane = (status: string) => CLOSED_STATUSES.has(status) || REVIEW_STATUSES.has(status);
+
+/**
  * Termin w postaci do wiersza: krotka etykieta i ton pilnosci.
  *
  * Etykieta mowi to, co przy wierszu najwazniejsze: ile po terminie, a przy
  * bliskim — „dziś" / „jutro". Dalszy termin to po prostu data. Ton dostaja
- * wylacznie terminy pilne, i nigdy zadania zamkniete: termin zamknietego
- * zadania juz niczego nie wymaga.
+ * wylacznie terminy pilne, i nigdy praca juz oddana (patrz `oddane`): jej termin
+ * niczego nie wymaga, a rosnacy licznik spoznienia klamalby o stanie zadania.
  */
+/** Pelne dni KALENDARZOWE od `od` do `do_`; dodatnie = `do_` jest pozniej. */
+function dniKalendarzowe(od: string, do_: string): number | null {
+  const a = new Date(od);
+  const b = new Date(do_);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+  const polnoc = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((polnoc(b) - polnoc(a)) / 86400000);
+}
+
+/**
+ * Kiedy praca zostala ODDANA wzgledem terminu — „oddane 1 dzień po terminie".
+ *
+ * Moment bierzemy z `closedDate`, ktore Bitrix ustawia, gdy wykonawca konczy
+ * zadanie — takze wtedy, gdy trafia ono najpierw do kontroli, a nie wprost do
+ * zamkniecia (sprawdzone na 50 zadaniach: `closedDate` co do minuty rowna sie
+ * `statusChangedDate`, a pole i tak przychodzi razem z lista, wiec nic nie kosztuje).
+ *
+ * To odpowiedz na pytanie, ktorego rosnacy licznik „N dni po" nie umial dac:
+ * spoznienie zamyka sie w chwili oddania i nie rosnie dalej.
+ */
+function opisOddania(deadline: string, oddaneDnia: string): string | null {
+  const dni = dniKalendarzowe(deadline, oddaneDnia);
+  if (dni === null) return null;
+  const n = Math.abs(dni);
+  const unit = n === 1 ? 'dzień' : 'dni';
+  const kiedy = shortDate(oddaneDnia);
+  if (dni > 0) return `oddane ${n} ${unit} po terminie (${kiedy})`;
+  if (dni === 0) return `oddane w dniu terminu (${kiedy})`;
+  return `oddane ${n} ${unit} przed terminem (${kiedy})`;
+}
+
 function dueInfo(
   deadline: string,
-  done: boolean,
+  zrobione: boolean,
+  /** `closedDate` zadania — moment oddania pracy. */
+  oddaneDnia?: string | null,
 ): { label: string; tone: '' | 'late' | 'soon'; distance: string; title: string; days: number } {
   const end = new Date(deadline);
   if (Number.isNaN(end.getTime())) return { label: '', tone: '', distance: '', title: '', days: 0 };
   const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const days = Math.round((midnight(end) - midnight(new Date())) / 86400000);
+
+  /*
+   * Praca oddana: SAMA DATA, bez „dziś", „jutro" i bez licznika spoznienia.
+   * „12 wrz" jest faktem, „7 dni po" — ocena, ktora tu nie ma juz adresata.
+   *
+   * Pod kursorem mowimy natomiast, KIEDY zostala oddana wzgledem terminu — bo to
+   * jest pytanie, ktore przy zamknietym zadaniu ma sens.
+   */
+  if (zrobione) {
+    const oddanie = oddaneDnia ? opisOddania(deadline, oddaneDnia) : null;
+    const distance = oddanie ?? (days < 0 ? 'termin minął' : 'przed terminem');
+    return {
+      label: shortDate(deadline),
+      tone: '',
+      distance,
+      days,
+      title: `Termin: ${shortDate(deadline)} · ${distance}`,
+    };
+  }
+
   const label =
     days < 0 ? `${-days} ${days === -1 ? 'dzień' : 'dni'} po` : days === 0 ? 'dziś' : days === 1 ? 'jutro' : shortDate(deadline);
-  const tone = done ? '' : days < 0 ? 'late' : days <= 1 ? 'soon' : '';
+  const tone = days < 0 ? 'late' : days <= 1 ? 'soon' : '';
   /*
    * Podpowiedz niesie ODLEGLOSC w dniach — w wierszu jest tylko data albo kolor,
    * a „ile jeszcze / ile po" trzeba bylo liczyc w glowie. „dzień" tylko przy
@@ -3066,10 +3162,10 @@ function dueInfo(
  * Kolor odleglosci w karcie — ta sama paleta co dopisek „plan" na wykresie
  * (`paceFill`): zielen (hsl 145) dla zapasu, czerwien (hsl 5) dla spoznienia,
  * zmieszane z przygaszonym kolorem, zeby nie krzyczaly. Dzis i jutro zostaja
- * pomaranczowe, jak w wierszu. Zamkniete zadanie nie ma juz czego pilnowac.
+ * pomaranczowe, jak w wierszu. Praca oddana nie ma juz czego pilnowac.
  */
-function dueFill(days: number, done: boolean): string {
-  if (done) return 'var(--fg-dim)';
+function dueFill(days: number, zrobione: boolean): string {
+  if (zrobione) return 'var(--fg-dim)';
   if (days <= 1 && days >= 0) return 'var(--accent-orange)';
   if (days < 0) {
     /* Im dluzej po terminie, tym mocniej — od ok. 35% do sufitu wykresu (65%). */
@@ -3084,22 +3180,36 @@ function dueFill(days: number, done: boolean): string {
  */
 function DueHover({
   deadline,
-  done,
+  zrobione,
+  oddaneDnia,
   className,
   children,
 }: {
   deadline: string;
-  done: boolean;
+  /** Praca oddana — patrz `oddane`. Termin traci wtedy ton i licznik. */
+  zrobione: boolean;
+  /** `closedDate` — moment oddania. Dzieki niemu karta mowi, czy zdazono. */
+  oddaneDnia?: string | null;
   className: string;
   children: ReactNode;
 }) {
-  const due = dueInfo(deadline, done);
+  const due = dueInfo(deadline, zrobione, oddaneDnia);
+  /*
+   * Oddane PO terminie dostaje przygaszona czerwien, nie szarosc: to nadal fakt
+   * o spoznieniu, tylko zamkniety — ma dac sie zauwazyc przy przegladaniu, ale
+   * nie krzyczec jak termin, ktory wciaz leci.
+   */
+  const spoznione = zrobione && oddaneDnia !== null && oddaneDnia !== undefined
+    ? (dniKalendarzowe(deadline, oddaneDnia) ?? 0) > 0
+    : false;
   return (
     <HoverNote
       label="Termin"
       value={shortDate(deadline)}
       note={due.distance}
-      noteColor={dueFill(due.days, done)}
+      noteColor={
+        spoznione ? 'color-mix(in oklab, hsl(5 52% 55%) 45%, var(--fg-dim))' : dueFill(due.days, zrobione)
+      }
       className={className}
     >
       {children}
@@ -3390,11 +3500,12 @@ function TaskRow({
           */}
           {(() => {
             if (!task.deadline) return <span className="row-due" />;
-            const due = dueInfo(task.deadline, task.status === '5');
+            const due = dueInfo(task.deadline, oddane(task.status));
             return (
               <DueHover
                 deadline={task.deadline}
-                done={task.status === '5'}
+                zrobione={oddane(task.status)}
+                oddaneDnia={task.closedDate}
                 className={`row-due${due.tone ? ` due-${due.tone}` : ''}`}
               >
                 <CalendarIcon />
@@ -3417,9 +3528,10 @@ function TaskRow({
            termin barwi sie tak samo jak w wariancie z zetonem. */
         <DueHover
           deadline={task.deadline}
-          done={task.status === '5'}
+          zrobione={oddane(task.status)}
+          oddaneDnia={task.closedDate}
           className={`row-meta row-deadline${(() => {
-            const tone = dueInfo(task.deadline, task.status === '5').tone;
+            const tone = dueInfo(task.deadline, oddane(task.status)).tone;
             return tone ? ` due-${tone}` : '';
           })()}`}
         >
@@ -5140,7 +5252,7 @@ function FieldButton({
  * polnocy. Bitrix trzyma termin z godzina, ale binear ustawia go polem `type="date"`,
  * wiec godzina i tak jest umowna i nie ma czego odliczac dokladniej.
  */
-function DeadlineLeft({ value, done }: { value: string; done: boolean }) {
+function DeadlineLeft({ value, zrobione }: { value: string; zrobione: boolean }) {
   /*
    * Przerysowanie O POLNOCY. Bez tego okno zostawione na noc pokazuje rano wczorajsze
    * "dziś". Celujemy w najblizsza polnoc, zamiast budzic sie co minute: ta wartosc
@@ -5158,11 +5270,14 @@ function DeadlineLeft({ value, done }: { value: string; done: boolean }) {
 
   /* Odleglosc liczy `dueInfo` — ta sama, ktora obsluguje wiersz i karte pod
      kursorem. Wlasny rachunek stal tu wczesniej i dublowal tamten co do minuty. */
-  const { days } = dueInfo(value, done);
+  const { days } = dueInfo(value, zrobione);
   const late = -days;
 
-  const label =
-    days < 0
+  /* Praca oddana: sama data, tak samo jak w wierszu — bez rosnacego „N dni po
+     terminie", ktore przy zadaniu czekajacym na akceptacje niczego nie znaczy. */
+  const label = zrobione
+    ? shortDate(value)
+    : days < 0
       ? `${late} ${late === 1 ? 'dzień' : 'dni'} po terminie`
       : days === 0
         ? 'dziś'
@@ -5180,10 +5295,10 @@ function DeadlineLeft({ value, done }: { value: string; done: boolean }) {
    * na zielono („jest zapas"), a panel obok barwil to samo na 30% czerwieni
    * („robi sie ciasno"). Jedna data nie moze dostawac dwoch sprzecznych ocen.
    *
-   * Zadanie ZAKONCZONE zostaje szare bez wzgledu na date — tez z `dueFill`.
+   * Praca ODDANA zostaje szara bez wzgledu na date — tez z `dueFill`.
    */
   return (
-    <span className="dd-deadline" style={{ color: dueFill(days, done) }}>
+    <span className="dd-deadline" style={{ color: dueFill(days, zrobione) }}>
       {label}
     </span>
   );
@@ -5645,7 +5760,7 @@ function DetailPanel({
           <dt>Termin</dt>
           <dd className="dd-deadline-cell">
             <DateField value={task.deadline} onChange={onDeadline} />
-            {task.deadline && <DeadlineLeft value={task.deadline} done={task.status === '5'} />}
+            {task.deadline && <DeadlineLeft value={task.deadline} zrobione={oddane(task.status)} />}
           </dd>
 
           {/* ── kto ─────────────────────────────────────────────────────── */}
@@ -8033,8 +8148,29 @@ export default function App() {
   const [planPominieci, setPlanPominieci] = useState<number[]>(saved.planPominieci ?? []);
   const [planTura, setPlanTura] = useState(saved.planTura ?? 0);
   const [planTylkoDoStartu, setPlanTylkoDoStartu] = useState(saved.planTylkoDoStartu ?? true);
+  const [planPrzeniesienie, setPlanPrzeniesienie] = useState(saved.planPrzeniesienie ?? true);
+  const [planKolejkaWl, setPlanKolejkaWl] = useState(saved.planKolejkaWl ?? true);
+  /*
+   * Zapis SPRAWDZAMY, a nie bierzemy na slowo. Zapisane ustawienia bywaja
+   * starsze od dzisiejszego kodu albo po prostu uszkodzone — `{cols: null}`
+   * wystarczylo, zeby panele dostaly `flex-grow: NaN` i widok zostal rozjechany
+   * na zawsze, bo zla wartosc wracala z kazdym odswiezeniem. Ulamek poza
+   * zakresem uchwytu tez odrzucamy: 0 znaczy panel sciscniety do zera, ktorego
+   * nie da sie juz zlapac.
+   */
+  const [planPodzial, setPlanPodzial] = useState(() => {
+    const ulamek = (v: unknown, dom: number) =>
+      typeof v === 'number' && Number.isFinite(v) && v >= 0.12 && v <= 0.88 ? v : dom;
+    return {
+      cols: ulamek(saved.planPodzial?.cols, 0.5),
+      split: ulamek(saved.planPodzial?.split, 0.8),
+    };
+  });
+  const [planZwiniete, setPlanZwiniete] = useState<number[]>(() =>
+    Array.isArray(saved.planZwiniete) ? saved.planZwiniete.filter((v) => Number.isFinite(v)) : [],
+  );
   const [planSort, setPlanSort] = useState<{ by: PlanSortBy; dir: 'asc' | 'desc' }[]>(
-    () => saved.planSort ?? [{ by: 'updated', dir: 'desc' }],
+    () => saved.planSort ?? (SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[]),
   );
   /* Zapisane ustawienie moze pochodzic ze starszej wersji (byl tez wariant sam
      naglowek) — nieznana wartosc wraca do "bez koloru", zamiast zostawiac klase,
@@ -9112,6 +9248,10 @@ export default function App() {
       planPominieci,
       planTura,
       planTylkoDoStartu,
+      planPrzeniesienie,
+      planKolejkaWl,
+      planPodzial,
+      planZwiniete,
       listTint,
       deadlineLook,
       szukajWOpisach: wOpisach,
@@ -9127,7 +9267,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -9793,11 +9933,16 @@ export default function App() {
     }));
   }, [epics, planKolejka, planPominieci]);
 
-  /** Dzial, ktorego JEST tura — liczony po obecnych, wiec pominiecie nie zostawia dziury. */
+  /**
+   * Dzial, ktorego JEST tura — liczony po obecnych, wiec pominiecie nie zostawia
+   * dziury. `null` takze przy WYLACZONEJ kolejce: nikt nie wybiera, wiec rejestr
+   * nie ma sie do czego zawezac (`Planning` czyta to wprost z `teraz`).
+   */
   const teraz = useMemo(() => {
+    if (!planKolejkaWl) return null;
     const obecni = dzialy.filter((d) => d.obecny);
     return obecni.length ? obecni[planTura % obecni.length] : null;
-  }, [dzialy, planTura]);
+  }, [dzialy, planTura, planKolejkaWl]);
 
   /*
    * Losowanie kolejnosci — Fisher-Yates na PELNEJ liscie, razem z nieobecnymi.
@@ -9990,46 +10135,27 @@ export default function App() {
   );
 
   /*
-   * Komparator zlozony ze STOSU kluczy: pierwszy rozstrzyga, kolejny wchodzi
-   * dopiero przy remisie. Skladamy go z tego samego `taskComparator`, ktorego
-   * uzywa lista — inaczej "po priorytecie" znaczyloby tu co innego niz tam.
+   * Komparator zlozony ze STOSU kluczy — patrz `planComparator` (planSort.ts).
+   * Osie wspolne z lista ida przez ten sam `compareBy`, ktorego uzywa lista —
+   * inaczej "po priorytecie" znaczyloby tu co innego niz tam.
    */
   const planCmp = useMemo(() => {
     /*
      * Pozycja zadania w procesie. Zadanie poza sprintem nie ma etapu — laduje na
      * koncu, bo "jeszcze nigdzie nie doszlo" jest dalej niz kazda kolumna.
      */
-    const rank = (t: Task): number => {
+    const stageRank = (t: Task): number => {
       if (!t.stageId) return Number.MAX_SAFE_INTEGER;
       const name = stageNames.get(t.stageId);
       const at = name === undefined ? undefined : stageOrder.get(name);
       return at ?? Number.MAX_SAFE_INTEGER;
     };
-
-    /* Oba ROSNACO — kierunek doklada dopiero `odwroc`, jak przy reszcie osi.
-       Dla tagu ranga 0 znaczy „ma tag", wiec rosnaco stawia go na poczatku. */
-    const wysoki = (a: Task, b: Task) => {
-      const ma = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki') ? 0 : 1);
-      return ma(a) - ma(b);
-    };
-    const sp = (a: Task, b: Task) => (a.storyPoints ?? 0) - (b.storyPoints ?? 0);
-
-    const levels = planSort.map((lvl) => {
-      const odwroc = (f: (a: Task, b: Task) => number) =>
-        lvl.dir === 'asc' ? f : (a: Task, b: Task) => -f(a, b);
-      if (lvl.by === 'stage') return odwroc((a: Task, b: Task) => rank(a) - rank(b));
-      if (lvl.by === 'wysoki') return odwroc(wysoki);
-      if (lvl.by === 'sp') return odwroc(sp);
-      return taskComparator({ ...sort, ...(lvl as { by: SortBy; dir: 'asc' | 'desc' }) }, me);
+    return planComparator(planSort, {
+      axis: (by, a, b) => compareBy(by as SortBy, a, b),
+      stageRank,
+      me,
     });
-    return (a: Task, b: Task) => {
-      for (const cmp of levels) {
-        const r = cmp(a, b);
-        if (r !== 0) return r;
-      }
-      return 0;
-    };
-  }, [planSort, sort, me, stageNames, stageOrder]);
+  }, [planSort, me, stageNames, stageOrder]);
 
   /*
    * Odsiew po statusie NIE jest tu robiony — robi go `Planning`, bo rozni sie
@@ -10049,6 +10175,17 @@ export default function App() {
     () => [...matchQuery(planBase, query)].sort(planCmp),
     [planBase, query, planCmp],
   );
+
+  /*
+   * Zadania do PANELI SPRINTU — wszystkie, bez filtrow i bez szukania.
+   *
+   * Filtr zaweza w planowaniu tylko REJESTR. Wczesniej dotykal wszystkiego, wiec
+   * kazdy filtr albo wpisana fraza zmienialy sumy SP i licznik mocy sprintu, choc
+   * w samym sprincie nic sie nie zmienilo — liczba, ktora ma byc podstawa decyzji,
+   * zalezala od tego, czego ktos wlasnie szukal. Rejestr przeciwnie: tam sie szuka
+   * i zawezanie jest cala jego robota.
+   */
+  const planAll = useMemo(() => [...tasks].sort(planCmp), [tasks, planCmp]);
 
   const onDragEnd = useCallback(
     (e: DragEndEvent) => {
@@ -11112,13 +11249,16 @@ export default function App() {
            */
           <Planning
             /*
-             * `planTasks`: wszystkie filtry i wyszukiwanie BEZ zakresu i BEZ
-             * odsiewu po statusie, posortowane wlasnym stosem kluczy. Zakres
-             * (sprint / poza sprintem / wszystkie) jest tu bez sensu — ten widok
-             * sam dzieli zadania na rejestr i sprinty; status odsiewa `Planning`,
-             * bo rozni sie miedzy panelami.
+             * DWA zestawy, bo filtr dotyczy tylko rejestru:
+             *  - `planAll` do paneli sprintu — wszystko, zeby sumy SP i licznik
+             *    mocy nie zalezaly od tego, czego ktos wlasnie szuka,
+             *  - `planTasks` do rejestru — po filtrach i po frazie.
+             * Oba posortowane tym samym stosem kluczy i oba bez odsiewu po
+             * statusie: ten robi `Planning`, bo rozni sie miedzy panelami.
+             * Zakresu nie ma w zadnym — widok sam dzieli zadania na rejestr i sprinty.
              */
-            tasks={planTasks}
+            tasks={planAll}
+            rejestrTasks={planTasks}
             activeSprint={activeSprint}
             nextSprint={nextSprint}
             onCreateSprint={nastepnySprint && me !== null ? zalozSprint : undefined}
@@ -11132,11 +11272,21 @@ export default function App() {
             onMoce={setPlanMoce}
             dzialy={dzialy}
             teraz={teraz}
+            kolejkaWl={planKolejkaWl}
+            onKolejkaWl={() => setPlanKolejkaWl((v) => !v)}
+            podzial={planPodzial}
+            onPodzial={setPlanPodzial}
+            zwiniete={planZwiniete}
+            onZwin={(id) =>
+              setPlanZwiniete((z) => (z.includes(id) ? z.filter((v) => v !== id) : [...z, id]))
+            }
             onLosuj={losujKolejnosc}
             onPomin={() => setPlanTura((t) => t + 1)}
             onPrzestaw={przestawDzial}
             onObecny={przelaczObecnosc}
             tylkoDoStartu={planTylkoDoStartu}
+            przeniesienie={planPrzeniesienie}
+            onPrzeniesienie={() => setPlanPrzeniesienie((v) => !v)}
             onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
             sort={planSort}
             sortFields={PLAN_SORTS}
