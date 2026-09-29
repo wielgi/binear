@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   answerState,
   countAll,
+  isSubstantiveAnswer,
+  MIN_ANSWER_CHARS,
+  plainBody,
   previousDay,
   recordDay,
   type ChatMessage,
@@ -81,32 +84,76 @@ describe('countAll', () => {
 });
 
 describe('answerState', () => {
-  const IT = new Set([251, 28]);
+  const IT = new Set([900, 901]);
   const isIt = (id: number) => IT.has(id);
   const msg = (id: number, authorId: number, text = 'tekst'): ChatMessage => ({ id, authorId, text });
   const PYTANIA = '[B]1. Kto to robi?[/B]\nOpis\n\n[B]2. Jak czesto?[/B]';
 
   it('bez komentarza z pytaniami nie ma kotwicy', () => {
-    expect(answerState([msg(1, 108), msg(2, 251, 'zwykly komentarz')], isIt)).toBe('no-question');
+    expect(answerState([msg(1, 700), msg(2, 900, 'zwykly komentarz')], isIt)).toBe('no-question');
   });
 
-  it('odpowiedz osoby spoza IT po pytaniach', () => {
-    expect(answerState([msg(1, 251, PYTANIA), msg(2, 108, 'Robi to magazyn')], isIt)).toBe('answered');
+  it('odpowiedz z numerowanymi punktami po pytaniach', () => {
+    const odp = '1. Robi to magazyn\n2. Kilka razy w tygodniu';
+    expect(answerState([msg(1, 900, PYTANIA), msg(2, 700, odp)], isIt)).toBe('answered');
+  });
+
+  it('dluzsza odpowiedz bez numeracji tez sie liczy', () => {
+    const odp =
+      'Duplikujemy zamowienia glownie przy powtorkach zakupow u stalych klientow, robimy to kilka razy dziennie i brakuje nam skopiowanych pol.';
+    expect(answerState([msg(1, 900, PYTANIA), msg(2, 700, odp)], isIt)).toBe('answered');
+  });
+
+  it('ping z oznaczeniem i samo oznaczenie kogos nie sa odpowiedzia', () => {
+    const czat = [
+      msg(1, 800, PYTANIA),
+      msg(2, 801, '[USER=101]Jan Kowalski[/USER] i [USER=102]Anna Nowak[/USER] - czy możecie odpowiedzieć na pytania?'),
+      msg(3, 102, '[USER=101]Jan Kowalski[/USER]'),
+    ];
+    expect(answerState(czat, (id) => id === 800)).toBe('waiting');
+  });
+
+  it('po pingu prawdziwa odpowiedz nadal jest wykrywana', () => {
+    const czat = [
+      msg(1, 800, PYTANIA),
+      msg(2, 801, '[USER=101]Jan Kowalski[/USER] czy możecie odpowiedzieć?'),
+      msg(3, 101, '1. Duplikujemy raz dziennie\n2. Kopiuje sie klient i pozycje'),
+    ];
+    expect(answerState(czat, (id) => id === 800)).toBe('answered');
   });
 
   it('wpis systemowy i komentarz z IT to nie odpowiedz', () => {
-    expect(answerState([msg(1, 251, PYTANIA), msg(2, 0, 'Zmiana etapu'), msg(3, 28, 'ping')], isIt)).toBe(
+    expect(answerState([msg(1, 900, PYTANIA), msg(2, 0, 'Zmiana etapu'), msg(3, 901, 'ping')], isIt)).toBe(
       'waiting',
     );
   });
 
   it('kolejna runda pytan przesuwa kotwice', () => {
-    const czat = [msg(1, 251, PYTANIA), msg(2, 108, 'odpowiedz'), msg(3, 251, PYTANIA)];
+    const czat = [msg(1, 900, PYTANIA), msg(2, 700, 'odpowiedz'), msg(3, 900, PYTANIA)];
     expect(answerState(czat, isIt)).toBe('waiting');
   });
 
   it('pytania zadane przez kogos spoza IT nie sa kotwica', () => {
-    expect(answerState([msg(1, 108, PYTANIA), msg(2, 109, 'ok')], isIt)).toBe('no-question');
+    expect(answerState([msg(1, 700, PYTANIA), msg(2, 701, 'ok')], isIt)).toBe('no-question');
+  });
+});
+
+describe('isSubstantiveAnswer', () => {
+  it('wzmianki i znaczniki nie wliczaja sie do dlugosci', () => {
+    expect(plainBody('[USER=101]Jan Kowalski[/USER] [B]tak[/B]')).toBe('tak');
+    expect(isSubstantiveAnswer('[USER=101]Jan Kowalski[/USER]')).toBe(false);
+    expect(isSubstantiveAnswer('[USER=16]a[/USER] '.repeat(20))).toBe(false);
+  });
+
+  it('numeracja wystarcza nawet w krotkiej wiadomosci, sama liczba w tekscie nie', () => {
+    expect(isSubstantiveAnswer('1. tak')).toBe(true);
+    expect(isSubstantiveAnswer('2) nie')).toBe(true);
+    expect(isSubstantiveAnswer('mamy 3 kolektory')).toBe(false);
+  });
+
+  it('prog dlugosci to MIN_ANSWER_CHARS znakow wlasnej tresci', () => {
+    expect(isSubstantiveAnswer('a'.repeat(MIN_ANSWER_CHARS - 1))).toBe(false);
+    expect(isSubstantiveAnswer('a'.repeat(MIN_ANSWER_CHARS))).toBe(true);
   });
 });
 

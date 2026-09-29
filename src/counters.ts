@@ -163,13 +163,41 @@ export const QUESTION = /^\s*\[B\]\s*\d{1,2}\./m;
 
 export type AnswerState = 'answered' | 'waiting' | 'no-question';
 
+/** Ile znakow tresci (bez wzmianek i znacznikow) wystarcza za odpowiedz bez numeracji. */
+export const MIN_ANSWER_CHARS = 120;
+
+/** Tresc wiadomosci bez wzmianek „[USER=1]Imie[/USER]" i znacznikow BBCode. */
+export function plainBody(text: string): string {
+  return text
+    .replace(/\[USER=\d+\][\s\S]*?\[\/USER\]/gi, ' ')
+    .replace(/\[\/?[A-Za-z]+(?:=[^\]]*)?\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
- * Czy po NASZYCH ostatnich pytaniach odezwal sie ktos spoza IT.
+ * Czy wiadomosc ma tresc odpowiedzi, a nie jest samym ping-iem.
+ *
+ * „Jan i Anna, czy mozecie odpowiedziec?" oraz samo „Jan Kowalski" (ktos
+ * oznaczony dalej) to wiadomosci osob spoza IT, ale nie odpowiadaja na zadne
+ * pytanie — bez tego zadanie wygladaloby na takie, w ktorym pilka wrocila do nas.
+ * Odpowiedzia jest wiadomosc z numerowanymi punktami („1.", „2)") albo majaca co
+ * najmniej MIN_ANSWER_CHARS znakow wlasnej tresci. Krotkie jednozdaniowe „tak" przy
+ * pojedynczym pytaniu tego progu nie przechodzi — swiadomy kompromis.
+ */
+export function isSubstantiveAnswer(text: string): boolean {
+  const body = plainBody(text);
+  if (/(?:^|\s)\d{1,2}[.)]\s*\S/.test(body)) return true;
+  return body.length >= MIN_ANSWER_CHARS;
+}
+
+/**
+ * Czy po NASZYCH ostatnich pytaniach ktos spoza IT faktycznie odpowiedzial.
  *
  * Kotwica = ostatnia wiadomosc osoby z IT w formacie pytan wywiadu. Kolejna runda
  * pytan przesuwa kotwice, wiec stare odpowiedzi nie udaja nowych. Odpowiedzia jest
- * kazda pozniejsza wiadomosc osoby spoza IT — takze „wroce z tym jutro", bo to tez
- * sygnal, ze pilka wrocila do nas i trzeba to przeczytac. Wpisy systemowe odpadaja.
+ * pozniejsza wiadomosc osoby spoza IT, ktora ma tresc (patrz `isSubstantiveAnswer`).
+ * Wpisy systemowe i same ping-i odpadaja.
  *
  * `messages` od najstarszej do najnowszej.
  */
@@ -185,7 +213,7 @@ export function answerState(messages: ChatMessage[], isIt: (authorId: number) =>
   if (anchor < 0) return 'no-question';
   for (let i = anchor + 1; i < messages.length; i++) {
     const m = messages[i];
-    if (m.authorId > 0 && !isIt(m.authorId)) return 'answered';
+    if (m.authorId > 0 && !isIt(m.authorId) && isSubstantiveAnswer(m.text)) return 'answered';
   }
   return 'waiting';
 }
