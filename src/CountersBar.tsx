@@ -20,7 +20,15 @@ import {
   type CounterValue,
   type DaySnapshot,
 } from './counters';
-import { CalendarIcon, CommentIcon, HashIcon, LayersIcon, ListIcon, PenIcon } from './icons';
+import {
+  CalendarIcon,
+  CheckIcon,
+  CommentIcon,
+  HashIcon,
+  LayersIcon,
+  ListIcon,
+  PenIcon,
+} from './icons';
 
 /** Czaty dociagamy ponownie co tyle, nawet gdy lista sie nie zmienila. */
 const ANSWERS_REFRESH_MS = 5 * 60_000;
@@ -170,6 +178,7 @@ const ICONS: Record<CounterKey, ReactNode> = {
   wywiad: <PenIcon />,
   odpowiedzi: <CommentIcon />,
   wycena: <HashIcon />,
+  gotowe: <CheckIcon />,
   sprint: <CalendarIcon />,
 };
 

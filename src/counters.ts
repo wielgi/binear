@@ -11,7 +11,14 @@
  */
 import type { Task } from './bitrix';
 
-export type CounterKey = 'sprint' | 'poza' | 'wycena' | 'odpowiedzi' | 'wywiad' | 'epik';
+export type CounterKey =
+  | 'sprint'
+  | 'poza'
+  | 'wycena'
+  | 'gotowe'
+  | 'odpowiedzi'
+  | 'wywiad'
+  | 'epik';
 
 export const TAG_DO_STARTU = 'DO-STARTU';
 export const TAG_CZEKA = 'OCZEKUJE-NA-ODPOWIEDZ';
@@ -59,7 +66,8 @@ const inSprint = (t: CounterTask, ctx: CounterCtx) =>
 
 /*
  * Kolejnosc = kolejnosc pracy w audycie: najpierw skala rejestru, potem porzadki
- * (epik, wywiad, odpowiedzi, wycena), na koncu sprint jako punkt odniesienia.
+ * (epik, wywiad, odpowiedzi, wycena), potem to, co juz gotowe do wziecia do sprintu,
+ * na koncu sprint jako punkt odniesienia.
  */
 export const COUNTERS: CounterDef[] = [
   {
@@ -102,6 +110,17 @@ export const COUNTERS: CounterDef[] = [
       inAudit(t, ctx) && !inSprint(t, ctx) && hasTag(t, TAG_DO_STARTU) && t.storyPoints == null,
     needsMeta: true,
     riseIsBad: true,
+  },
+  {
+    key: 'gotowe',
+    label: 'Gotowe do startu',
+    hint:
+      'Poza sprintem, z tagiem DO-STARTU i z wyceną — można je wziąć do sprintu (bez odłożonych).',
+    match: (t, ctx) =>
+      inAudit(t, ctx) && !inSprint(t, ctx) && hasTag(t, TAG_DO_STARTU) && t.storyPoints != null,
+    needsMeta: true,
+    // Wiecej gotowych to dobra wiadomosc — nie kolorujemy wzrostu na bursztynowo.
+    riseIsBad: false,
   },
   {
     key: 'sprint',

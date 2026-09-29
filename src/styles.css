@@ -1443,6 +1443,7 @@ input[type='search']::-webkit-search-decoration {
 .counter-wywiad { --c: var(--accent-orange); }
 .counter-odpowiedzi { --c: var(--accent-amber); }
 .counter-wycena { --c: #a371f7; }
+.counter-gotowe { --c: #2bb8c9; }
 .counter-sprint { --c: var(--accent-green); }
 
 .counter-icon {
@@ -1455,6 +1456,11 @@ input[type='search']::-webkit-search-decoration {
   border-radius: var(--radius);
   color: var(--c);
   background: color-mix(in srgb, var(--c) 16%, transparent);
+}
+
+.counter-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .counter-body {

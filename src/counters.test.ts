@@ -54,6 +54,12 @@ describe('countAll', () => {
     expect(wynik.wycena.count).toBe(1);
   });
 
+  it('gotowe do startu: DO-STARTU poza sprintem Z wycena, dopelnia karte do wyceny', () => {
+    expect(wynik.gotowe.count).toBe(1); // id 4 (tag pisany malymi, 6 SP); id 5 jest w sprincie
+    const ids = lista.filter((t) => t.tags.some((g) => g.toUpperCase() === 'DO-STARTU') && t.sprintId === null);
+    expect(wynik.wycena.count + wynik.gotowe.count).toBe(ids.length);
+  });
+
   it('do analizy: tylko OCZEKUJE z odpowiedzia', () => {
     expect(wynik.odpowiedzi.count).toBe(1);
   });
@@ -74,7 +80,9 @@ describe('countAll', () => {
       zadanie({ id: 22, status: '6', tags: ['DO-STARTU'] }),
     ];
     const w = countAll(odlozone, ctx({ answered: new Set([21]) }));
-    expect([w.wywiad.count, w.epik.count, w.odpowiedzi.count, w.wycena.count]).toEqual([0, 0, 0, 0]);
+    expect([w.wywiad.count, w.epik.count, w.odpowiedzi.count, w.wycena.count, w.gotowe.count]).toEqual([
+      0, 0, 0, 0, 0,
+    ]);
     expect(w.poza.count).toBe(3);
   });
 

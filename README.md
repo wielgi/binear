@@ -112,7 +112,7 @@ also a palette section with usage counts.
 ## Counters
 
 A row of cards under the header answers "what is there to do in the register",
-following the steps of the task audit. Left to right:
+following the steps of the task audit, then what is ready to go. Left to right:
 
 | card | counts |
 | --- | --- |
@@ -121,6 +121,7 @@ following the steps of the task audit. Left to right:
 | **To interview** | open, not deferred, tagged `DO-WYWIADU` |
 | **Answers to read** | tagged `OCZEKUJE-NA-ODPOWIEDZ`, and someone outside IT wrote in the chat after our last round of questions |
 | **To estimate** | outside the sprint, tagged `DO-STARTU`, no story points |
+| **Ready to start** | outside the sprint, not deferred, tagged `DO-STARTU`, with story points — what can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
 
 The numbers are **global**: the whole group, regardless of scope, `Only mine`,
