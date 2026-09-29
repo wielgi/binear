@@ -5671,7 +5671,15 @@ function DetailPanel({
     <aside className="detail" style={{ width }}>
       <div className="detail-resizer" onMouseDown={startResize} title="Przeciągnij, aby zmienić szerokość" />
       <div className="detail-head">
-        <TaskCode code={task.code ?? `#${task.id}`} copy={task.code ?? String(task.id)} onCopied={() => {}} />
+        {/*
+          Numer zadania zostaje widoczny TAKZE po nadaniu kodu IT: kod idzie w
+          galaz i commit, ale numer to adres zadania i to po nim szuka Bitrix.
+          Oba kopiuja sie kliknieciem.
+        */}
+        <span className="detail-codes">
+          <TaskCode code={task.code ?? `#${task.id}`} copy={task.code ?? String(task.id)} onCopied={() => {}} />
+          {task.code && <TaskCode code={`#${task.id}`} copy={String(task.id)} onCopied={() => {}} />}
+        </span>
         <div className="detail-head-right">
           {/*
             Droga w druga strone niz z dziennika do zadania: stad pytamy „co

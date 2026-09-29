@@ -2329,25 +2329,6 @@ input[type='search']::-webkit-search-decoration {
 
 /* Przycisk kopiowania siedzi w slocie kodu i pojawia sie dopiero na hover,
    zeby nie dokladac szumu do kazdego wiersza. */
-.copy-btn {
-  display: none;
-  align-items: center;
-  padding: 0;
-  color: var(--fg-dim);
-  vertical-align: middle;
-}
-
-.row:hover .copy-btn,
-/* Karta nie jest `.row`, wiec bez tego przycisk zostawal ukryty na tablicy. */
-.card:hover .copy-btn,
-.detail-head .copy-btn {
-  display: inline-flex;
-}
-
-.copy-btn:hover {
-  color: var(--fg);
-}
-
 .row-code {
   display: inline-flex;
   align-items: center;
@@ -2355,20 +2336,32 @@ input[type='search']::-webkit-search-decoration {
   /*
    * Stala kolumna trzyma tytuly w jednej linii; waska, zeby kod stal blisko tytulu.
    *
-   * ŚWIADOMY KOMPROMIS: 56px miesci `IT-885` (44px) razem z przyciskiem kopiowania,
-   * ale nie `#116213` (57px) — na wierszu z samym numerem przycisk wypada poza
-   * obcinany obszar i na hover go nie widac. Zostaje tak: kopiuje sie przede
-   * wszystkim numery IT, bo to one ida w nazwe galezi, tytul PR-a i commit.
-   * Poszerzenie kolumny do 74px naprawia przycisk, ale przesuwa KAZDY tytul
-   * o 18px w prawo — placilby caly widok za rzadki przypadek.
+   * 60px = najdluzszy identyfikator: sam numer `#117145` (57px). Czterocyfrowy
+   * kod IT (`IT-1002`, 48,7px) miesci sie tym bardziej. Cyfry sa tabelaryczne,
+   * wiec szerokosc zalezy tylko od LICZBY cyfr. Przycisku kopiowania juz nie ma
+   * (kopiuje klik w sam kod — patrz `TaskCode`), wiec kolumna niesie tylko tekst.
    */
-  flex: 0 0 56px;
+  flex: 0 0 60px;
   font-size: var(--t-mini);
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Klik w kod kopiuje go — kursor i podkreslenie mowia, ze to nie zwykly tekst. */
+.row-code-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  border-radius: var(--radius-sm, 3px);
+}
+
+.row-code-text:hover {
+  color: var(--fg);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
 }
 
 /*
@@ -3514,15 +3507,21 @@ body.resizing {
   box-shadow: inset 0 -1px 0 var(--border);
 }
 
-/*
- * W panelu kod NIE jest kolumna, wiec nie ma czego wyrownywac — a staly slot 56 px
- * z `overflow: hidden` (z listy) obcinal przycisk kopiowania, gdy tekst byl dluzszy.
- * Kod IT ("IT-877") miescil sie z przyciskiem, sam numer ("#116213") juz nie — czyli
- * kopiowanie znikalo dokladnie tam, gdzie jest jedynym identyfikatorem zadania.
- */
+/* W panelu kod NIE jest kolumna, wiec nie ma czego wyrownywac — bez stalego slotu. */
 .detail-head .row-code {
   flex: 0 0 auto;
   overflow: visible;
+}
+
+/* Kod IT i numer zadania obok siebie; numer przygaszony, bo kod jest glowny. */
+.detail-codes {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s6);
+}
+
+.detail-codes > .row-code + .row-code {
+  opacity: 0.75;
 }
 
 .detail-head-right {
@@ -3548,15 +3547,31 @@ body.resizing {
 
 /* Tytul klikalny do edycji — hover rozszerzamy box-shadowem, zeby tlo objelo tekst
    bez dokladania paddingu (inaczej naglowek by podskakiwal). */
-.detail-title {
+/*
+ * Tytul PRZYKLEJONY u gory przewijanego panelu — przy dlugim opisie i
+ * komentarzach dalej widac, czego dotyczy to, co sie czyta.
+ *
+ * Tlo panelu, zeby tresc przewijala sie POD nim, a nie przez niego. Ujemne
+ * marginesy w poziomie + ten sam padding rozciagaja tlo na cala szerokosc
+ * (bez tego po bokach przeswitywalby przewijany tekst). `top` ujemny o padding
+ * panelu, bo przyklejenie liczy sie od krawedzi przewijania, a nie od tresci.
+ */
+/* `.detail-body` w selektorze: regula `.detail-body h1` (margines) jest
+   silniejsza od samej klasy i zjadala ujemne marginesy. */
+.detail-body .detail-title {
+  position: sticky;
+  top: calc(-1 * var(--s5));
+  z-index: 2;
+  margin-left: calc(-1 * var(--s5));
+  margin-right: calc(-1 * var(--s5));
+  padding: var(--s2) var(--s5);
+  background: var(--bg-panel);
   cursor: text;
-  border-radius: var(--radius);
-  transition: background 120ms ease, box-shadow 120ms ease;
+  transition: background 120ms ease;
 }
 
 .detail-title:hover {
   background: var(--bg-active);
-  box-shadow: 0 0 0 4px var(--bg-active);
 }
 
 .detail-title-input {
@@ -5014,7 +5029,7 @@ a.mention:hover {
   }
 
   .row-code {
-    flex-basis: 56px;
+    flex-basis: 60px;
   }
 
   /* Zostaje sama kropka marki — nazwa i tak jest w tytule okna. */
@@ -5818,19 +5833,6 @@ a.mention:hover {
 }
 
 /*
- * Pole najechania siegajace poza pasek. Sam pasek ma 4 px — trafienie w niego
- * mysza jest przypadkiem, a to on ma odpowiadac na pytanie "czyje to SP".
- */
-.plan-load-seg::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -8px;
-  bottom: -8px;
-}
-
-/*
  * Praca PRZENIESIONA — w kolorze osoby, ale w kreski: to nie jej decyzja z tego
  * spotkania, tylko zaleglosc, ktora i tak zajmie jej czas. Kolor musi zostac,
  * bo pasek odpowiada na „czyje to".
@@ -5871,6 +5873,19 @@ a.mention:hover {
 
 .plan-load-mark-ponad {
   background: var(--danger);
+}
+
+/*
+ * Pole najechania siegajace poza pasek. Sam pasek ma 4 px — trafienie w niego
+ * mysza jest przypadkiem, a to on ma odpowiadac na pytanie "czyje to SP".
+ */
+.plan-load-seg::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8px;
+  bottom: -8px;
 }
 
 /*

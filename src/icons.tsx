@@ -638,21 +638,6 @@ export function ClipIcon() {
   );
 }
 
-export function CopyIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
-      <rect x="5.5" y="2.5" width="8" height="8" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path
-        d="M10.5 13.5h-7a1 1 0 0 1-1-1v-7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 export function SearchIcon() {
   return (
     <svg viewBox="0 0 14 14" width="13" height="13" aria-hidden>

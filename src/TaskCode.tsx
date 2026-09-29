@@ -1,11 +1,17 @@
 import { useState } from 'react';
 
-import { CheckIcon, CopyIcon } from './icons';
+import { HoverNote } from './HoverNote';
 
 /**
- * Kod zadania z przyciskiem kopiowania. Kopiujemy sam kod (IT-749), bo to jego
- * wkleja sie w nazwe galezi, tytul PR-a i commit — czyli w to, po czym
+ * Kod zadania, ktory kopiuje sie KLIKNIECIEM. Kopiujemy sam kod (IT-749), bo to
+ * jego wkleja sie w nazwe galezi, tytul PR-a i commit — czyli w to, po czym
  * `bitrix_sync.py` rozpoznaje zadanie.
+ *
+ * Bez osobnego przycisku. Byl — ikonka obok kodu — ale kolumna kodu ma stala
+ * szerokosc i od IT-1000 (a przy samym numerze zawsze) przycisk wystawal poza
+ * nia i widac bylo jego skrawek. Poszerzanie kolumny przesuwalo kazdy tytul.
+ * Klikniecie w sam kod nie zajmuje miejsca, a karta pod kursorem mowi, co sie
+ * stanie, i potwierdza, ze sie stalo.
  *
  * Wspolny dla listy i tablicy: karta ma pokazywac to samo, co wiersz (parytet
  * widokow), a Board nie moze importowac z App.tsx — wyszedlby cykl importow.
@@ -27,30 +33,39 @@ export function TaskCode({
   copy?: string;
   onCopied: (text: string) => void;
 }) {
-  const [done, setDone] = useState(false);
+  /* `null` = schowek odmowil. Cisza znaczylaby wtedy „skopiowane". */
+  const [done, setDone] = useState<boolean | null>(false);
+  const text = copy ?? code;
 
   return (
-    <span className="row-code">
-      {code}
-      <button
-        className="copy-btn"
-        title={`Kopiuj ${copy ?? code}`}
+    <HoverNote
+      className="row-code"
+      value={done === null ? 'Nie udało się skopiować' : done ? 'Skopiowano' : 'Kliknij, żeby skopiować'}
+      note={text}
+    >
+      <span
+        className="row-code-text"
+        role="button"
         onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => {
+          /* Klik w kod kopiuje — nie otwiera zadania, jak klik w reszte wiersza. */
           e.stopPropagation();
           void navigator.clipboard
-            .writeText(copy ?? code)
+            .writeText(text)
             .then(() => {
               setDone(true);
               setTimeout(() => setDone(false), 1200);
-              onCopied(copy ?? code);
+              onCopied(text);
             })
-            .catch(() => onCopied(''));
+            .catch(() => {
+              setDone(null);
+              setTimeout(() => setDone(false), 1200);
+              onCopied('');
+            });
         }}
       >
-        {done ? <CheckIcon /> : <CopyIcon />}
-      </button>
-    </span>
+        {code}
+      </span>
+    </HoverNote>
   );
 }
-
