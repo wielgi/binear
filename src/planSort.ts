@@ -7,6 +7,7 @@
  * byl niewidoczny w kodzie, a widoczny dopiero w kolejnosci wierszy.
  */
 import type { Task } from './bitrix';
+import { hasTag, TAG_STRATEGIA } from './counters';
 
 export type Cmp = (a: Task, b: Task) => number;
 
@@ -39,8 +40,52 @@ const deadlineTime = (t: Task): number => {
   return Number.isNaN(ms) ? Number.MAX_SAFE_INTEGER : ms;
 };
 
+/** Ma tag STRATEGIA — ranga 0, inaczej 1. Strategia idzie na sam poczatek, przed wszystkim innym. */
+const strategiaRank = (t: Task) => (hasTag(t, TAG_STRATEGIA) ? 0 : 1);
+
 /** Ma tag „Wysoki" (bez wzgledu na wielkosc liter) — ranga 0, inaczej 1. */
 const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki') ? 0 : 1);
+
+/**
+ * Domyslna kolejnosc waznosci: STRATEGIA na samej gorze (o jej kolejnosci decyduje rada, wiec nie
+ * miesza sie z reszta), potem priorytet Bitriksa, tag „Wysoki", okres zwrotu rosnaco (ZWROT-3 przed
+ * ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu na koncu) i story pointy malejaco.
+ */
+export const PLAN_SORT_DOMYSLNY: PlanSortLevel[] = [
+  { by: 'strategia', dir: 'asc' },
+  { by: 'priority', dir: 'asc' },
+  { by: 'wysoki', dir: 'asc' },
+  { by: 'zwrot', dir: 'asc' },
+  { by: 'sp', dir: 'desc' },
+];
+
+/** Dawne domyslne stosy — kto ich nie ruszal, dostaje nowy domyslny, a nie zamrozony stary. */
+const STARE_DOMYSLNE: PlanSortLevel[][] = [
+  [
+    { by: 'priority', dir: 'asc' },
+    { by: 'wysoki', dir: 'asc' },
+    { by: 'sp', dir: 'desc' },
+  ],
+  [
+    { by: 'priority', dir: 'asc' },
+    { by: 'wysoki', dir: 'asc' },
+    { by: 'zwrot', dir: 'asc' },
+    { by: 'sp', dir: 'desc' },
+  ],
+];
+
+const takSamo = (a: PlanSortLevel[], b: PlanSortLevel[]) =>
+  a.length === b.length && a.every((l, i) => l.by === b[i].by && l.dir === b[i].dir);
+
+/**
+ * Zapisane w przegladarce sortowanie planowania. Zapisany jest CALY stos, wiec kto nigdy go nie
+ * zmienil, mial w localStorage stary domyslny — i nowy poziom (STRATEGIA na gorze, zwrot) nigdy by do
+ * niego nie dotarl. Stary domyslny zastepujemy nowym; stos ulozony przez uzytkownika zostaje jak byl.
+ */
+export function migratePlanSort(saved: PlanSortLevel[] | undefined): PlanSortLevel[] | undefined {
+  if (!saved) return undefined;
+  return STARE_DOMYSLNE.some((s) => takSamo(saved, s)) ? PLAN_SORT_DOMYSLNY : saved;
+}
 
 /**
  * Komparator planowania dla wybranego stosu.
@@ -77,7 +122,9 @@ export function planComparator(
     const f: Cmp =
       lvl.by === 'stage'
         ? (a, b) => deps.stageRank(a) - deps.stageRank(b)
-        : lvl.by === 'wysoki'
+        : lvl.by === 'strategia'
+          ? (a, b) => strategiaRank(a) - strategiaRank(b)
+          : lvl.by === 'wysoki'
           ? (a, b) => wysokiRank(a) - wysokiRank(b)
           : lvl.by === 'sp'
             ? (a, b) => (a.storyPoints ?? 0) - (b.storyPoints ?? 0)

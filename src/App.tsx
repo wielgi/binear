@@ -174,7 +174,7 @@ import { TaskCode } from './TaskCode';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
-import { planComparator } from './planSort';
+import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import {
   COUNTERS,
@@ -622,14 +622,10 @@ const DEFAULT_SETTINGS: Settings = {
   showDone: false,
   planDone: false,
   planReview: true,
-  /* Domyslna kolejnosc waznosci — plomien rosnaco (ranga 0 = wysoki), tag tak
-     samo, a story pointy malejaco, bo tu wiecej znaczy wazniej. */
-  planSort: [
-    { by: 'priority', dir: 'asc' },
-    { by: 'wysoki', dir: 'asc' },
-    { by: 'zwrot', dir: 'asc' },
-    { by: 'sp', dir: 'desc' },
-  ],
+  /* Domyslna kolejnosc waznosci: STRATEGIA na gorze, potem plomien rosnaco (ranga 0 = wysoki), tag
+     tak samo, okres zwrotu rosnaco, a story pointy malejaco, bo tu wiecej znaczy wazniej.
+     Zrodlo prawdy: PLAN_SORT_DOMYSLNY w planSort.ts (razem z migracja starego domyslnego). */
+  planSort: PLAN_SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[],
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
   listTint: 'fade',
   deadlineLook: 'mark',
@@ -667,7 +663,13 @@ function loadSettings(): Settings {
     if (!raw) return DEFAULT_SETTINGS;
     const saved = JSON.parse(raw) as Partial<Settings>;
     // Scalamy z domyslnymi, zeby dolozenie nowego ustawienia nie wywrocilo startu.
-    return { ...DEFAULT_SETTINGS, ...saved, sort: { ...DEFAULT_SETTINGS.sort, ...saved.sort } };
+    return {
+      ...DEFAULT_SETTINGS,
+      ...saved,
+      sort: { ...DEFAULT_SETTINGS.sort, ...saved.sort },
+      // Zapisany jest caly stos — stary domyslny zamieniamy na nowy (STRATEGIA na gorze, zwrot).
+      planSort: (migratePlanSort(saved.planSort) as Settings['planSort'] | undefined) ?? DEFAULT_SETTINGS.planSort,
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -1803,7 +1805,7 @@ type Dir = 'asc' | 'desc';
  * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
  * na liscie i tak grupuje sie po etapie.
  */
-type PlanSortBy = SortBy | 'stage' | 'wysoki' | 'sp' | 'zwrot';
+type PlanSortBy = SortBy | 'stage' | 'strategia' | 'wysoki' | 'sp' | 'zwrot';
 
 const SORTS: { key: SortBy; label: string }[] = [
   { key: 'updated', label: 'Zaktualizowane' },
@@ -1820,6 +1822,7 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
    * pozycje bylyby niewidoczne w liscie i nie dalo by sie poprawic zadnego z nich
    * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
    */
+  { key: 'strategia', label: 'Tag STRATEGIA' },
   { key: 'wysoki', label: 'Tag „Wysoki”' },
   /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), strategia, potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
   { key: 'zwrot', label: 'Okres zwrotu' },

@@ -178,11 +178,18 @@ be read at all (no `im` scope) they stay on `…`.
 
 Missing any of the above puts the task on **To estimate**, not **Ready to start**.
 
-**Planning: sort by payback.** The planning view has a new sort level, **Okres zwrotu**,
-and it sits in the default stack after the `Wysoki` tag: `WYMOG` first (nearest deadline
-first, then those without a deadline), then `STRATEGIA` as a block of its own (the board decides
-their order, so no fake band), then `ZWROT-3 → 6 → 12 → 12+`, and tasks without a payback tag last. Within a band the next level (story points) decides.
-Anyone who saved their own sort keeps it — add the level from the sort menu.
+**Planning: sort order.** The default stack is now **`STRATEGIA` first**, then the Bitrix priority
+(flame), the `Wysoki` tag, **payback ascending**, and story points descending. `STRATEGIA` sits above
+everything, flame and `Wysoki` included: the board decides its order, so it doesn't mix with the rest
+(several of them fall through to the next level). Payback is read from the tags — `ZWROT-3`, then
+`ZWROT-6`, `ZWROT-12`, `ZWROT-12+` — with `WYMOG` first (nearest deadline first) and tasks without a
+payback tag last. Both are sort levels (**Tag STRATEGIA**, **Okres zwrotu**) you can reorder, reverse or
+drop from the sort menu. Sorting hides nothing: the register still shows every `DO-STARTU` task, also
+those with no payback worked out yet.
+
+The sort is saved in the browser as a whole stack, so someone who never touched it would keep the old
+default for good. A saved stack that is exactly one of the old defaults is replaced by the new one; a
+stack you arranged yourself is left alone.
 
 **Answers.** The anchor is the last comment by IT that looks like interview
 questions (a line starting with `[B]1.`). An answer is a later message from someone outside IT that has substance: numbered

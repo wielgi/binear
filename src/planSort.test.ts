@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from './bitrix';
 import { paybackRank } from './counters';
-import { planComparator, stackComparator, type Cmp } from './planSort';
+import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator, stackComparator, type Cmp } from './planSort';
 
 /** Zadanie z samymi polami, ktore czyta sortowanie planowania. */
 const task = (id: number, p: Partial<Task> = {}): Task =>
@@ -153,5 +153,73 @@ describe('sortowanie po zwrocie', () => {
   it('odwrocony kierunek daje najgorszy zwrot na gorze', () => {
     const tasks = [task(2, { tags: ['ZWROT-3'] }), task(3, { tags: ['ZWROT-12+'] }), task(5)];
     expect(ids(tasks, [{ by: 'zwrot', dir: 'desc' }], d)).toEqual([5, 3, 2]);
+  });
+});
+
+describe('domyslna kolejnosc planowania: STRATEGIA na gorze, potem zwrot rosnaco', () => {
+  const d = { ...deps, paybackRank };
+
+  it('domyslny stos to strategia, priorytet, Wysoki, zwrot, SP', () => {
+    expect(PLAN_SORT_DOMYSLNY.map((l) => l.by)).toEqual(['strategia', 'priority', 'wysoki', 'zwrot', 'sp']);
+  });
+
+  it('STRATEGIA jest nad wszystkim — takze nad plomieniem i tagiem Wysoki', () => {
+    const tasks = [
+      task(1, { priority: '2', tags: ['ZWROT-3'] }),
+      task(2, { tags: ['Wysoki', 'ZWROT-3'] }),
+      task(3, { priority: '0', tags: ['STRATEGIA'] }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 1, 2]);
+  });
+
+  it('po strategii i priorytecie porzadkuje zwrot rosnaco: ZWROT-3, 6, 12, 12+, a zadania bez zwrotu zostaja na koncu', () => {
+    const tasks = [
+      task(1, { tags: ['ZWROT-12+'] }),
+      task(2),
+      task(3, { tags: ['ZWROT-3'] }),
+      task(4, { tags: ['ZWROT-12'] }),
+      task(5, { tags: ['ZWROT-6'] }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 5, 4, 1, 2]);
+  });
+
+  it('sortowanie niczego nie ukrywa — zadania bez wyliczonego zwrotu tez sa na liscie', () => {
+    const tasks = [task(1), task(2, { tags: ['ZWROT-6'] }), task(3, { tags: ['STRATEGIA'] })];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toHaveLength(3);
+  });
+
+  it('kilka strategii: kolejny poziom stosu rozstrzyga (o kolejnosci decyduje rada, nie zwrot)', () => {
+    const tasks = [task(1, { tags: ['STRATEGIA'], priority: '0' }), task(2, { tags: ['STRATEGIA'], priority: '2' })];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
+  });
+
+  it('poziom strategia mozna odwrocic albo wyjac ze stosu', () => {
+    const tasks = [task(1, { tags: ['STRATEGIA'] }), task(2)];
+    expect(ids(tasks, [{ by: 'strategia', dir: 'desc' }], d)).toEqual([2, 1]);
+    expect(ids(tasks, [{ by: 'sp', dir: 'desc' }], d)).toEqual([2, 1]); // remis → id malejaco
+  });
+});
+
+describe('migratePlanSort', () => {
+  const STARY = [
+    { by: 'priority', dir: 'asc' as const },
+    { by: 'wysoki', dir: 'asc' as const },
+    { by: 'sp', dir: 'desc' as const },
+  ];
+
+  it('stary domyslny (zapisany w przegladarce) zamienia na nowy', () => {
+    expect(migratePlanSort(STARY)).toEqual(PLAN_SORT_DOMYSLNY);
+    expect(migratePlanSort([...STARY.slice(0, 2), { by: 'zwrot', dir: 'asc' as const }, STARY[2]])).toEqual(PLAN_SORT_DOMYSLNY);
+  });
+
+  it('stos ulozony przez uzytkownika zostaje bez zmian', () => {
+    const wlasny = [{ by: 'sp', dir: 'desc' as const }, { by: 'deadline', dir: 'asc' as const }];
+    expect(migratePlanSort(wlasny)).toBe(wlasny);
+    const odwrocony = [{ ...STARY[0], dir: 'desc' as const }, STARY[1], STARY[2]];
+    expect(migratePlanSort(odwrocony)).toBe(odwrocony);
+  });
+
+  it('brak zapisu → brak wartosci (wchodzi domyslny z ustawien)', () => {
+    expect(migratePlanSort(undefined)).toBeUndefined();
   });
 });
