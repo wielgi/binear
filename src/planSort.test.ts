@@ -132,6 +132,17 @@ describe('sortowanie po zwrocie', () => {
     expect(ids(tasks, zwrot, d)).toEqual([11, 10, 12, 2]);
   });
 
+  it('strategia osobnym blokiem tuz po wymogach, przed przedzialami', () => {
+    const tasks = [
+      task(2, { tags: ['ZWROT-3'] }),
+      task(20, { tags: ['STRATEGIA'] }),
+      task(10, { tags: ['WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
+      task(3, { tags: ['ZWROT-12+'] }),
+      task(5),
+    ];
+    expect(ids(tasks, zwrot, d)).toEqual([10, 20, 2, 3, 5]);
+  });
+
   it('w tym samym przedziale rozstrzyga kolejny poziom stosu', () => {
     const tasks = [task(2, { tags: ['ZWROT-3'], storyPoints: 2 }), task(7, { tags: ['ZWROT-3'], storyPoints: 9 })];
     expect(

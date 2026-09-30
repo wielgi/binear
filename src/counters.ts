@@ -59,6 +59,12 @@ export const TAGS_KONCEPT = ['KONCEPT', 'KONCEPCJA'];
  * i już istnieje jako tag; pozostałe to nowe tagi z zasad wartości zadań.
  */
 export const TAG_WYMOG = 'WYMOG';
+/**
+ * Zadanie strategiczne, którego korzyści nie da się przeliczyć na czas ani pieniądze. Nie ma okresu
+ * zwrotu ani tagu ZWROT — zamiast tego ma jedno zdanie uzasadnienia w wiadomości WARTOŚĆ. Nadaje je
+ * wyłącznie kierownik IT albo zarząd; o kolejności decyduje rada.
+ */
+export const TAG_STRATEGIA = 'STRATEGIA';
 export const TAGS_KATEGORIA = [
   TAG_BUG,
   'OSZCZEDNOSC',
@@ -67,6 +73,7 @@ export const TAGS_KATEGORIA = [
   'ANALITYKA',
   'UTRZYMANIE',
   TAG_WYMOG,
+  TAG_STRATEGIA,
 ];
 
 /** Bitrix nie rozroznia wielkosci liter w tagach — „do-startu" to ten sam tag. */
@@ -80,17 +87,27 @@ export interface CounterCtx {
   /** Zadania OCZEKUJE-NA-ODPOWIEDZ z odpowiedzia po naszych pytaniach; `null` = jeszcze liczymy. */
   answered: ReadonlySet<number> | null;
   /**
-   * Zadania oznaczone jako rozpoznanie (albo analiza błędu): wiadomość WYCENA ma dopisek „Rozpoznanie —
-   * bez okresu zwrotu". Takie zadanie dostaje DO-STARTU bez kategorii i bez okresu zwrotu — wartość
-   * liczymy dopiero przy właściwym zadaniu, które z niego powstanie. `null` = jeszcze czytamy czaty;
-   * czytamy je tylko dla zadań, które mieszczą się w rozpoznaniu (do 4 h) i nie mają kompletu w tagach.
+   * Fakty, które widać tylko w czacie zadania; `null` = jeszcze czytamy czaty. Czytamy je wyłącznie
+   * dla zadań, którym do kompletu brakuje czegoś, co może tam być (patrz `needsChat`).
    */
-  recon: ReadonlySet<number> | null;
+  chat: ChatFacts | null;
+}
+
+/**
+ * Co wiemy z czatów zadań DO-STARTU:
+ *  - `recon` — oznaczone jako rozpoznanie albo analiza błędu (dopisek w wiadomości WYCENA); takie
+ *    zadanie jest gotowe bez kategorii i bez okresu zwrotu, bo wartość liczymy dopiero przy właściwym
+ *    zadaniu, które z niego powstanie,
+ *  - `strategic` — zadania STRATEGIA, które mają już wiadomość WARTOŚĆ z uzasadnieniem.
+ */
+export interface ChatFacts {
+  recon: ReadonlySet<number>;
+  strategic: ReadonlySet<number>;
 }
 
 type CounterTask = Pick<
   Task,
-  'id' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId' | 'deadline'
+  'id' | 'title' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId' | 'deadline'
 >;
 
 export interface CounterDef {
@@ -102,7 +119,7 @@ export interface CounterDef {
   /** Liczba zalezy od story pointow — dopoki nie doszly, jest niepewna. */
   needsMeta?: boolean;
   /** Liczba zalezy tez od rozpoznan (dopisek w wiadomosci WYCENA w czacie) — niepewna, dopoki czaty sie czytaja. */
-  needsRecon?: boolean;
+  needsChatFacts?: boolean;
   /** Karta istnieje tylko w projekcie ze sprintami (scrum). */
   needsSprint?: boolean;
   /**
@@ -140,8 +157,9 @@ const wasAnswered = (t: CounterTask, ctx: CounterCtx) => ctx.answered?.has(t.id)
 export const hasCategory = (t: Pick<CounterTask, 'tags'>): boolean =>
   TAGS_KATEGORIA.some((g) => hasTag(t, g));
 
-/** Do startu potrzeba okresu zwrotu, chyba że zadanie jest wymogiem (prawo, umowa) — ono ma termin. */
-export const needsPayback = (t: Pick<CounterTask, 'tags'>): boolean => !hasTag(t, TAG_WYMOG);
+/** Wymóg i strategia nie mają okresu zwrotu — jedno ma termin, drugie uzasadnienie. */
+export const needsPayback = (t: Pick<CounterTask, 'tags'>): boolean =>
+  !hasTag(t, TAG_WYMOG) && !hasTag(t, TAG_STRATEGIA);
 
 /**
  * Komplet z SAMEJ listy zadań (bez czatu): wycena, kategoria i — zależnie od kategorii —
@@ -149,28 +167,40 @@ export const needsPayback = (t: Pick<CounterTask, 'tags'>): boolean => !hasTag(t
  *
  *  - zwykłe zadanie: tag okresu zwrotu (ZWROT-3 / ZWROT-6 / ZWROT-12 / ZWROT-12+), który
  *    `wartosc.mjs` kopiuje z przedziału w wiadomości WARTOŚĆ,
- *  - WYMOG: termin (pole „Termin" zadania) — wymóg nie ma rankingu, ma datę.
+ *  - WYMOG: termin (pole „Termin" zadania) — wymóg nie ma rankingu, ma datę,
+ *  - STRATEGIA: z tagów sama się nie kompletuje — uzasadnienie siedzi w czacie (`ChatFacts.strategic`).
  */
 export const isCompleteByTags = (t: CounterTask): boolean =>
   t.storyPoints != null &&
   hasCategory(t) &&
+  !hasTag(t, TAG_STRATEGIA) &&
   (needsPayback(t) ? paybackBand(t) !== null : t.deadline != null);
 
 /**
- * Rozpoznanie mieści się w 4 godzinach (`gotowe.mjs --rozpoznanie`) — tylko takie zadania,
- * którym brakuje kompletu w tagach, mogą okazać się rozpoznaniem, więc tylko ich czat czytamy.
+ * Rozpoznanie mieści się w 4 godzinach (`gotowe.mjs --rozpoznanie`). Poznajemy je po dopisku w
+ * wiadomości WYCENA albo — jak w audycie — po tytule („rozpoznanie…", „weryfikacja…") przy wycenie do 4 h.
  */
 export const RECON_MAX_HOURS = 4;
-export const maybeRecon = (t: CounterTask): boolean =>
-  t.storyPoints != null && t.storyPoints <= RECON_MAX_HOURS && !isCompleteByTags(t);
+export const isReconByTitle = (t: Pick<CounterTask, 'title' | 'storyPoints'>): boolean =>
+  t.storyPoints != null && t.storyPoints <= RECON_MAX_HOURS && /rozpoznani|weryfikacj/i.test(t.title);
+
+/** Zadanie, którego kompletność rozstrzyga czat: może być rozpoznaniem albo strategią z uzasadnieniem. */
+export const needsChat = (t: CounterTask): boolean =>
+  t.storyPoints != null &&
+  !isReconByTitle(t) &&
+  ((t.storyPoints <= RECON_MAX_HOURS && !isCompleteByTags(t)) || hasTag(t, TAG_STRATEGIA));
 
 /**
- * Czy zadanie z DO-STARTU ma komplet: kompletne w tagach albo oznaczone jako rozpoznanie.
- * Dopóki czaty się czytają (`recon === null`), zadanie mieszczące się w rozpoznaniu nie jest
- * jeszcze ani kompletne, ani niekompletne — kafelki dostają wtedy znak „liczę" (`needsRecon`).
+ * Czy zadanie z DO-STARTU ma komplet: kompletne w tagach, rozpoznanie (po tytule albo z czatu) albo
+ * strategia z uzasadnieniem. Dopóki czaty się czytają (`chat === null`), zadanie, które od nich zależy,
+ * nie jest jeszcze ani kompletne, ani niekompletne — kafelki dostają wtedy znak „liczę" (`needsChatFacts`).
  */
 const isComplete = (t: CounterTask, ctx: CounterCtx) =>
-  isCompleteByTags(t) || (t.storyPoints != null && (ctx.recon?.has(t.id) ?? false));
+  isCompleteByTags(t) ||
+  (t.storyPoints != null &&
+    (isReconByTitle(t) ||
+      (ctx.chat?.recon.has(t.id) ?? false) ||
+      (hasTag(t, TAG_STRATEGIA) && (ctx.chat?.strategic.has(t.id) ?? false))));
 
 /*
  * Kolejnosc = kolejnosc pracy w audycie: skala rejestru, potem stany od „trzeba zapytac"
@@ -223,10 +253,11 @@ export const COUNTERS: CounterDef[] = [
     hint:
       'Poza sprintem, z tagiem DO-STARTU, ale bez kompletu: brakuje story pointów, ' +
       'kategorii korzyści albo tagu okresu zwrotu (ZWROT-3 … ZWROT-12+). WYMOG potrzebuje ' +
-      'terminu zamiast zwrotu, rozpoznanie nie potrzebuje żadnego z nich — uzupełnij wycenę i wartość.',
+      'terminu zamiast zwrotu, STRATEGIA — uzasadnienia w wiadomości WARTOŚĆ, rozpoznanie nie ' +
+      'potrzebuje żadnego z nich — uzupełnij wycenę i wartość.',
     match: (t, ctx) => outside(t, ctx) && isStartu(t) && !isComplete(t, ctx),
     needsMeta: true,
-    needsRecon: true,
+    needsChatFacts: true,
     riseIsBad: true,
   },
   {
@@ -235,10 +266,11 @@ export const COUNTERS: CounterDef[] = [
     label: 'Gotowe do startu',
     hint:
       'Poza sprintem, z tagiem DO-STARTU i kompletem: wycena, kategoria korzyści i okres ' +
-      'zwrotu (WYMOG: termin; rozpoznanie: sama wycena) — można je wziąć do sprintu.',
+      'zwrotu (WYMOG: termin; STRATEGIA: uzasadnienie; rozpoznanie: sama wycena) — można je wziąć ' +
+      'do sprintu.',
     match: (t, ctx) => outside(t, ctx) && isStartu(t) && isComplete(t, ctx),
     needsMeta: true,
-    needsRecon: true,
+    needsChatFacts: true,
     // Wiecej gotowych to dobra wiadomosc — nie kolorujemy wzrostu na bursztynowo.
     riseIsBad: false,
   },
@@ -375,25 +407,42 @@ export function paybackBand(t: Pick<Task, 'tags'>): PaybackBand | null {
  * Miejsce zadania w sortowaniu „po zwrocie" — mniejsza liczba idzie wyżej.
  *
  *   0    WYMOG (ma termin, wchodzi poza rankingiem, więc na początku)
- *   1–4  przedział: do 3, 3–6, 6–12, ponad 12 miesięcy
- *   5    brak okresu zwrotu (jeszcze niepoliczony) — na końcu
+ *   1    STRATEGIA (bez liczb, o kolejności decyduje rada — więc osobnym blokiem tuż po wymogach,
+ *        a nie wciśnięta w któryś przedział)
+ *   2–5  przedział: do 3, 3–6, 6–12, ponad 12 miesięcy
+ *   6    brak okresu zwrotu (jeszcze niepoliczony) — na końcu
  */
 export function paybackRank(t: Pick<Task, 'tags'>): number {
   if (hasTag(t, TAG_WYMOG)) return 0;
+  if (hasTag(t, TAG_STRATEGIA)) return 1;
   const band = paybackBand(t);
-  return band ? 1 + PAYBACK_BANDS.findIndex((b) => b.key === band) : PAYBACK_BANDS.length + 1;
+  return band ? 2 + PAYBACK_BANDS.findIndex((b) => b.key === band) : PAYBACK_BANDS.length + 2;
 }
 
 /**
  * Dopisek w wiadomości WYCENA przy rozpoznaniu i analizie błędu (`gotowe.mjs --rozpoznanie`):
- * „Rozpoznanie — bez okresu zwrotu". Po nim krok 9 audytu pomija zadanie, a binear uznaje je
- * za komplet bez kategorii i zwrotu.
+ * „Rozpoznanie — bez okresu zwrotu". Starsze wyceny nie mają dopisku, tylko uzasadnienie zaczynające
+ * się od „Rozpoznanie / Weryfikacja / Przegląd kodu / Sprawdzenie" — audyt czyta obie postaci, więc
+ * my też. Po nich krok 9 audytu pomija zadanie, a binear uznaje je za komplet bez kategorii i zwrotu.
  */
-export const RECON_MARKER = /rozpoznanie\s*[-–—]\s*bez okresu zwrotu/i;
+export const RECON_MARKER =
+  /rozpoznanie\s*[-–—]\s*bez okresu zwrotu|co obejmuje ta wycena\s*(?:rozpoznanie|weryfikacja|przegl[ąa]d kodu|sprawdzenie)/i;
 
 /** Czy któraś z wiadomości (system pomijamy) oznacza zadanie jako rozpoznanie. */
 export function hasReconMarker(messages: ChatMessage[]): boolean {
   return messages.some((m) => m.authorId > 0 && RECON_MARKER.test(plainBody(m.text)));
+}
+
+/**
+ * Wiadomość „WARTOŚĆ" w czacie zadania — początek wiadomości po zdjęciu znaczników, bez względu na
+ * wielkość liter i polskie znaki: „WARTOŚĆ: strategia", „[B]Wartość[/B] …". Dla STRATEGII to jedyny
+ * ślad uzasadnienia, bo takie zadanie nie ma tagu ZWROT.
+ */
+export const VALUE_MESSAGE = /^warto[śs][ćc](?=$|[\s:.,;\-–—])/i;
+
+/** Czy któraś z wiadomości (system pomijamy) to wiadomość WARTOŚĆ. */
+export function hasValueMessage(messages: ChatMessage[]): boolean {
+  return messages.some((m) => m.authorId > 0 && VALUE_MESSAGE.test(plainBody(m.text)));
 }
 
 /**

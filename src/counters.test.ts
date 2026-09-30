@@ -4,8 +4,10 @@ import {
   countAll,
   COUNTERS,
   hasReconMarker,
+  hasValueMessage,
   isCompleteByTags,
-  maybeRecon,
+  isReconByTitle,
+  needsChat,
   paybackBand,
   paybackRank,
   isSubstantiveAnswer,
@@ -23,6 +25,7 @@ const zadanie = (o: Partial<Parameters<typeof countAll>[0][number]> & { id: numb
   tags: [],
   storyPoints: null,
   epicId: 141,
+  title: 'Zadanie',
   deadline: null as string | null,
   ...o,
 });
@@ -31,7 +34,7 @@ const ctx = (o: Partial<CounterCtx> = {}): CounterCtx => ({
   sprintId: 70,
   closed: new Set(['5']),
   answered: new Set(),
-  recon: new Set<number>(),
+  chat: { recon: new Set<number>(), strategic: new Set<number>() } as CounterCtx['chat'],
   ...o,
 });
 
@@ -178,7 +181,7 @@ describe('countAll', () => {
     const rozp = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
       zadanie({ id: 200, tags: ['DO-STARTU'], storyPoints: 4, ...o });
     const stan = (t: ReturnType<typeof zadanie>, recon: Set<number> | null) => {
-      const w = countAll([t], ctx({ recon }));
+      const w = countAll([t], ctx({ chat: recon ? { recon, strategic: new Set() } : null }));
       return [w.wycena.count, w.gotowe.count];
     };
 
@@ -199,13 +202,13 @@ describe('countAll', () => {
     });
 
     it('do 4 h — tylko takie zadania czyta sie z czatu, powyzej to nie rozpoznanie', () => {
-      expect(maybeRecon(rozp({ storyPoints: 4 }))).toBe(true);
-      expect(maybeRecon(rozp({ storyPoints: 6 }))).toBe(false);
-      expect(maybeRecon(rozp({ storyPoints: null }))).toBe(false);
+      expect(needsChat(rozp({ storyPoints: 4 }))).toBe(true);
+      expect(needsChat(rozp({ storyPoints: 6 }))).toBe(false);
+      expect(needsChat(rozp({ storyPoints: null }))).toBe(false);
     });
 
     it('zadanie z kompletem w tagach nie jest kandydatem — jego czatu nie czytamy', () => {
-      expect(maybeRecon(rozp({ tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(false);
+      expect(needsChat(rozp({ tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(false);
       expect(isCompleteByTags(rozp({ tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(true);
     });
 
@@ -214,7 +217,7 @@ describe('countAll', () => {
     });
 
     it('kafelki zalezne od rozpoznan sa oznaczone, zeby ekran pokazal „liczę” zamiast zera', () => {
-      expect(COUNTERS.filter((d) => d.needsRecon).map((d) => d.key)).toEqual(['wycena', 'gotowe']);
+      expect(COUNTERS.filter((d) => d.needsChatFacts).map((d) => d.key)).toEqual(['wycena', 'gotowe']);
     });
 
     it('rozpoznaje dopisek w wiadomosci WYCENA, takze z kursywa i roznymi myslnikami', () => {
@@ -225,6 +228,62 @@ describe('countAll', () => {
       expect(hasReconMarker([m('WYCENA: 4 h. rozpoznanie – bez okresu zwrotu')])).toBe(true);
       expect(hasReconMarker([m('WYCENA: 4 h')])).toBe(false);
       expect(hasReconMarker([m(wycena, 0)])).toBe(false);
+    });
+
+    it('rozpoznaje tez starsza postac: uzasadnienie zaczynajace sie od Rozpoznanie / Weryfikacja', () => {
+      const m = (text: string): ChatMessage => ({ id: 1, authorId: 5, text });
+      for (const slowo of ['Rozpoznanie', 'Weryfikacja', 'Przegląd kodu', 'Sprawdzenie']) {
+        expect(hasReconMarker([m(`[B]WYCENA: 3 h[/B]\n\n[B]Co obejmuje ta wycena[/B]\n${slowo} tematu.`)])).toBe(true);
+      }
+      expect(hasReconMarker([m('[B]Co obejmuje ta wycena[/B]\nNowy ekran listy.')])).toBe(false);
+    });
+
+    it('do 4 h z „rozpoznanie” albo „weryfikacja” w tytule to rozpoznanie bez czytania czatu', () => {
+      expect(isReconByTitle({ title: 'Rozpoznanie: sync stanów', storyPoints: 4 })).toBe(true);
+      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 3 })).toBe(true);
+      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 8 })).toBe(false);
+      expect(isReconByTitle({ title: 'Nowy ekran', storyPoints: 2 })).toBe(false);
+      expect(needsChat(rozp({ title: 'Rozpoznanie: sync stanów' }))).toBe(false);
+      expect(stan(rozp({ title: 'Rozpoznanie: sync stanów' }), new Set())).toEqual([0, 1]);
+    });
+  });
+
+  describe('STRATEGIA: bez okresu zwrotu, z uzasadnieniem w wiadomosci WARTOSC', () => {
+    const strat = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
+      zadanie({ id: 300, tags: ['DO-STARTU', 'STRATEGIA'], storyPoints: 16, ...o });
+    const stan = (t: ReturnType<typeof zadanie>, strategic: Set<number> | null) => {
+      const w = countAll([t], ctx({ chat: strategic ? { recon: new Set(), strategic } : null }));
+      return [w.wycena.count, w.gotowe.count];
+    };
+
+    it('kategoria + wiadomosc WARTOSC → gotowe, bez tagu ZWROT', () => {
+      expect(stan(strat(), new Set([300]))).toEqual([0, 1]);
+    });
+
+    it('sam tag STRATEGIA bez uzasadnienia to jeszcze nie komplet', () => {
+      expect(stan(strat(), new Set())).toEqual([1, 0]);
+      expect(isCompleteByTags(strat())).toBe(false);
+    });
+
+    it('bez wyceny → do wyceny, choc ma uzasadnienie', () => {
+      expect(stan(strat({ storyPoints: null }), new Set([300]))).toEqual([1, 0]);
+    });
+
+    it('tag ZWROT strategii nie potrzebny i niczego nie zmienia', () => {
+      expect(stan(strat({ tags: ['DO-STARTU', 'STRATEGIA', 'ZWROT-12'] }), new Set([300]))).toEqual([0, 1]);
+    });
+
+    it('czat strategii czytamy niezaleznie od wielkosci wyceny; dopoki sie czyta — „liczę”', () => {
+      expect(needsChat(strat({ storyPoints: 40 }))).toBe(true);
+      expect(stan(strat(), null)).toEqual([1, 0]);
+    });
+
+    it('czyta wiadomosc WARTOSC: z pogrubieniem, bez polskich znakow; nie myli z wyceną; system pomija', () => {
+      const m = (text: string, authorId = 5): ChatMessage => ({ id: 1, authorId, text });
+      expect(hasValueMessage([m('[B]WARTOŚĆ: strategia[/B]\n\nUzasadnienie: cel.')])).toBe(true);
+      expect(hasValueMessage([m('WARTOSC - strategia')])).toBe(true);
+      expect(hasValueMessage([m('WYCENA: 16 h'), m('Ta wartość jest niska')])).toBe(false);
+      expect(hasValueMessage([m('WARTOŚĆ: strategia', 0)])).toBe(false);
     });
   });
 
@@ -250,11 +309,12 @@ describe('countAll', () => {
 
     it('wymog przed wszystkim, potem przedzialy, na koncu brak', () => {
       expect(paybackRank(tags('WYMOG'))).toBe(0);
-      expect(paybackRank(tags('OSZCZEDNOSC', 'ZWROT-3'))).toBe(1);
-      expect(paybackRank(tags('ZWROT-6'))).toBe(2);
-      expect(paybackRank(tags('ZWROT-12'))).toBe(3);
-      expect(paybackRank(tags('ZWROT-12+'))).toBe(4);
-      expect(paybackRank(tags('OSZCZEDNOSC'))).toBe(5);
+      expect(paybackRank(tags('STRATEGIA'))).toBe(1);
+      expect(paybackRank(tags('OSZCZEDNOSC', 'ZWROT-3'))).toBe(2);
+      expect(paybackRank(tags('ZWROT-6'))).toBe(3);
+      expect(paybackRank(tags('ZWROT-12'))).toBe(4);
+      expect(paybackRank(tags('ZWROT-12+'))).toBe(5);
+      expect(paybackRank(tags('OSZCZEDNOSC'))).toBe(6);
     });
   });
 

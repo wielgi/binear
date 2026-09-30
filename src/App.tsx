@@ -175,7 +175,7 @@ import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { planComparator } from './planSort';
-import { CountersBar, useAnsweredTasks, useCounterHistory, useReconTasks } from './CountersBar';
+import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import {
   COUNTERS,
   counterDef,
@@ -1821,7 +1821,7 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
    * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
    */
   { key: 'wysoki', label: 'Tag „Wysoki”' },
-  /* Okres zwrotu z wiadomosci WARTOSC: wymogi (po terminie), potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
+  /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), strategia, potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
   { key: 'zwrot', label: 'Okres zwrotu' },
   { key: 'sp', label: 'Story pointy' },
   { key: 'stage', label: 'Etap w sprincie' },
@@ -8635,16 +8635,16 @@ export default function App() {
     groupId,
     enabled: metaReady,
   });
-  /* Rozpoznania (dopisek w wiadomosci WYCENA) — jedyny wyjatek od kompletu „kategoria + zwrot". */
-  const recon = useReconTasks(tasks, {
+  /* Fakty z czatow: rozpoznania i uzasadnienia STRATEGII — nie widac ich w tagach. */
+  const chatFacts = useChatFacts(tasks, {
     closed: CLOSED_STATUSES,
     sprintId,
     groupId,
     enabled: metaReady,
   });
   const counterCtx = useMemo<CounterCtx>(
-    () => ({ sprintId, closed: CLOSED_STATUSES, answered, recon }),
-    [sprintId, answered, recon],
+    () => ({ sprintId, closed: CLOSED_STATUSES, answered, chat: chatFacts }),
+    [sprintId, answered, chatFacts],
   );
   const counterDefs = useMemo(
     () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),
@@ -8662,13 +8662,13 @@ export default function App() {
       if (
         !metaReady ||
         ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null) ||
-        (d.needsRecon && recon === null)
+        (d.needsChatFacts && chatFacts === null)
       ) {
         s.add(d.key);
       }
     }
     return s;
-  }, [counterDefs, metaReady, answered, recon]);
+  }, [counterDefs, metaReady, answered, chatFacts]);
   const counterSnap = useMemo<DaySnapshot>(() => {
     const s: DaySnapshot = {};
     for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;

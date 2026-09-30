@@ -146,30 +146,42 @@ three are read from the task list itself — no chat requests for them:
 
 - **story points** (the estimate);
 - **a benefit category** — one tag out of `BUG`, `OSZCZEDNOSC`, `PRZYCHOD`, `RYZYKO`,
-  `ANALITYKA`, `UTRZYMANIE`, `WYMOG` (a tag outside this list, e.g. `Wysoki`, is not a category);
+  `ANALITYKA`, `UTRZYMANIE`, `WYMOG`, `STRATEGIA` (a tag outside this list, e.g. `Wysoki`, is not a category);
 - **a payback period** — one of the tags `ZWROT-3` (up to 3 months), `ZWROT-6` (3–6),
   `ZWROT-12` (6–12) or `ZWROT-12+` (over 12, or "can't be counted"). The number is the band's
   upper bound. The tag is a copy of the band written into the task's `WARTOŚĆ` chat message by
   the value script, so a correction is a re-run that swaps the tag. If a task somehow carries two
   of them, the worst one counts.
 
-`WYMOG` (law, contract, a counterparty) has a deadline instead of a ranking: it needs **no
-payback period but must have a deadline** (Bitrix's own `Termin` field).
+Two categories have no payback period:
 
-**Reconnaissance is the one exception.** A task that the estimate script marked as
+- `WYMOG` (law, contract, a counterparty) has a deadline instead of a ranking: it needs **no
+  payback period but must have a deadline** (Bitrix's own `Termin` field).
+- `STRATEGIA` (strategically important, can't be honestly counted in time or money) has **no payback
+  tag either**; instead it needs the one-sentence justification in the task's `WARTOŚĆ` chat
+  message — so the tag alone doesn't complete it, the chat does. Only the IT manager or the board
+  gives it, never the requesting department.
+
+**Reconnaissance is the one exception to the category.** A task the estimate script marked as
 reconnaissance or a bug analysis (`--rozpoznanie`: up to 4 h, its result is the estimate and the
-value of the real task) is ready with just an estimate — no category, no payback tag. The mark is a
-line in its `WYCENA` chat message (`Rozpoznanie — bez okresu zwrotu`), so that is the one place
-binear reads a chat: only for tasks of up to 4 h that don't already have a complete set of tags.
-While those chats load, both cards show `…` rather than a wrong number, and if chats can't be read
-at all (no `im` scope) they stay on `…`.
+value of the real task) is ready with just an estimate — no category, no payback tag. It is
+recognised the way the audit does it: by the line in its `WYCENA` chat message (`Rozpoznanie — bez
+okresu zwrotu`, or the older opening of the justification: Rozpoznanie / Weryfikacja / Przegląd kodu
+/ Sprawdzenie), or — with no chat read at all — by a title with "rozpoznanie" or "weryfikacja" on an
+estimate of up to 4 h.
+
+**Chats are read for two things only**, and only for open `DO-STARTU` tasks outside the sprint whose
+completeness a chat decides: tasks up to 4 h without a complete set of tags (reconnaissance) and
+`STRATEGIA` tasks (justification). Everything else — category, payback, deadline — comes from the
+task list. While those chats load, both cards show `…` rather than a wrong number, and if chats can't
+be read at all (no `im` scope) they stay on `…`.
 
 Missing any of the above puts the task on **To estimate**, not **Ready to start**.
 
 **Planning: sort by payback.** The planning view has a new sort level, **Okres zwrotu**,
 and it sits in the default stack after the `Wysoki` tag: `WYMOG` first (nearest deadline
-first, then those without a deadline), then `do 3 → 3–6 → 6–12 → ponad 12 mies.`, and
-tasks without a payback period last. Within a band the next level (story points) decides.
+first, then those without a deadline), then `STRATEGIA` as a block of its own (the board decides
+their order, so no fake band), then `ZWROT-3 → 6 → 12 → 12+`, and tasks without a payback tag last. Within a band the next level (story points) decides.
 Anyone who saved their own sort keeps it — add the level from the sort menu.
 
 **Answers.** The anchor is the last comment by IT that looks like interview

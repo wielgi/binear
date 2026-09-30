@@ -11,15 +11,18 @@ import {
   DEFERRED_STATUS,
   hasTag,
   hasReconMarker,
+  hasValueMessage,
   loadHistory,
-  maybeRecon,
+  needsChat,
   previousDay,
   recordDay,
   saveHistory,
   TAG_CZEKA,
   TAG_DO_STARTU,
+  TAG_STRATEGIA,
   type CounterDef,
   type CounterKey,
+  type ChatFacts,
   type CounterValue,
   type DaySnapshot,
 } from './counters';
@@ -148,18 +151,20 @@ export function useAnsweredTasks(
 }
 
 /**
- * Zadania DO-STARTU oznaczone jako rozpoznanie albo analiza błędu: ich wiadomość WYCENA ma dopisek
- * „Rozpoznanie — bez okresu zwrotu" (patrz `hasReconMarker`). Takie zadanie jest gotowe do startu
- * bez kategorii korzyści i bez tagu okresu zwrotu — wartość liczymy przy właściwym zadaniu.
+ * Fakty z czatów zadań DO-STARTU, których nie widać w tagach (patrz `ChatFacts`):
  *
- * Kategorię i okres zwrotu widać w tagach, więc czatu nie czytamy dla nikogo, kto ma komplet.
- * Czytamy tylko zadania, które mieszczą się w rozpoznaniu (do 4 h, `maybeRecon`) i mimo to nie mają
- * kompletu w tagach. Zamknięte, odłożone i z aktywnego sprintu pomijamy — kafelki ich nie liczą.
+ *  - **rozpoznanie / analiza błędu** — wiadomość WYCENA ma dopisek „Rozpoznanie — bez okresu zwrotu".
+ *    Takie zadanie jest gotowe do startu bez kategorii i bez tagu okresu zwrotu,
+ *  - **strategia z uzasadnieniem** — zadanie ze STRATEGIĄ ma wiadomość WARTOŚĆ (jedno zdanie celu).
+ *
+ * Kategorię i okres zwrotu zwykłych zadań widać w tagach, więc czatu nie czytamy dla nikogo, kto ma
+ * komplet. Czytamy tylko zadania, o których kompletności rozstrzyga czat (`needsChat`). Zamknięte,
+ * odłożone i z aktywnego sprintu pomijamy — kafelki ich nie liczą.
  *
  * `null` dopóki pierwszy przebieg dla tego projektu się nie skończy albo gdy czatów nie da się
  * przeczytać (brak zakresu `im`): kafelki pokazują wtedy wielokropek, a nie „wszystko do wyceny".
  */
-export function useReconTasks(
+export function useChatFacts(
   tasks: Task[],
   opts: {
     closed: ReadonlySet<string>;
@@ -167,9 +172,9 @@ export function useReconTasks(
     groupId: number | null;
     enabled: boolean;
   },
-): ReadonlySet<number> | null {
+): ChatFacts | null {
   const { closed, sprintId, groupId, enabled } = opts;
-  const [state, setState] = useState<{ group: number | null; recon: Set<number> } | null>(null);
+  const [state, setState] = useState<{ group: number | null; facts: ChatFacts } | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -185,7 +190,7 @@ export function useReconTasks(
           t.status !== DEFERRED_STATUS &&
           (sprintId === null || t.sprintId !== sprintId) &&
           hasTag(t, TAG_DO_STARTU) &&
-          maybeRecon(t) &&
+          needsChat(t) &&
           t.chatId !== null,
       ),
     [tasks, closed, sprintId],
@@ -204,13 +209,17 @@ export function useReconTasks(
 
     (async () => {
       const got = await Promise.allSettled(candidates.map((t) => fetchChatTail(t.chatId as number)));
-      // Wszystkie czaty odmówiły (np. brak zakresu `im`) — nie udajemy, że nikt nie jest rozpoznaniem.
+      // Wszystkie czaty odmówiły (np. brak zakresu `im`) — nie udajemy, że nic w nich nie ma.
       if (got.length > 0 && got.every((r) => r.status === 'rejected')) return;
       const recon = new Set<number>();
+      const strategic = new Set<number>();
       got.forEach((r, i) => {
-        if (r.status === 'fulfilled' && hasReconMarker(r.value.messages)) recon.add(candidates[i].id);
+        if (r.status !== 'fulfilled') return;
+        const t = candidates[i];
+        if (hasReconMarker(r.value.messages)) recon.add(t.id);
+        if (hasTag(t, TAG_STRATEGIA) && hasValueMessage(r.value.messages)) strategic.add(t.id);
       });
-      if (!cancelled) setState({ group: groupId, recon });
+      if (!cancelled) setState({ group: groupId, facts: { recon, strategic } });
     })().catch(() => {
       /* Czat nieczytelny — kafelki zostają przy ostatnim wyniku. */
     });
@@ -221,7 +230,7 @@ export function useReconTasks(
     // `candidates` i reszta są w kluczu — efekt ma ruszać tylko, gdy klucz się zmieni.
   }, [key, enabled]);
 
-  return state && state.group === groupId ? state.recon : null;
+  return state && state.group === groupId ? state.facts : null;
 }
 
 /**
