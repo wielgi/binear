@@ -175,7 +175,7 @@ import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { planComparator } from './planSort';
-import { CountersBar, useAnsweredTasks, useCounterHistory, useValuedTasks } from './CountersBar';
+import { CountersBar, useAnsweredTasks, useCounterHistory, useReconTasks } from './CountersBar';
 import {
   COUNTERS,
   counterDef,
@@ -8635,16 +8635,16 @@ export default function App() {
     groupId,
     enabled: metaReady,
   });
-  /* Okres zwrotu (wiadomosc WARTOSC w czacie) — potrzebny do „Gotowe do startu" i „Do wyceny". */
-  const valued = useValuedTasks(tasks, {
+  /* Rozpoznania (dopisek w wiadomosci WYCENA) — jedyny wyjatek od kompletu „kategoria + zwrot". */
+  const recon = useReconTasks(tasks, {
     closed: CLOSED_STATUSES,
     sprintId,
     groupId,
     enabled: metaReady,
   });
   const counterCtx = useMemo<CounterCtx>(
-    () => ({ sprintId, closed: CLOSED_STATUSES, answered, valued }),
-    [sprintId, answered, valued],
+    () => ({ sprintId, closed: CLOSED_STATUSES, answered, recon }),
+    [sprintId, answered, recon],
   );
   const counterDefs = useMemo(
     () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),
@@ -8662,13 +8662,13 @@ export default function App() {
       if (
         !metaReady ||
         ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null) ||
-        (d.needsValued && valued === null)
+        (d.needsRecon && recon === null)
       ) {
         s.add(d.key);
       }
     }
     return s;
-  }, [counterDefs, metaReady, answered, valued]);
+  }, [counterDefs, metaReady, answered, recon]);
   const counterSnap = useMemo<DaySnapshot>(() => {
     const s: DaySnapshot = {};
     for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
@@ -10251,9 +10251,9 @@ export default function App() {
       axis: (by, a, b) => compareBy(by as SortBy, a, b),
       stageRank,
       me,
-      paybackRank: (t) => paybackRank(t, valued),
+      paybackRank,
     });
-  }, [planSort, me, stageNames, stageOrder, valued]);
+  }, [planSort, me, stageNames, stageOrder]);
 
   /*
    * Odsiew po statusie NIE jest tu robiony — robi go `Planning`, bo rozni sie

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from './bitrix';
-import { paybackRank, type PaybackBand } from './counters';
+import { paybackRank } from './counters';
 import { planComparator, stackComparator, type Cmp } from './planSort';
 
 /** Zadanie z samymi polami, ktore czyta sortowanie planowania. */
@@ -108,24 +108,23 @@ describe('planComparator', () => {
 });
 
 describe('sortowanie po zwrocie', () => {
-  const pasma = new Map<number, PaybackBand>([
-    [1, '6-12'],
-    [2, 'do3'],
-    [3, 'ponad12'],
-    [4, '3-6'],
-    [7, 'do3'],
-  ]);
-  const d = { ...deps, paybackRank: (t: Task) => paybackRank(t, pasma) };
+  const d = { ...deps, paybackRank };
   const zwrot = [{ by: 'zwrot', dir: 'asc' as const }];
 
   it('od najkrotszego zwrotu do najdluzszego, na koncu zadania bez okresu zwrotu', () => {
-    const tasks = [task(3), task(1), task(5), task(2), task(4)];
+    const tasks = [
+      task(3, { tags: ['ZWROT-12+'] }),
+      task(1, { tags: ['ZWROT-12'] }),
+      task(5),
+      task(2, { tags: ['ZWROT-3'] }),
+      task(4, { tags: ['ZWROT-6'] }),
+    ];
     expect(ids(tasks, zwrot, d)).toEqual([2, 4, 1, 3, 5]);
   });
 
   it('wymogi na poczatku, od najblizszego terminu; wymog bez terminu za tymi z terminem', () => {
     const tasks = [
-      task(2),
+      task(2, { tags: ['ZWROT-3'] }),
       task(10, { tags: ['WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
       task(11, { tags: ['wymog'], deadline: '2026-10-05T00:00:00+02:00' }),
       task(12, { tags: ['WYMOG'], deadline: null }),
@@ -134,13 +133,14 @@ describe('sortowanie po zwrocie', () => {
   });
 
   it('w tym samym przedziale rozstrzyga kolejny poziom stosu', () => {
-    const tasks = [task(2, { storyPoints: 2 }), task(7, { storyPoints: 9 })];
+    const tasks = [task(2, { tags: ['ZWROT-3'], storyPoints: 2 }), task(7, { tags: ['ZWROT-3'], storyPoints: 9 })];
     expect(
       ids(tasks, [{ by: 'zwrot', dir: 'asc' }, { by: 'sp', dir: 'desc' }], d),
     ).toEqual([7, 2]);
   });
 
   it('odwrocony kierunek daje najgorszy zwrot na gorze', () => {
-    expect(ids([task(2), task(3), task(5)], [{ by: 'zwrot', dir: 'desc' }], d)).toEqual([5, 3, 2]);
+    const tasks = [task(2, { tags: ['ZWROT-3'] }), task(3, { tags: ['ZWROT-12+'] }), task(5)];
+    expect(ids(tasks, [{ by: 'zwrot', dir: 'desc' }], d)).toEqual([5, 3, 2]);
   });
 });

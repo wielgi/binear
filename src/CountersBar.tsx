@@ -7,12 +7,12 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { fetchChatTail, type ChatTail, type Task } from './bitrix';
 import {
   answerState,
-  awaitsValue,
   dayKey,
   DEFERRED_STATUS,
   hasTag,
+  hasReconMarker,
   loadHistory,
-  paybackBand,
+  maybeRecon,
   previousDay,
   recordDay,
   saveHistory,
@@ -22,7 +22,6 @@ import {
   type CounterKey,
   type CounterValue,
   type DaySnapshot,
-  type PaybackBand,
 } from './counters';
 import {
   BugIcon,
@@ -149,19 +148,18 @@ export function useAnsweredTasks(
 }
 
 /**
- * Zadania DO-STARTU, którym do kompletu brakuje tylko okresu zwrotu, a w czacie mają
- * już wiadomość WARTOŚĆ z czytelnym przedziałem zwrotu → ten przedział (patrz `paybackBand`).
- * Przedział służy też do sortowania w planowaniu, więc to mapa, a nie sam zbiór.
+ * Zadania DO-STARTU oznaczone jako rozpoznanie albo analiza błędu: ich wiadomość WYCENA ma dopisek
+ * „Rozpoznanie — bez okresu zwrotu" (patrz `hasReconMarker`). Takie zadanie jest gotowe do startu
+ * bez kategorii korzyści i bez tagu okresu zwrotu — wartość liczymy przy właściwym zadaniu.
  *
- * Czytamy czaty wyłącznie tych, które mają wycenę i kategorię (`awaitsValue`): pozostałe
- * i tak są „do wyceny", więc ich czat niczego nie zmienia. Zadania zamknięte, odłożone
- * i z aktywnego sprintu pomijamy — kafelki ich nie liczą.
+ * Kategorię i okres zwrotu widać w tagach, więc czatu nie czytamy dla nikogo, kto ma komplet.
+ * Czytamy tylko zadania, które mieszczą się w rozpoznaniu (do 4 h, `maybeRecon`) i mimo to nie mają
+ * kompletu w tagach. Zamknięte, odłożone i z aktywnego sprintu pomijamy — kafelki ich nie liczą.
  *
- * `null` dopóki pierwszy przebieg dla tego projektu się nie skończy albo gdy czatów
- * nie da się przeczytać (brak zakresu `im`): wtedy kafelki pokazują wielokropek, a nie
- * „wszystko do wyceny".
+ * `null` dopóki pierwszy przebieg dla tego projektu się nie skończy albo gdy czatów nie da się
+ * przeczytać (brak zakresu `im`): kafelki pokazują wtedy wielokropek, a nie „wszystko do wyceny".
  */
-export function useValuedTasks(
+export function useReconTasks(
   tasks: Task[],
   opts: {
     closed: ReadonlySet<string>;
@@ -169,9 +167,9 @@ export function useValuedTasks(
     groupId: number | null;
     enabled: boolean;
   },
-): ReadonlyMap<number, PaybackBand> | null {
+): ReadonlySet<number> | null {
   const { closed, sprintId, groupId, enabled } = opts;
-  const [state, setState] = useState<{ group: number | null; valued: Map<number, PaybackBand> } | null>(null);
+  const [state, setState] = useState<{ group: number | null; recon: Set<number> } | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -187,7 +185,7 @@ export function useValuedTasks(
           t.status !== DEFERRED_STATUS &&
           (sprintId === null || t.sprintId !== sprintId) &&
           hasTag(t, TAG_DO_STARTU) &&
-          awaitsValue(t) &&
+          maybeRecon(t) &&
           t.chatId !== null,
       ),
     [tasks, closed, sprintId],
@@ -206,15 +204,13 @@ export function useValuedTasks(
 
     (async () => {
       const got = await Promise.allSettled(candidates.map((t) => fetchChatTail(t.chatId as number)));
-      // Wszystkie czaty odmówiły (np. brak zakresu `im`) — nie udajemy, że nikt nie ma wartości.
+      // Wszystkie czaty odmówiły (np. brak zakresu `im`) — nie udajemy, że nikt nie jest rozpoznaniem.
       if (got.length > 0 && got.every((r) => r.status === 'rejected')) return;
-      const valued = new Map<number, PaybackBand>();
+      const recon = new Set<number>();
       got.forEach((r, i) => {
-        if (r.status !== 'fulfilled') return;
-        const band = paybackBand(r.value.messages);
-        if (band) valued.set(candidates[i].id, band);
+        if (r.status === 'fulfilled' && hasReconMarker(r.value.messages)) recon.add(candidates[i].id);
       });
-      if (!cancelled) setState({ group: groupId, valued });
+      if (!cancelled) setState({ group: groupId, recon });
     })().catch(() => {
       /* Czat nieczytelny — kafelki zostają przy ostatnim wyniku. */
     });
@@ -225,7 +221,7 @@ export function useValuedTasks(
     // `candidates` i reszta są w kluczu — efekt ma ruszać tylko, gdy klucz się zmieni.
   }, [key, enabled]);
 
-  return state && state.group === groupId ? state.valued : null;
+  return state && state.group === groupId ? state.recon : null;
 }
 
 /**

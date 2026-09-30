@@ -141,24 +141,30 @@ with exactly the tasks it counts (search still applies); clicking it again, or
 changing scope, filters or toggles, returns to the normal view. Tag names match
 case-insensitively, as in Bitrix.
 
-**What "ready" means.** A `DO-STARTU` task needs three things to be ready to start:
+**What "ready" means.** A `DO-STARTU` task needs three things to be ready to start, and all
+three are read from the task list itself — no chat requests for them:
 
 - **story points** (the estimate);
 - **a benefit category** — one tag out of `BUG`, `OSZCZEDNOSC`, `PRZYCHOD`, `RYZYKO`,
   `ANALITYKA`, `UTRZYMANIE`, `WYMOG` (a tag outside this list, e.g. `Wysoki`, is not a category);
-- **a payback period** — a `WARTOŚĆ` message in the task's chat that names one of four
-  bands after the word `zwrot`: `do 3 mies.`, `3–6 mies.`, `6–12 mies.`, `ponad 12 mies.`
-  (`nie da się policzyć` counts as `ponad 12`). The message is matched at its start,
-  ignoring case, bold and Polish letters; system entries don't count; the **newest**
-  `WARTOŚĆ` message wins, so a correction replaces an old value. A `WARTOŚĆ` message
-  without a readable band is not a payback period.
+- **a payback period** — one of the tags `ZWROT-3` (up to 3 months), `ZWROT-6` (3–6),
+  `ZWROT-12` (6–12) or `ZWROT-12+` (over 12, or "can't be counted"). The number is the band's
+  upper bound. The tag is a copy of the band written into the task's `WARTOŚĆ` chat message by
+  the value script, so a correction is a re-run that swaps the tag. If a task somehow carries two
+  of them, the worst one counts.
 
 `WYMOG` (law, contract, a counterparty) has a deadline instead of a ranking: it needs **no
-payback period but must have a deadline** (Bitrix's own `Termin` field). Missing any of the
-above puts the task on **To estimate**, not **Ready to start**. Chats are read only for
-tasks that already have an estimate and a category, so the extra requests are few; while
-they load, both cards show `…` rather than a wrong number, and if chats can't be read at
-all (no `im` scope) the cards stay on `…`.
+payback period but must have a deadline** (Bitrix's own `Termin` field).
+
+**Reconnaissance is the one exception.** A task that the estimate script marked as
+reconnaissance or a bug analysis (`--rozpoznanie`: up to 4 h, its result is the estimate and the
+value of the real task) is ready with just an estimate — no category, no payback tag. The mark is a
+line in its `WYCENA` chat message (`Rozpoznanie — bez okresu zwrotu`), so that is the one place
+binear reads a chat: only for tasks of up to 4 h that don't already have a complete set of tags.
+While those chats load, both cards show `…` rather than a wrong number, and if chats can't be read
+at all (no `im` scope) they stay on `…`.
+
+Missing any of the above puts the task on **To estimate**, not **Ready to start**.
 
 **Planning: sort by payback.** The planning view has a new sort level, **Okres zwrotu**,
 and it sits in the default stack after the `Wysoki` tag: `WYMOG` first (nearest deadline

@@ -80,11 +80,12 @@ export interface CounterCtx {
   /** Zadania OCZEKUJE-NA-ODPOWIEDZ z odpowiedzia po naszych pytaniach; `null` = jeszcze liczymy. */
   answered: ReadonlySet<number> | null;
   /**
-   * Przedział okresu zwrotu zadań, w których czacie jest wiadomość WARTOŚĆ z odczytanym
-   * przedziałem. `null` = jeszcze czytamy czaty. Czytamy je tylko dla zadań, którym do
-   * gotowości brakuje wyłącznie tego (mają wycenę i kategorię), więc mapa jest mała.
+   * Zadania oznaczone jako rozpoznanie (albo analiza błędu): wiadomość WYCENA ma dopisek „Rozpoznanie —
+   * bez okresu zwrotu". Takie zadanie dostaje DO-STARTU bez kategorii i bez okresu zwrotu — wartość
+   * liczymy dopiero przy właściwym zadaniu, które z niego powstanie. `null` = jeszcze czytamy czaty;
+   * czytamy je tylko dla zadań, które mieszczą się w rozpoznaniu (do 4 h) i nie mają kompletu w tagach.
    */
-  valued: ReadonlyMap<number, PaybackBand> | null;
+  recon: ReadonlySet<number> | null;
 }
 
 type CounterTask = Pick<
@@ -100,8 +101,8 @@ export interface CounterDef {
   match: (t: CounterTask, ctx: CounterCtx) => boolean;
   /** Liczba zalezy od story pointow — dopoki nie doszly, jest niepewna. */
   needsMeta?: boolean;
-  /** Liczba zalezy tez od okresu zwrotu (wiadomosc WARTOSC w czacie) — niepewna, dopoki czaty sie czytaja. */
-  needsValued?: boolean;
+  /** Liczba zalezy tez od rozpoznan (dopisek w wiadomosci WYCENA w czacie) — niepewna, dopoki czaty sie czytaja. */
+  needsRecon?: boolean;
   /** Karta istnieje tylko w projekcie ze sprintami (scrum). */
   needsSprint?: boolean;
   /**
@@ -143,24 +144,33 @@ export const hasCategory = (t: Pick<CounterTask, 'tags'>): boolean =>
 export const needsPayback = (t: Pick<CounterTask, 'tags'>): boolean => !hasTag(t, TAG_WYMOG);
 
 /**
- * Czy zadanie z DO-STARTU ma komplet: wycenę, kategorię i — zależnie od kategorii —
- * okres zwrotu albo termin.
+ * Komplet z SAMEJ listy zadań (bez czatu): wycena, kategoria i — zależnie od kategorii —
+ * tag okresu zwrotu albo termin.
  *
- *  - zwykłe zadanie: okres zwrotu, czyli wiadomość WARTOŚĆ z odczytanym przedziałem,
- *  - WYMOG: termin (pole „Termin" zadania w Bitriksie) — wymóg nie ma rankingu, ma datę.
- *
- * Dopóki czaty się czytają (`valued === null`), zadanie, któremu brakuje tylko okresu
- * zwrotu, nie jest jeszcze ani kompletne, ani niekompletne — kafelki dostają wtedy znak
- * „liczę" (patrz `needsValued`).
+ *  - zwykłe zadanie: tag okresu zwrotu (ZWROT-3 / ZWROT-6 / ZWROT-12 / ZWROT-12+), który
+ *    `wartosc.mjs` kopiuje z przedziału w wiadomości WARTOŚĆ,
+ *  - WYMOG: termin (pole „Termin" zadania) — wymóg nie ma rankingu, ma datę.
  */
-const isComplete = (t: CounterTask, ctx: CounterCtx) =>
+export const isCompleteByTags = (t: CounterTask): boolean =>
   t.storyPoints != null &&
   hasCategory(t) &&
-  (needsPayback(t) ? (ctx.valued?.has(t.id) ?? false) : t.deadline != null);
+  (needsPayback(t) ? paybackBand(t) !== null : t.deadline != null);
 
-/** Zadanie, któremu do gotowości brakuje już tylko okresu zwrotu — jego czat trzeba przeczytać. */
-export const awaitsValue = (t: Pick<Task, 'tags' | 'storyPoints'>): boolean =>
-  t.storyPoints != null && hasCategory(t) && needsPayback(t);
+/**
+ * Rozpoznanie mieści się w 4 godzinach (`gotowe.mjs --rozpoznanie`) — tylko takie zadania,
+ * którym brakuje kompletu w tagach, mogą okazać się rozpoznaniem, więc tylko ich czat czytamy.
+ */
+export const RECON_MAX_HOURS = 4;
+export const maybeRecon = (t: CounterTask): boolean =>
+  t.storyPoints != null && t.storyPoints <= RECON_MAX_HOURS && !isCompleteByTags(t);
+
+/**
+ * Czy zadanie z DO-STARTU ma komplet: kompletne w tagach albo oznaczone jako rozpoznanie.
+ * Dopóki czaty się czytają (`recon === null`), zadanie mieszczące się w rozpoznaniu nie jest
+ * jeszcze ani kompletne, ani niekompletne — kafelki dostają wtedy znak „liczę" (`needsRecon`).
+ */
+const isComplete = (t: CounterTask, ctx: CounterCtx) =>
+  isCompleteByTags(t) || (t.storyPoints != null && (ctx.recon?.has(t.id) ?? false));
 
 /*
  * Kolejnosc = kolejnosc pracy w audycie: skala rejestru, potem stany od „trzeba zapytac"
@@ -212,11 +222,11 @@ export const COUNTERS: CounterDef[] = [
     label: 'Do wyceny',
     hint:
       'Poza sprintem, z tagiem DO-STARTU, ale bez kompletu: brakuje story pointów, ' +
-      'kategorii korzyści (tag) albo okresu zwrotu (wiadomość WARTOŚĆ w czacie; ' +
-      'zadania z tagiem WYMOG go nie potrzebują) — uzupełnij wycenę i wartość.',
+      'kategorii korzyści albo tagu okresu zwrotu (ZWROT-3 … ZWROT-12+). WYMOG potrzebuje ' +
+      'terminu zamiast zwrotu, rozpoznanie nie potrzebuje żadnego z nich — uzupełnij wycenę i wartość.',
     match: (t, ctx) => outside(t, ctx) && isStartu(t) && !isComplete(t, ctx),
     needsMeta: true,
-    needsValued: true,
+    needsRecon: true,
     riseIsBad: true,
   },
   {
@@ -225,10 +235,10 @@ export const COUNTERS: CounterDef[] = [
     label: 'Gotowe do startu',
     hint:
       'Poza sprintem, z tagiem DO-STARTU i kompletem: wycena, kategoria korzyści i okres ' +
-      'zwrotu — można je wziąć do sprintu.',
+      'zwrotu (WYMOG: termin; rozpoznanie: sama wycena) — można je wziąć do sprintu.',
     match: (t, ctx) => outside(t, ctx) && isStartu(t) && isComplete(t, ctx),
     needsMeta: true,
-    needsValued: true,
+    needsRecon: true,
     // Wiecej gotowych to dobra wiadomosc — nie kolorujemy wzrostu na bursztynowo.
     riseIsBad: false,
   },
@@ -333,51 +343,32 @@ export function plainBody(text: string): string {
     .trim();
 }
 
-/**
- * Wiadomość „WARTOŚĆ" w czacie zadania — obok „WYCENA" niesie wartość miesięczną i okres
- * zwrotu. Rozpoznajemy ją po początku wiadomości (po zdjęciu znaczników), bez względu
- * na wielkość liter i polskie znaki: „WARTOŚĆ: …", „[B]Wartość[/B] …", „WARTOSC …".
- */
-export const VALUE_MESSAGE = /^warto[śs][ćc](?=$|[\s:.,;\-–—])/i;
-
 /** Przedział okresu zwrotu, od najlepszego do najgorszego. */
 export type PaybackBand = 'do3' | '3-6' | '6-12' | 'ponad12';
 
-export const PAYBACK_BANDS: { key: PaybackBand; label: string }[] = [
-  { key: 'do3', label: 'do 3 mies.' },
-  { key: '3-6', label: '3–6 mies.' },
-  { key: '6-12', label: '6–12 mies.' },
-  { key: 'ponad12', label: 'ponad 12 mies.' },
-];
-
-/*
- * Przedział czytamy ze słowa „zwrot" w wiadomości WARTOŚĆ: „zwrot do 3 mies.",
- * „zwrot 3–6 mies.", „zwrot: 6-12", „zwrot ponad 12". „Nie da się policzyć" to to samo
- * co „ponad 12" — zasady wrzucają je do najgorszego przedziału.
+/**
+ * Przedziały i ich tagi na zadaniu. Liczba w tagu to GÓRNA granica przedziału; `ZWROT-12+` to
+ * ponad 12 miesięcy albo „nie da się policzyć". Tag jest kopią przedziału z wiadomości WARTOŚĆ
+ * i to z niego czytamy — bez wchodzenia w czat.
  */
-const BAND_PATTERNS: [PaybackBand, RegExp][] = [
-  ['do3', /zwrot\s*:?\s*(?:do\s*3|<\s*3)(?!\d)/i],
-  ['3-6', /zwrot\s*:?\s*3\s*[-–—]\s*6(?!\d)/i],
-  ['6-12', /zwrot\s*:?\s*6\s*[-–—]\s*12(?!\d)/i],
-  ['ponad12', /zwrot\s*:?\s*(?:ponad\s*12|>\s*12|12\s*\+|nie da si[eę] policzy[cć])/i],
+export const PAYBACK_BANDS: { key: PaybackBand; label: string; tag: string }[] = [
+  { key: 'do3', label: 'do 3 mies.', tag: 'ZWROT-3' },
+  { key: '3-6', label: '3–6 mies.', tag: 'ZWROT-6' },
+  { key: '6-12', label: '6–12 mies.', tag: 'ZWROT-12' },
+  { key: 'ponad12', label: 'ponad 12 mies.', tag: 'ZWROT-12+' },
 ];
 
 /**
- * Przedział okresu zwrotu z NAJNOWSZEJ wiadomości WARTOŚĆ w czacie (system pomijamy).
- * Poprawka ma wygrać ze starą wartością, więc liczy się ostatnia; jeśli ostatnia nie
- * ma czytelnego przedziału, zadanie nie ma okresu zwrotu (`null`).
- *
- * `messages` od najstarszej do najnowszej.
+ * Przedział okresu zwrotu z tagów zadania. Gdyby zadanie miało dwa tagi zwrotu (skrypt podmienia
+ * stary, ale ręczna zmiana potrafi zostawić oba), liczy się NAJGORSZY — lepiej nie obiecać za dużo.
  */
-export function paybackBand(messages: ChatMessage[]): PaybackBand | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.authorId <= 0) continue;
-    const body = plainBody(m.text);
-    if (!VALUE_MESSAGE.test(body)) continue;
-    return BAND_PATTERNS.find(([, re]) => re.test(body))?.[0] ?? null;
+export function paybackBand(t: Pick<Task, 'tags'>): PaybackBand | null {
+  let worst = -1;
+  for (const g of t.tags) {
+    const i = PAYBACK_BANDS.findIndex((b) => b.tag === g.toUpperCase());
+    if (i > worst) worst = i;
   }
-  return null;
+  return worst < 0 ? null : PAYBACK_BANDS[worst].key;
 }
 
 /**
@@ -387,13 +378,22 @@ export function paybackBand(messages: ChatMessage[]): PaybackBand | null {
  *   1–4  przedział: do 3, 3–6, 6–12, ponad 12 miesięcy
  *   5    brak okresu zwrotu (jeszcze niepoliczony) — na końcu
  */
-export function paybackRank(
-  t: Pick<Task, 'id' | 'tags'>,
-  bands: ReadonlyMap<number, PaybackBand> | null,
-): number {
+export function paybackRank(t: Pick<Task, 'tags'>): number {
   if (hasTag(t, TAG_WYMOG)) return 0;
-  const band = bands?.get(t.id);
+  const band = paybackBand(t);
   return band ? 1 + PAYBACK_BANDS.findIndex((b) => b.key === band) : PAYBACK_BANDS.length + 1;
+}
+
+/**
+ * Dopisek w wiadomości WYCENA przy rozpoznaniu i analizie błędu (`gotowe.mjs --rozpoznanie`):
+ * „Rozpoznanie — bez okresu zwrotu". Po nim krok 9 audytu pomija zadanie, a binear uznaje je
+ * za komplet bez kategorii i zwrotu.
+ */
+export const RECON_MARKER = /rozpoznanie\s*[-–—]\s*bez okresu zwrotu/i;
+
+/** Czy któraś z wiadomości (system pomijamy) oznacza zadanie jako rozpoznanie. */
+export function hasReconMarker(messages: ChatMessage[]): boolean {
+  return messages.some((m) => m.authorId > 0 && RECON_MARKER.test(plainBody(m.text)));
 }
 
 /**
