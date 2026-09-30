@@ -9,8 +9,10 @@
  * Otwarte zadania spoza aktywnego sprintu, BEZ odlozonych, dziela sie na stany, ktore
  * sie wykluczaja i razem daja dokladnie „Poza sprintem":
  *
- *   DO-STARTU, z wycena             → Gotowe do startu
- *   DO-STARTU, bez wyceny           → Do wyceny
+ *   DO-STARTU, z wyceną, kategorią
+ *     i okresem zwrotu              → Gotowe do startu
+ *   DO-STARTU, bez któregokolwiek
+ *     z tych trzech                 → Do wyceny
  *   OCZEKUJE-NA-ODPOWIEDZ + wpis    → Do analizy odpowiedzi
  *   OCZEKUJE-NA-ODPOWIEDZ           → Czeka na odpowiedz
  *   cala reszta                     → Do wywiadu (DO-WYWIADU albo brak tagu gotowosci)
@@ -52,6 +54,21 @@ export const TAG_BUG = 'BUG';
  */
 export const TAGS_KONCEPT = ['KONCEPT', 'KONCEPCJA'];
 
+/*
+ * Kategoria korzyści zadania — jeden tag na zadanie. `BUG` jest kategorią „naprawa błędu"
+ * i już istnieje jako tag; pozostałe to nowe tagi z zasad wartości zadań.
+ */
+export const TAG_WYMOG = 'WYMOG';
+export const TAGS_KATEGORIA = [
+  TAG_BUG,
+  'OSZCZEDNOSC',
+  'PRZYCHOD',
+  'RYZYKO',
+  'ANALITYKA',
+  'UTRZYMANIE',
+  TAG_WYMOG,
+];
+
 /** Bitrix nie rozroznia wielkosci liter w tagach — „do-startu" to ten sam tag. */
 export const hasTag = (t: Pick<Task, 'tags'>, tag: string): boolean =>
   t.tags.some((g) => g.toUpperCase() === tag);
@@ -62,9 +79,18 @@ export interface CounterCtx {
   closed: ReadonlySet<string>;
   /** Zadania OCZEKUJE-NA-ODPOWIEDZ z odpowiedzia po naszych pytaniach; `null` = jeszcze liczymy. */
   answered: ReadonlySet<number> | null;
+  /**
+   * Przedział okresu zwrotu zadań, w których czacie jest wiadomość WARTOŚĆ z odczytanym
+   * przedziałem. `null` = jeszcze czytamy czaty. Czytamy je tylko dla zadań, którym do
+   * gotowości brakuje wyłącznie tego (mają wycenę i kategorię), więc mapa jest mała.
+   */
+  valued: ReadonlyMap<number, PaybackBand> | null;
 }
 
-type CounterTask = Pick<Task, 'id' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId'>;
+type CounterTask = Pick<
+  Task,
+  'id' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId' | 'deadline'
+>;
 
 export interface CounterDef {
   key: CounterKey;
@@ -74,6 +100,8 @@ export interface CounterDef {
   match: (t: CounterTask, ctx: CounterCtx) => boolean;
   /** Liczba zalezy od story pointow — dopoki nie doszly, jest niepewna. */
   needsMeta?: boolean;
+  /** Liczba zalezy tez od okresu zwrotu (wiadomosc WARTOSC w czacie) — niepewna, dopoki czaty sie czytaja. */
+  needsValued?: boolean;
   /** Karta istnieje tylko w projekcie ze sprintami (scrum). */
   needsSprint?: boolean;
   /**
@@ -106,6 +134,33 @@ const isStartu = (t: CounterTask) => hasTag(t, TAG_DO_STARTU);
 /** DO-STARTU ma pierwszenstwo — zadanie z dwoma tagami gotowosci liczy sie raz. */
 const isCzeka = (t: CounterTask) => !isStartu(t) && hasTag(t, TAG_CZEKA);
 const wasAnswered = (t: CounterTask, ctx: CounterCtx) => ctx.answered?.has(t.id) ?? false;
+
+/** Ma tag kategorii korzyści (jeden z `TAGS_KATEGORIA`) — widać to z samej listy zadań. */
+export const hasCategory = (t: Pick<CounterTask, 'tags'>): boolean =>
+  TAGS_KATEGORIA.some((g) => hasTag(t, g));
+
+/** Do startu potrzeba okresu zwrotu, chyba że zadanie jest wymogiem (prawo, umowa) — ono ma termin. */
+export const needsPayback = (t: Pick<CounterTask, 'tags'>): boolean => !hasTag(t, TAG_WYMOG);
+
+/**
+ * Czy zadanie z DO-STARTU ma komplet: wycenę, kategorię i — zależnie od kategorii —
+ * okres zwrotu albo termin.
+ *
+ *  - zwykłe zadanie: okres zwrotu, czyli wiadomość WARTOŚĆ z odczytanym przedziałem,
+ *  - WYMOG: termin (pole „Termin" zadania w Bitriksie) — wymóg nie ma rankingu, ma datę.
+ *
+ * Dopóki czaty się czytają (`valued === null`), zadanie, któremu brakuje tylko okresu
+ * zwrotu, nie jest jeszcze ani kompletne, ani niekompletne — kafelki dostają wtedy znak
+ * „liczę" (patrz `needsValued`).
+ */
+const isComplete = (t: CounterTask, ctx: CounterCtx) =>
+  t.storyPoints != null &&
+  hasCategory(t) &&
+  (needsPayback(t) ? (ctx.valued?.has(t.id) ?? false) : t.deadline != null);
+
+/** Zadanie, któremu do gotowości brakuje już tylko okresu zwrotu — jego czat trzeba przeczytać. */
+export const awaitsValue = (t: Pick<Task, 'tags' | 'storyPoints'>): boolean =>
+  t.storyPoints != null && hasCategory(t) && needsPayback(t);
 
 /*
  * Kolejnosc = kolejnosc pracy w audycie: skala rejestru, potem stany od „trzeba zapytac"
@@ -155,18 +210,25 @@ export const COUNTERS: CounterDef[] = [
     key: 'wycena',
     inSum: true,
     label: 'Do wyceny',
-    hint: 'Poza sprintem, z tagiem DO-STARTU, bez story pointów — uzupełnij wycenę.',
-    match: (t, ctx) => outside(t, ctx) && isStartu(t) && t.storyPoints == null,
+    hint:
+      'Poza sprintem, z tagiem DO-STARTU, ale bez kompletu: brakuje story pointów, ' +
+      'kategorii korzyści (tag) albo okresu zwrotu (wiadomość WARTOŚĆ w czacie; ' +
+      'zadania z tagiem WYMOG go nie potrzebują) — uzupełnij wycenę i wartość.',
+    match: (t, ctx) => outside(t, ctx) && isStartu(t) && !isComplete(t, ctx),
     needsMeta: true,
+    needsValued: true,
     riseIsBad: true,
   },
   {
     key: 'gotowe',
     inSum: true,
     label: 'Gotowe do startu',
-    hint: 'Poza sprintem, z tagiem DO-STARTU i z wyceną — można je wziąć do sprintu.',
-    match: (t, ctx) => outside(t, ctx) && isStartu(t) && t.storyPoints != null,
+    hint:
+      'Poza sprintem, z tagiem DO-STARTU i kompletem: wycena, kategoria korzyści i okres ' +
+      'zwrotu — można je wziąć do sprintu.',
+    match: (t, ctx) => outside(t, ctx) && isStartu(t) && isComplete(t, ctx),
     needsMeta: true,
+    needsValued: true,
     // Wiecej gotowych to dobra wiadomosc — nie kolorujemy wzrostu na bursztynowo.
     riseIsBad: false,
   },
@@ -269,6 +331,69 @@ export function plainBody(text: string): string {
     .replace(/\[\/?[A-Za-z]+(?:=[^\]]*)?\]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Wiadomość „WARTOŚĆ" w czacie zadania — obok „WYCENA" niesie wartość miesięczną i okres
+ * zwrotu. Rozpoznajemy ją po początku wiadomości (po zdjęciu znaczników), bez względu
+ * na wielkość liter i polskie znaki: „WARTOŚĆ: …", „[B]Wartość[/B] …", „WARTOSC …".
+ */
+export const VALUE_MESSAGE = /^warto[śs][ćc](?=$|[\s:.,;\-–—])/i;
+
+/** Przedział okresu zwrotu, od najlepszego do najgorszego. */
+export type PaybackBand = 'do3' | '3-6' | '6-12' | 'ponad12';
+
+export const PAYBACK_BANDS: { key: PaybackBand; label: string }[] = [
+  { key: 'do3', label: 'do 3 mies.' },
+  { key: '3-6', label: '3–6 mies.' },
+  { key: '6-12', label: '6–12 mies.' },
+  { key: 'ponad12', label: 'ponad 12 mies.' },
+];
+
+/*
+ * Przedział czytamy ze słowa „zwrot" w wiadomości WARTOŚĆ: „zwrot do 3 mies.",
+ * „zwrot 3–6 mies.", „zwrot: 6-12", „zwrot ponad 12". „Nie da się policzyć" to to samo
+ * co „ponad 12" — zasady wrzucają je do najgorszego przedziału.
+ */
+const BAND_PATTERNS: [PaybackBand, RegExp][] = [
+  ['do3', /zwrot\s*:?\s*(?:do\s*3|<\s*3)(?!\d)/i],
+  ['3-6', /zwrot\s*:?\s*3\s*[-–—]\s*6(?!\d)/i],
+  ['6-12', /zwrot\s*:?\s*6\s*[-–—]\s*12(?!\d)/i],
+  ['ponad12', /zwrot\s*:?\s*(?:ponad\s*12|>\s*12|12\s*\+|nie da si[eę] policzy[cć])/i],
+];
+
+/**
+ * Przedział okresu zwrotu z NAJNOWSZEJ wiadomości WARTOŚĆ w czacie (system pomijamy).
+ * Poprawka ma wygrać ze starą wartością, więc liczy się ostatnia; jeśli ostatnia nie
+ * ma czytelnego przedziału, zadanie nie ma okresu zwrotu (`null`).
+ *
+ * `messages` od najstarszej do najnowszej.
+ */
+export function paybackBand(messages: ChatMessage[]): PaybackBand | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.authorId <= 0) continue;
+    const body = plainBody(m.text);
+    if (!VALUE_MESSAGE.test(body)) continue;
+    return BAND_PATTERNS.find(([, re]) => re.test(body))?.[0] ?? null;
+  }
+  return null;
+}
+
+/**
+ * Miejsce zadania w sortowaniu „po zwrocie" — mniejsza liczba idzie wyżej.
+ *
+ *   0    WYMOG (ma termin, wchodzi poza rankingiem, więc na początku)
+ *   1–4  przedział: do 3, 3–6, 6–12, ponad 12 miesięcy
+ *   5    brak okresu zwrotu (jeszcze niepoliczony) — na końcu
+ */
+export function paybackRank(
+  t: Pick<Task, 'id' | 'tags'>,
+  bands: ReadonlyMap<number, PaybackBand> | null,
+): number {
+  if (hasTag(t, TAG_WYMOG)) return 0;
+  const band = bands?.get(t.id);
+  return band ? 1 + PAYBACK_BANDS.findIndex((b) => b.key === band) : PAYBACK_BANDS.length + 1;
 }
 
 /**

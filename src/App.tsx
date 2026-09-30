@@ -175,11 +175,12 @@ import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { planComparator } from './planSort';
-import { CountersBar, useAnsweredTasks, useCounterHistory } from './CountersBar';
+import { CountersBar, useAnsweredTasks, useCounterHistory, useValuedTasks } from './CountersBar';
 import {
   COUNTERS,
   counterDef,
   countAll,
+  paybackRank,
   type CounterCtx,
   type CounterKey,
   type DaySnapshot,
@@ -626,6 +627,7 @@ const DEFAULT_SETTINGS: Settings = {
   planSort: [
     { by: 'priority', dir: 'asc' },
     { by: 'wysoki', dir: 'asc' },
+    { by: 'zwrot', dir: 'asc' },
     { by: 'sp', dir: 'desc' },
   ],
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
@@ -1801,7 +1803,7 @@ type Dir = 'asc' | 'desc';
  * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
  * na liscie i tak grupuje sie po etapie.
  */
-type PlanSortBy = SortBy | 'stage' | 'wysoki' | 'sp';
+type PlanSortBy = SortBy | 'stage' | 'wysoki' | 'sp' | 'zwrot';
 
 const SORTS: { key: SortBy; label: string }[] = [
   { key: 'updated', label: 'Zaktualizowane' },
@@ -1819,6 +1821,8 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
    * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
    */
   { key: 'wysoki', label: 'Tag „Wysoki”' },
+  /* Okres zwrotu z wiadomosci WARTOSC: wymogi (po terminie), potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
+  { key: 'zwrot', label: 'Okres zwrotu' },
   { key: 'sp', label: 'Story pointy' },
   { key: 'stage', label: 'Etap w sprincie' },
   ...SORTS,
@@ -8631,9 +8635,16 @@ export default function App() {
     groupId,
     enabled: metaReady,
   });
+  /* Okres zwrotu (wiadomosc WARTOSC w czacie) — potrzebny do „Gotowe do startu" i „Do wyceny". */
+  const valued = useValuedTasks(tasks, {
+    closed: CLOSED_STATUSES,
+    sprintId,
+    groupId,
+    enabled: metaReady,
+  });
   const counterCtx = useMemo<CounterCtx>(
-    () => ({ sprintId, closed: CLOSED_STATUSES, answered }),
-    [sprintId, answered],
+    () => ({ sprintId, closed: CLOSED_STATUSES, answered, valued }),
+    [sprintId, answered, valued],
   );
   const counterDefs = useMemo(
     () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),
@@ -8648,12 +8659,16 @@ export default function App() {
   const counterPending = useMemo(() => {
     const s = new Set<CounterKey>();
     for (const d of counterDefs) {
-      if (!metaReady || ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null)) {
+      if (
+        !metaReady ||
+        ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null) ||
+        (d.needsValued && valued === null)
+      ) {
         s.add(d.key);
       }
     }
     return s;
-  }, [counterDefs, metaReady, answered]);
+  }, [counterDefs, metaReady, answered, valued]);
   const counterSnap = useMemo<DaySnapshot>(() => {
     const s: DaySnapshot = {};
     for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
@@ -10236,8 +10251,9 @@ export default function App() {
       axis: (by, a, b) => compareBy(by as SortBy, a, b),
       stageRank,
       me,
+      paybackRank: (t) => paybackRank(t, valued),
     });
-  }, [planSort, me, stageNames, stageOrder]);
+  }, [planSort, me, stageNames, stageOrder, valued]);
 
   /*
    * Odsiew po statusie NIE jest tu robiony — robi go `Planning`, bo rozni sie

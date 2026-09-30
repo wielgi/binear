@@ -120,8 +120,8 @@ following the steps of the task audit. Left to right:
 | **To interview** | outside the sprint, tagged `DO-WYWIADU` **or with no readiness tag at all** (new tasks, or ones tagged only `BUG`, `Wysoki`…) |
 | **Waiting for an answer** | outside the sprint, tagged `OCZEKUJE-NA-ODPOWIEDZ`, nobody outside IT has answered yet |
 | **Answers to read** | the same tag, and someone outside IT answered with substance after our last round of questions |
-| **To estimate** | outside the sprint, `DO-STARTU`, no story points |
-| **Ready to start** | outside the sprint, `DO-STARTU`, with story points — can be pulled into a sprint |
+| **To estimate** | outside the sprint, `DO-STARTU`, but **missing any of the three**: story points, a benefit category tag, or a payback period |
+| **Ready to start** | outside the sprint, `DO-STARTU`, with **all three** — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
 | **Bugs** *(apart, behind a divider)* | open tasks tagged `BUG`, in the sprint or outside it, deferred excluded |
 
@@ -140,6 +140,31 @@ tasks, not how many the current view shows. Clicking a card replaces the list
 with exactly the tasks it counts (search still applies); clicking it again, or
 changing scope, filters or toggles, returns to the normal view. Tag names match
 case-insensitively, as in Bitrix.
+
+**What "ready" means.** A `DO-STARTU` task needs three things to be ready to start:
+
+- **story points** (the estimate);
+- **a benefit category** — one tag out of `BUG`, `OSZCZEDNOSC`, `PRZYCHOD`, `RYZYKO`,
+  `ANALITYKA`, `UTRZYMANIE`, `WYMOG` (a tag outside this list, e.g. `Wysoki`, is not a category);
+- **a payback period** — a `WARTOŚĆ` message in the task's chat that names one of four
+  bands after the word `zwrot`: `do 3 mies.`, `3–6 mies.`, `6–12 mies.`, `ponad 12 mies.`
+  (`nie da się policzyć` counts as `ponad 12`). The message is matched at its start,
+  ignoring case, bold and Polish letters; system entries don't count; the **newest**
+  `WARTOŚĆ` message wins, so a correction replaces an old value. A `WARTOŚĆ` message
+  without a readable band is not a payback period.
+
+`WYMOG` (law, contract, a counterparty) has a deadline instead of a ranking: it needs **no
+payback period but must have a deadline** (Bitrix's own `Termin` field). Missing any of the
+above puts the task on **To estimate**, not **Ready to start**. Chats are read only for
+tasks that already have an estimate and a category, so the extra requests are few; while
+they load, both cards show `…` rather than a wrong number, and if chats can't be read at
+all (no `im` scope) the cards stay on `…`.
+
+**Planning: sort by payback.** The planning view has a new sort level, **Okres zwrotu**,
+and it sits in the default stack after the `Wysoki` tag: `WYMOG` first (nearest deadline
+first, then those without a deadline), then `do 3 → 3–6 → 6–12 → ponad 12 mies.`, and
+tasks without a payback period last. Within a band the next level (story points) decides.
+Anyone who saved their own sort keeps it — add the level from the sort menu.
 
 **Answers.** The anchor is the last comment by IT that looks like interview
 questions (a line starting with `[B]1.`). An answer is a later message from someone outside IT that has substance: numbered

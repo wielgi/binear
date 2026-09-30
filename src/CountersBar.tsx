@@ -7,18 +7,22 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { fetchChatTail, type ChatTail, type Task } from './bitrix';
 import {
   answerState,
+  awaitsValue,
   dayKey,
   DEFERRED_STATUS,
   hasTag,
   loadHistory,
+  paybackBand,
   previousDay,
   recordDay,
   saveHistory,
   TAG_CZEKA,
+  TAG_DO_STARTU,
   type CounterDef,
   type CounterKey,
   type CounterValue,
   type DaySnapshot,
+  type PaybackBand,
 } from './counters';
 import {
   BugIcon,
@@ -142,6 +146,86 @@ export function useAnsweredTasks(
   }, [key, enabled]);
 
   return state && state.group === groupId ? state.answered : null;
+}
+
+/**
+ * Zadania DO-STARTU, którym do kompletu brakuje tylko okresu zwrotu, a w czacie mają
+ * już wiadomość WARTOŚĆ z czytelnym przedziałem zwrotu → ten przedział (patrz `paybackBand`).
+ * Przedział służy też do sortowania w planowaniu, więc to mapa, a nie sam zbiór.
+ *
+ * Czytamy czaty wyłącznie tych, które mają wycenę i kategorię (`awaitsValue`): pozostałe
+ * i tak są „do wyceny", więc ich czat niczego nie zmienia. Zadania zamknięte, odłożone
+ * i z aktywnego sprintu pomijamy — kafelki ich nie liczą.
+ *
+ * `null` dopóki pierwszy przebieg dla tego projektu się nie skończy albo gdy czatów
+ * nie da się przeczytać (brak zakresu `im`): wtedy kafelki pokazują wielokropek, a nie
+ * „wszystko do wyceny".
+ */
+export function useValuedTasks(
+  tasks: Task[],
+  opts: {
+    closed: ReadonlySet<string>;
+    sprintId: number | null;
+    groupId: number | null;
+    enabled: boolean;
+  },
+): ReadonlyMap<number, PaybackBand> | null {
+  const { closed, sprintId, groupId, enabled } = opts;
+  const [state, setState] = useState<{ group: number | null; valued: Map<number, PaybackBand> } | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((x) => x + 1), ANSWERS_REFRESH_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const candidates = useMemo(
+    () =>
+      tasks.filter(
+        (t) =>
+          !closed.has(t.status) &&
+          t.status !== DEFERRED_STATUS &&
+          (sprintId === null || t.sprintId !== sprintId) &&
+          hasTag(t, TAG_DO_STARTU) &&
+          awaitsValue(t) &&
+          t.chatId !== null,
+      ),
+    [tasks, closed, sprintId],
+  );
+
+  const key = useMemo(
+    () =>
+      `${groupId}#${tick}#` +
+      candidates.map((t) => `${t.id}:${t.chatId}:${t.changedDate}:${t.newComments}`).join('|'),
+    [candidates, groupId, tick],
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+
+    (async () => {
+      const got = await Promise.allSettled(candidates.map((t) => fetchChatTail(t.chatId as number)));
+      // Wszystkie czaty odmówiły (np. brak zakresu `im`) — nie udajemy, że nikt nie ma wartości.
+      if (got.length > 0 && got.every((r) => r.status === 'rejected')) return;
+      const valued = new Map<number, PaybackBand>();
+      got.forEach((r, i) => {
+        if (r.status !== 'fulfilled') return;
+        const band = paybackBand(r.value.messages);
+        if (band) valued.set(candidates[i].id, band);
+      });
+      if (!cancelled) setState({ group: groupId, valued });
+    })().catch(() => {
+      /* Czat nieczytelny — kafelki zostają przy ostatnim wyniku. */
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // `candidates` i reszta są w kluczu — efekt ma ruszać tylko, gdy klucz się zmieni.
+  }, [key, enabled]);
+
+  return state && state.group === groupId ? state.valued : null;
 }
 
 /**

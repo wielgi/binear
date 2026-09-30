@@ -33,6 +33,12 @@ export function stackComparator(levels: Cmp[], tail: Cmp): Cmp {
   };
 }
 
+/** Termin zadania jako czas; brak terminu idzie na koniec (najdalej). */
+const deadlineTime = (t: Task): number => {
+  const ms = t.deadline ? Date.parse(t.deadline) : NaN;
+  return Number.isNaN(ms) ? Number.MAX_SAFE_INTEGER : ms;
+};
+
 /** Ma tag „Wysoki" (bez wzgledu na wielkosc liter) — ranga 0, inaczej 1. */
 const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki') ? 0 : 1);
 
@@ -42,11 +48,30 @@ const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki'
  * `axis` to rosnace porownanie osi wspolnych z lista (priorytet, daty, tytul) —
  * podawane z zewnatrz, zeby „po priorytecie" znaczylo tu to samo co na liscie.
  * `stageRank` to pozycja etapu w procesie; zadanie bez etapu idzie na koniec.
+ * `paybackRank` to miejsce w sortowaniu „po zwrocie" (patrz `paybackRank` w counters.ts);
+ * bez niej ta os niczego nie rozstrzyga.
  */
 export function planComparator(
   sort: PlanSortLevel[],
-  deps: { axis: (by: string, a: Task, b: Task) => number; stageRank: (t: Task) => number; me: number | null },
+  deps: {
+    axis: (by: string, a: Task, b: Task) => number;
+    stageRank: (t: Task) => number;
+    me: number | null;
+    paybackRank?: (t: Task) => number;
+  },
 ): Cmp {
+  /*
+   * „Po zwrocie": wymogi na poczatku, od najblizszego terminu (wymog ma date, nie
+   * ranking), potem przedzialy od najlepszego, na koncu zadania bez okresu zwrotu.
+   * Zadania w tym samym przedziale zostaja w remisie — rozstrzyga kolejny poziom stosu.
+   */
+  const rankOf = deps.paybackRank ?? (() => 0);
+  const byPayback: Cmp = (a, b) => {
+    const r = rankOf(a) - rankOf(b);
+    if (r !== 0 || rankOf(a) !== 0) return r;
+    return deadlineTime(a) - deadlineTime(b);
+  };
+
   const levels = sort.map((lvl): Cmp => {
     /* Kazda os ROSNACO — kierunek doklada dopiero `odwroc`. */
     const f: Cmp =
@@ -56,7 +81,9 @@ export function planComparator(
           ? (a, b) => wysokiRank(a) - wysokiRank(b)
           : lvl.by === 'sp'
             ? (a, b) => (a.storyPoints ?? 0) - (b.storyPoints ?? 0)
-            : (a, b) => deps.axis(lvl.by, a, b);
+            : lvl.by === 'zwrot'
+              ? byPayback
+              : (a, b) => deps.axis(lvl.by, a, b);
     return lvl.dir === 'asc' ? f : (a, b) => -f(a, b);
   });
 
