@@ -176,6 +176,8 @@ import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
+import { CapacityChip, useNow } from './CapacityChip';
+import { sprintCapacity } from './sprintClock';
 import {
   COUNTERS,
   counterDef,
@@ -8625,6 +8627,36 @@ export default function App() {
   const sprintId = activeSprint?.id ?? null;
 
   /*
+   * Odliczanie do konca sprintu przy etapie „Nowe / Oczekujace" (patrz sprintClock.ts).
+   * Liczy sie z CALEJ grupy zadan, nie z tego, co przepuscil filtr — pytanie brzmi
+   * „zdazymy?", a nie „ile widze". Etap „Nowe" to ten o typie NEW w AKTYWNYM sprincie
+   * (id etapow sa per sprint, wiec po nazwie nie da sie ich odroznic od cudzych).
+   */
+  const now = useNow();
+  const waitingStages = useMemo(
+    () => stages.filter((s) => sprintId !== null && s.sprintId === sprintId && s.type === 'NEW'),
+    [stages, sprintId],
+  );
+  const waitingStageIds = useMemo(() => new Set(waitingStages.map((s) => s.id)), [waitingStages]);
+  const waitingStageNames = useMemo(() => new Set(waitingStages.map((s) => s.name)), [waitingStages]);
+  const capacity = useMemo(
+    () =>
+      sprintCapacity({
+        now,
+        dateEnd: activeSprint?.dateEnd ?? null,
+        devs: config?.capacityDevs ?? 4,
+        sprintId,
+        waitingStageIds,
+        excludedIds: config?.capacityExcludeIds ?? [],
+        tasks,
+      }),
+    [now, activeSprint?.dateEnd, config?.capacityDevs, config?.capacityExcludeIds, sprintId, waitingStageIds, tasks],
+  );
+  /* Chip tylko wtedy, gdy widok naprawde pokazuje ten sprint — w „Wszystkich" etap „Nowe"
+     zlewa zadania z wielu sprintow i liczba nie odpowiadalaby temu, co widac. */
+  const capacityShown = scope === 'sprint' ? capacity : null;
+
+  /*
    * Liczniki nad lista (patrz counters.ts). Licza CALA grupe — bez zakresu,
    * przelacznikow i filtrow — bo odpowiadaja na pytanie „ile tego jest", a nie „ile
    * widze". Klikniecie karty podmienia liste na dokladnie te zadania, ktore liczy.
@@ -11443,6 +11475,7 @@ export default function App() {
             epicOf={epicOf}
             subCounts={childStats}
             relatedIds={relatedIds}
+            headExtra={(s) => (capacityShown && waitingStageIds.has(s.id) ? <CapacityChip cap={capacityShown} /> : null)}
             pending={pending}
             activeId={flat[cursor]?.id ?? null}
             openId={openId}
@@ -11520,6 +11553,9 @@ export default function App() {
                     {g.tasks.length}
                   </HoverNote>
                   <GroupPoints tasks={g.tasks} />
+                  {groupBy === 'stage' && capacityShown && waitingStageNames.has(g.key) && (
+                    <CapacityChip cap={capacityShown} />
+                  )}
                 </div>
                 )}
                 {/*
@@ -11561,6 +11597,9 @@ export default function App() {
                               {sub.tasks.length}
                             </HoverNote>
                             <GroupPoints tasks={sub.tasks} />
+                            {subGroupBy === 'stage' && capacityShown && waitingStageNames.has(sub.key) && (
+                              <CapacityChip cap={capacityShown} />
+                            )}
                           </div>
                         )}
                         {!subCollapsed &&
