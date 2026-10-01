@@ -129,11 +129,29 @@ describe('countAll', () => {
     expect(w.koncept.count).toBe(3);
   });
 
-  it('koncept to cecha: nie wchodzi do sumy, a zadanie zostaje w swoim stanie', () => {
-    const w = countAll([zadanie({ id: 80, tags: ['KONCEPCJA'] })], ctx());
-    expect(w.koncept.count).toBe(1);
-    expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
+  it('koncepcja jest poza rejestrem: nie liczy sie ani do „poza sprintem", ani do wywiadu', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 80, tags: ['KONCEPCJA'] }),
+        zadanie({ id: 81, tags: ['KONCEPT', 'DO-WYWIADU'] }),
+        zadanie({ id: 82, tags: ['koncepcja', 'OCZEKUJE-NA-ODPOWIEDZ'] }),
+        zadanie({ id: 83, tags: ['KONCEPT', 'DO-STARTU'], storyPoints: 4 }),
+        zadanie({ id: 84 }), // zwykle nowe zadanie — to ono jest w wywiadzie
+      ],
+      ctx(),
+    );
+    expect(w.koncept.count).toBe(4);
+    expect(w.poza.count).toBe(1);
     expect(w.wywiad.count).toBe(1);
+    expect([w.czeka.count, w.odpowiedzi.count, w.wycena.count, w.gotowe.count]).toEqual([0, 0, 0, 0]);
+    expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
+  });
+
+  it('koncepcja w aktywnym sprincie zostaje w „W sprincie" i w „Koncept"', () => {
+    const w = countAll([zadanie({ id: 85, tags: ['KONCEPCJA'], sprintId: 70, storyPoints: 3 })], ctx());
+    expect(w.sprint.count).toBe(1);
+    expect(w.koncept.count).toBe(1);
+    expect(w.poza.count).toBe(0);
   });
 
   it('bug to cecha: zadanie z BUG jest tez w swoim stanie, wiec suma stanow sie nie zmienia', () => {
