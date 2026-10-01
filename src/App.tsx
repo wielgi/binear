@@ -177,6 +177,7 @@ import {
 } from './history';
 import { TaskCode } from './TaskCode';
 import { BugBadge } from './BugBadge';
+import { zapiszPrzeniesienie, type Dodane } from './planRecent';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
@@ -8425,6 +8426,9 @@ export default function App() {
   const [planZwiniete, setPlanZwiniete] = useState<number[]>(() =>
     Array.isArray(saved.planZwiniete) ? saved.planZwiniete.filter((v) => Number.isFinite(v)) : [],
   );
+  /* Kiedy (kolejnosc) zadanie weszlo do sprintu w widoku planowania — Bitrix tego nie trzyma. */
+  const [planDodane, setPlanDodane] = useState<Dodane>({});
+  const planDodaneNext = useRef(1);
   const [planSort, setPlanSort] = useState<{ by: PlanSortBy; dir: 'asc' | 'desc' }[]>(
     () => saved.planSort ?? (SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[]),
   );
@@ -10370,6 +10374,9 @@ export default function App() {
       const zaslepka = directory.find((e) => e.id === UNASSIGNED_ID);
       let przepiete = 0;
 
+      const zapis = zapiszPrzeniesienie(planDodane, list, sprintId !== null, planDodaneNext.current);
+      planDodaneNext.current = zapis.nastepny;
+      setPlanDodane(zapis.dodane);
       return Promise.all(
         list.map((id) => {
           const t = tasks.find((x) => x.id === id);
@@ -10410,7 +10417,7 @@ export default function App() {
         return reload(true);
       });
     },
-    [nextSprint, mutate, backlogId, reload, directory, me, config, toast, tasks],
+    [nextSprint, mutate, backlogId, reload, directory, me, config, toast, tasks, planDodane],
   );
 
   /**
@@ -11649,6 +11656,7 @@ export default function App() {
             onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
             sort={planSort}
             kierownicy={config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED}
+            dodane={planDodane}
             sortFields={PLAN_SORTS}
             onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}
             /*
