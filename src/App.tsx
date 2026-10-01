@@ -38,6 +38,7 @@ import {
   fetchScrumMeta,
   fetchEpics,
   fetchTaskDetail,
+  fetchTaskFresh,
   fetchTaskHistory,
   BxError,
   createSprint,
@@ -142,6 +143,7 @@ import {
 import {
   MONTHS,
   podzielNaTrafienia,
+  relativeAge,
   tagsForWidth,
   shortDate,
   isUnassigned,
@@ -947,6 +949,8 @@ interface Toast {
  * o same ID zmienionych zadan, wiec 30 s nie jest tu zadnym obciazeniem.
  */
 const POLL_MS = 30_000;
+/** Co ile panel otwartego zadania sprawdza w Bitriksie, czy cos sie w nim nie zmienilo. */
+const PANEL_POLL_MS = 30_000;
 
 /* Ile czekamy przed ponowieniem po odmowie z limitu. Wiadro portalu leje sie
    2 zapytania na sekunde, wiec pare sekund wystarcza, zeby bylo z czego brac. */
@@ -1548,6 +1552,40 @@ function useBitrixData() {
       tasks: d.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
     }));
 
+  /**
+   * Odswieza JEDNO zadanie z Bitriksa — pola wiersza listy, story pointy i epik — i wstawia je do
+   * listy. Panel szczegolow wola to przy otwarciu, co pol minuty i na klikniecie.
+   *
+   * Osobno od przeladowania calej grupy, bo sonda calej listy patrzy tylko na date zmiany, a
+   * story pointy i epik leza na scrumowym bycie zadania i tej daty NIE przesuwaja — zmiana ich w
+   * Bitriksie byla dla binear niewidoczna, dopoki ktos nie odswiezyl wszystkiego recznie.
+   *
+   * Pinezki (wlasne, jeszcze niepotwierdzone zapisy) maja pierwszenstwo, jak przy kazdym pobraniu.
+   * `false` = Bitrix nie zna juz tego zadania; wiersz zostaje, a dopiero pelne przeladowanie
+   * zdecyduje, co z nim zrobic.
+   */
+  const refreshTask = useCallback(async (id: number): Promise<boolean> => {
+    const fresh = await fetchTaskFresh(id);
+    if (!fresh) return false;
+    setData((d) => ({
+      ...d,
+      tasks: applyPins(
+        d.tasks.map((t) =>
+          t.id !== id
+            ? t
+            : {
+                ...fresh.task,
+                // Scrumowe pola: gdy sie nie udalo ich odczytac, zostaja dotychczasowe.
+                storyPoints: fresh.meta ? fresh.meta.storyPoints : t.storyPoints,
+                epicId: fresh.meta ? fresh.meta.epicId : t.epicId,
+              },
+        ),
+        pinsRef.current,
+      ),
+    }));
+    return true;
+  }, []);
+
   const mutate = useCallback(
     async (id: number, patch: Partial<Task>, run: () => Promise<unknown>, what: string) => {
       const before = tasksRef.current.find((t) => t.id === id);
@@ -1719,6 +1757,9 @@ function useBitrixData() {
     newIds,
     reload: load,
     mutate,
+    refreshTask,
+    /** Kiedy ostatnio cokolwiek zrobiles — panel zadania nie pyta Bitriksa, gdy nikt nie pracuje. */
+    activeAtRef,
     removeTask,
     toast,
     selectProject,
@@ -3863,6 +3904,7 @@ function Comments({
   chatId,
   fraza,
   ready,
+  refreshKey,
   me,
   people,
   onConfirm,
@@ -3875,6 +3917,8 @@ function Comments({
   chatId: number | null;
   /** Szczegoly zadania juz doszly (albo sie nie udaly) — dopiero wtedy znamy `chatId`. */
   ready: boolean;
+  /** Rosnie przy kazdym odswiezeniu panelu — watek dociaga sie wtedy po cichu, bez migniecia. */
+  refreshKey: number;
   me: number | null;
   /** Osoby do wzmianek `@` — te same, co w filtrze i pickerze osoby. */
   people: Person[];
@@ -4124,6 +4168,26 @@ function Comments({
   }, [ready, taskId, chatId]);
 
   useEffect(load, [load]);
+
+  /*
+   * Ciche odswiezenie watku (panel odswieza sie co pol minuty i na klikniecie). W odroznieniu od
+   * `load` nie wraca do cache i nie pokazuje „Wczytywanie…" — podmienia tylko wtedy, gdy watek
+   * naprawde sie zmienil, zeby nie przerysowywac go co 30 s i nie ruszac przewijania.
+   */
+  useEffect(() => {
+    if (refreshKey === 0 || !ready) return;
+    const seq = ++loadSeq.current;
+    fetchComments(taskId, chatId)
+      .then((c) => {
+        if (seq !== loadSeq.current) return;
+        setComments((prev) => (prev && JSON.stringify(prev) === JSON.stringify(c) ? prev : c));
+        setCachedComments(taskId, c);
+      })
+      .catch(() => {
+        /* Cichy bonus — niepowodzenie zostawia to, co juz widac. */
+      });
+    // Tylko zmiana klucza odswiezenia; reszta jest ta sama co przy `load`.
+  }, [refreshKey]);
 
   /**
    * Pierwszy komentarz, ktorego jeszcze nie widzialem — nad nim staje kreska.
@@ -5437,6 +5501,8 @@ function DetailPanel({
   onDeadline,
   onTitle,
   onClose,
+  onRefresh,
+  idle,
   onDelete,
   onConfirm,
   onHistory,
@@ -5473,6 +5539,13 @@ function DetailPanel({
   onDeadline: (date: string) => void;
   onTitle: (title: string) => void;
   onClose: () => void;
+  /**
+   * Pobiera TO zadanie z Bitriksa od nowa (pola listy, story pointy, epik) i wstawia do listy;
+   * `false`, gdy Bitrix go nie zna. Szczegoly i komentarze panel dociaga sam.
+   */
+  onRefresh: () => Promise<boolean>;
+  /** Czy nikt nic nie robi od dluzszego czasu — wtedy panel przestaje pytac Bitriksa. */
+  idle: () => boolean;
   /** Usuniecie zadania — panel sam pyta o potwierdzenie przez App (setConfirm). */
   onDelete: () => void;
   /** To samo okno dla drobniejszych nieodwracalnych — dzis: usuniecie komentarza. */
@@ -5488,27 +5561,89 @@ function DetailPanel({
   const [detailError, setDetailError] = useState(false);
 
   /*
+   * ŚWIEŻOŚĆ danych tego zadania. Panel pokazuje od razu to, co ma w pamięci (lista, cache
+   * szczegółów i komentarzy), a swieze dane dociąga w tle — więc musi być widać, od kiedy
+   * jest to, na co patrzysz. `fetchedAt` = kiedy ostatnio przyszły z Bitriksa (null = jeszcze nie,
+   * widać wersję z pamięci).
+   */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  /* Podbijany przy odswiezeniu — `Comments` po zmianie dociaga watek po cichu. */
+  const [commentsTick, setCommentsTick] = useState(0);
+  const currentId = useRef(task.id);
+  currentId.current = task.id;
+  const inFlight = useRef<number | null>(null);
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
+  const idleRef = useRef(idle);
+  idleRef.current = idle;
+  /* Napis „pobrano X temu" przelicza sie sam, bez nowych danych. */
+  const [, setClock] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setClock((n) => n + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  /*
    * Podglad obrazkow Z OPISU. Trzymamy komplet (lista + pozycja) w jednym stanie, bo
    * przy obrazku spoza zalacznikow galeria sklada sie tylko z niego — sam indeks nie
    * mialby wtedy do czego wskazywac.
    */
   const [preview, setPreview] = useState<{ items: PreviewItem[]; index: number } | null>(null);
 
+  /**
+   * Odswiezenie tego zadania: wiersz listy (z story pointami i epikiem), szczegoly i — gdy
+   * `comments` — komentarze. Jedno naraz na zadanie, a wynik z POPRZEDNIEGO zadania odpada (panel
+   * nie jest kluczowany po zadaniu). Blad szczegolow pokazujemy tylko, gdy nie mamy nawet cache —
+   * inaczej zostaje stara wersja z dopiskiem, ze odswiezenie sie nie udalo.
+   */
+  const refresh = useCallback(
+    async (opts: { comments: boolean }) => {
+      const id = task.id;
+      if (inFlight.current === id) return;
+      inFlight.current = id;
+      setRefreshing(true);
+      const [row, det] = await Promise.allSettled([onRefreshRef.current(), fetchTaskDetail(id)]);
+      if (inFlight.current === id) inFlight.current = null;
+      if (currentId.current !== id) return;
+      setRefreshing(false);
+      if (det.status === 'fulfilled') setDetail(det.value);
+      else if (!getCachedDetail(id)) setDetailError(true);
+      if (opts.comments) setCommentsTick((n) => n + 1);
+      const ok = det.status === 'fulfilled' || (row.status === 'fulfilled' && row.value);
+      setRefreshFailed(!ok);
+      if (ok) setFetchedAt(Date.now());
+    },
+    [task.id],
+  );
+
+  // Otwarcie: od razu z pamieci (albo null przy pierwszym otwarciu), a swieze dane ruszaja w tle.
+  // Komentarze ladują się same przy montowaniu, więc ich tu nie ruszamy.
   useEffect(() => {
-    let stale = false;
-    const cached = getCachedDetail(task.id);
-    setDetail(cached); // od razu z cache (albo null, gdy zadania jeszcze nie otwierano)
+    setDetail(getCachedDetail(task.id));
     setDetailError(false);
+    setFetchedAt(null);
+    setRefreshFailed(false);
+    void refresh({ comments: false });
+  }, [task.id, refresh]);
 
-    fetchTaskDetail(task.id)
-      .then((d) => !stale && setDetail(d))
-      // Blad pokazujemy tylko, gdy nie mamy nawet cache — inaczej zostaje stara wersja.
-      .catch(() => !stale && !cached && setDetailError(true));
-
-    return () => {
-      stale = true;
+  // Dopoki zadanie jest otwarte, co pol minuty sprawdzamy, czy cos sie w nim nie zmienilo — ale
+  // tylko gdy karta jest widoczna i ktos w ogole pracuje, zeby panel zostawiony na noc nie pytal
+  // Bitriksa w nieskonczonosc. Powrot na karte odswieza od razu.
+  useEffect(() => {
+    const tick = () => {
+      if (document.hidden || idleRef.current()) return;
+      void refresh({ comments: true });
     };
-  }, [task.id]);
+    const timer = setInterval(tick, PANEL_POLL_MS);
+    const onVisible = () => !document.hidden && tick();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refresh]);
 
   /* Wszystkie obrazki zadania — takze te doczepione, a nie wstawione w opis; skoro
      podglad juz jest, ma po czym chodzic strzalkami. */
@@ -5684,6 +5819,36 @@ function DetailPanel({
           {task.code && <TaskCode code={`#${task.id}`} copy={String(task.id)} onCopied={() => {}} />}
         </span>
         <div className="detail-head-right">
+          {/*
+            Kiedy dane tego zadania przyszly z Bitriksa, z przyciskiem odswiezenia. Do czasu pierwszego
+            pobrania widac wersje z pamieci — napis mowi to wprost, zeby stara liczba nie wygladala jak
+            aktualna.
+          */}
+          <button
+            className={`detail-fresh${refreshFailed ? ' detail-fresh-fail' : ''}`}
+            onClick={() => void refresh({ comments: true })}
+            disabled={refreshing}
+            title={
+              fetchedAt
+                ? `Pobrano z Bitriksa o ${new Date(fetchedAt).toLocaleTimeString('pl-PL')} — kliknij, aby odświeżyć to zadanie`
+                : 'Pokazuję wersję z pamięci — kliknij, aby pobrać to zadanie z Bitriksa'
+            }
+          >
+            <span className={refreshing ? 'spin' : undefined}>
+              <RefreshIcon />
+            </span>
+            <span className="detail-fresh-text">
+              {refreshing
+                ? fetchedAt
+                  ? 'odświeżam…'
+                  : 'z pamięci · odświeżam…'
+                : refreshFailed
+                  ? `nie udało się odświeżyć${fetchedAt ? ` · ${relativeAge(Date.now() - fetchedAt)}` : ''}`
+                  : fetchedAt
+                    ? `pobrano ${relativeAge(Date.now() - fetchedAt)}`
+                    : 'z pamięci'}
+            </span>
+          </button>
           {/*
             Droga w druga strone niz z dziennika do zadania: stad pytamy „co
             binear zrobil TEMU zadaniu". Bez tego trzeba bylo otworzyc dziennik
@@ -6268,6 +6433,7 @@ function DetailPanel({
           fraza={fraza}
           chatId={mine?.chatId ?? null}
           ready={mine !== null || detailError}
+          refreshKey={commentsTick}
           me={me}
           people={people}
           onConfirm={onConfirm}
@@ -8040,6 +8206,8 @@ export default function App() {
     newIds,
     reload,
     mutate,
+    refreshTask,
+    activeAtRef,
     removeTask,
     toast,
     selectProject,
@@ -11662,6 +11830,8 @@ export default function App() {
             )
           }
           onClose={() => setOpenId(null)}
+          onRefresh={() => refreshTask(openTask.id)}
+          idle={() => Date.now() - activeAtRef.current > IDLE_MS}
           onHistory={(id) => {
             setHistFocus(id);
             setHistSeq((n) => n + 1);

@@ -750,6 +750,40 @@ export async function fetchScrumMeta(
 }
 
 /**
+ * JEDNO zadanie w ksztalcie wiersza listy, prosto z Bitriksa — do odswiezenia tego zadania, na
+ * ktore wlasnie patrzymy, bez przeladowywania calej grupy.
+ *
+ * Dwa wywolania: `tasks.task.list` z filtrem po id (tylko ta metoda oddaje tagi i licznik
+ * nieprzeczytanych w ksztalcie listy) i `tasks.api.scrum.task.get` (story pointy i epik, ktore
+ * leza na scrumowym bycie zadania — a ich zmiana NIE przesuwa daty zmiany zadania, wiec sonda
+ * calej listy ich nie zlapie).
+ *
+ * `null` = Bitrix nie zna zadania (usuniete albo bez dostepu). `meta` jest `undefined`, gdy
+ * scrumowe pole nie dalo sie odczytac — wtedy zostaja dotychczasowe wartosci; `null` pol w srodku
+ * znaczy „brak oszacowania / brak epika".
+ */
+export async function fetchTaskFresh(
+  taskId: number,
+): Promise<{ task: Task; meta: ScrumMeta | undefined } | null> {
+  const [list, scrum] = await Promise.all([
+    call<{ tasks?: any[] }>('tasks.task.list', {
+      filter: { ID: taskId },
+      select: LIST_SELECT,
+    }),
+    call<any>('tasks.api.scrum.task.get', { id: taskId }).catch(() => undefined),
+  ]);
+  const row = list?.tasks?.[0];
+  if (!row) return null;
+  return {
+    task: normalizeTask(row),
+    meta:
+      scrum === undefined
+        ? undefined
+        : { storyPoints: storyPointValue(scrum?.storyPoints), epicId: relId(scrum?.epicId) },
+  };
+}
+
+/**
  * Epiki grupy — nadrzedne tematy scruma. Osobne zapytanie (jak sprint/backlog),
  * bo `tasks.task.list` o nich nie wie. Blad polykamy: projekt bez scruma nie ma
  * epikow i wtedy funkcja epika po prostu sie nie pokazuje.

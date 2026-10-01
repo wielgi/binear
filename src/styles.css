@@ -3648,6 +3648,55 @@ body.resizing {
   gap: var(--s1);
 }
 
+/*
+ * „pobrano 12 s temu" + odswiezenie tego jednego zadania. Cichy, jak reszta naglowka: ma
+ * odpowiadac na pytanie „czy to jest swieze", a nie rzucac sie w oczy. Przy bledzie odswiezenia
+ * dopisek robi sie bursztynowy — stara liczba nie moze udawac aktualnej.
+ */
+.detail-fresh {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 28px;
+  padding: 0 var(--s2);
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border-radius: var(--radius);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.detail-fresh:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.detail-fresh:disabled {
+  cursor: progress;
+}
+
+.detail-fresh-fail {
+  color: var(--accent-amber);
+}
+
+.detail-fresh .spin {
+  display: inline-flex;
+  animation: detail-fresh-spin 900ms linear infinite;
+}
+
+@keyframes detail-fresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-fresh .spin {
+    animation: none;
+  }
+}
+
 .detail-body {
   flex: 1;
   min-height: 0; /* inaczej `flex: 1` nie ograniczy wysokosci i scroll nie ruszy */
