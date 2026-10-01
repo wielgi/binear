@@ -5979,6 +5979,11 @@ a.mention:hover {
 
 /* --- rozklad obciazenia --- */
 
+/* SP kierownika w naglowku panelu — przygaszone, bo nie wchodzi do limitu zespolu. */
+.plan-num-kierownik {
+  color: var(--fg-dim);
+}
+
 .plan-load {
   padding: 0 var(--s3) var(--s2);
 }

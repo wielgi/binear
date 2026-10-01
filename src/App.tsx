@@ -957,6 +957,8 @@ interface Toast {
 const POLL_MS = 30_000;
 /** Co ile panel otwartego zadania sprawdza w Bitriksie, czy cos sie w nim nie zmienilo. */
 const PANEL_POLL_MS = 30_000;
+/** Brak osob poza limitem — stala, zeby memo w planowaniu nie liczylo sie od nowa przy kazdym renderze. */
+const NO_CAPACITY_EXCLUDED: readonly number[] = [];
 
 /* Ile czekamy przed ponowieniem po odmowie z limitu. Wiadro portalu leje sie
    2 zapytania na sekunde, wiec pare sekund wystarcza, zeby bylo z czego brac. */
@@ -11590,6 +11592,7 @@ export default function App() {
             onPrzeniesienie={() => setPlanPrzeniesienie((v) => !v)}
             onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
             sort={planSort}
+            kierownicy={config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED}
             sortFields={PLAN_SORTS}
             onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}
             /*
