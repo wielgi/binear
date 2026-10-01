@@ -626,8 +626,8 @@ const DEFAULT_SETTINGS: Settings = {
   showDone: false,
   planDone: false,
   planReview: true,
-  /* Domyslna kolejnosc waznosci: STRATEGIA na gorze, potem plomien rosnaco (ranga 0 = wysoki), tag
-     tak samo, okres zwrotu rosnaco, a story pointy malejaco, bo tu wiecej znaczy wazniej.
+  /* Domyslna kolejnosc waznosci: plomien (awaria) najpierw, potem STRATEGIA, okres zwrotu rosnaco,
+     tag „Wysoki" jako rozstrzygniecie remisu, a story pointy malejaco, bo tu wiecej znaczy wazniej.
      Zrodlo prawdy: PLAN_SORT_DOMYSLNY w planSort.ts (razem z migracja starego domyslnego). */
   planSort: PLAN_SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[],
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.

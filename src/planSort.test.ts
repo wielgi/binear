@@ -156,20 +156,47 @@ describe('sortowanie po zwrocie', () => {
   });
 });
 
-describe('domyslna kolejnosc planowania: STRATEGIA na gorze, potem zwrot rosnaco', () => {
+describe('domyslna kolejnosc planowania: plomien, strategia, zwrot, Wysoki, SP', () => {
   const d = { ...deps, paybackRank };
 
-  it('domyslny stos to strategia, priorytet, Wysoki, zwrot, SP', () => {
-    expect(PLAN_SORT_DOMYSLNY.map((l) => l.by)).toEqual(['strategia', 'priority', 'wysoki', 'zwrot', 'sp']);
+  it('domyslny stos to priorytet, strategia, zwrot, Wysoki, SP', () => {
+    expect(PLAN_SORT_DOMYSLNY.map((l) => l.by)).toEqual(['priority', 'strategia', 'zwrot', 'wysoki', 'sp']);
   });
 
-  it('STRATEGIA jest nad wszystkim — takze nad plomieniem i tagiem Wysoki', () => {
+  it('plomien (priorytet 2) jest nad wszystkim — takze nad strategia', () => {
     const tasks = [
-      task(1, { priority: '2', tags: ['ZWROT-3'] }),
-      task(2, { tags: ['Wysoki', 'ZWROT-3'] }),
-      task(3, { priority: '0', tags: ['STRATEGIA'] }),
+      task(1, { priority: '1', tags: ['STRATEGIA'] }),
+      task(2, { priority: '2', tags: ['ZWROT-12+'] }),
+      task(3, { priority: '1', tags: ['ZWROT-3'] }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1, 3]);
+  });
+
+  it('STRATEGIA jest nad zwrotem i nad tagiem Wysoki', () => {
+    const tasks = [
+      task(1, { tags: ['Wysoki', 'ZWROT-3'] }),
+      task(2, { tags: ['ZWROT-3'] }),
+      task(3, { tags: ['STRATEGIA'] }),
     ];
     expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 1, 2]);
+  });
+
+  it('zwrot rozstrzyga PRZED tagiem Wysoki: ZWROT-3 bez Wysoki wyprzedza ZWROT-12 z Wysoki', () => {
+    const tasks = [
+      task(1, { tags: ['Wysoki', 'ZWROT-12'] }),
+      task(2, { tags: ['ZWROT-3'] }),
+      task(3, { tags: ['Wysoki'] }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1, 3]);
+  });
+
+  it('w obrebie tego samego zwrotu tag Wysoki idzie wyzej, potem SP malejaco', () => {
+    const tasks = [
+      task(1, { tags: ['ZWROT-6'], storyPoints: 20 }),
+      task(2, { tags: ['ZWROT-6', 'Wysoki'], storyPoints: 4 }),
+      task(3, { tags: ['ZWROT-6'], storyPoints: 8 }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1, 3]);
   });
 
   it('po strategii i priorytecie porzadkuje zwrot rosnaco: ZWROT-3, 6, 12, 12+, a zadania bez zwrotu zostaja na koncu', () => {
@@ -183,13 +210,21 @@ describe('domyslna kolejnosc planowania: STRATEGIA na gorze, potem zwrot rosnaco
     expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 5, 4, 1, 2]);
   });
 
+  it('wymog (z terminem) idzie przed przedzialami zwrotu', () => {
+    const tasks = [
+      task(1, { tags: ['ZWROT-3'] }),
+      task(2, { tags: ['WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
+  });
+
   it('sortowanie niczego nie ukrywa — zadania bez wyliczonego zwrotu tez sa na liscie', () => {
     const tasks = [task(1), task(2, { tags: ['ZWROT-6'] }), task(3, { tags: ['STRATEGIA'] })];
     expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toHaveLength(3);
   });
 
   it('kilka strategii: kolejny poziom stosu rozstrzyga (o kolejnosci decyduje rada, nie zwrot)', () => {
-    const tasks = [task(1, { tags: ['STRATEGIA'], priority: '0' }), task(2, { tags: ['STRATEGIA'], priority: '2' })];
+    const tasks = [task(1, { tags: ['STRATEGIA', 'ZWROT-12+'] }), task(2, { tags: ['STRATEGIA', 'ZWROT-3'] })];
     expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
   });
 
@@ -207,9 +242,23 @@ describe('migratePlanSort', () => {
     { by: 'sp', dir: 'desc' as const },
   ];
 
-  it('stary domyslny (zapisany w przegladarce) zamienia na nowy', () => {
+  it('kazdy stary domyslny (zapisany w przegladarce) zamienia na nowy', () => {
     expect(migratePlanSort(STARY)).toEqual(PLAN_SORT_DOMYSLNY);
     expect(migratePlanSort([...STARY.slice(0, 2), { by: 'zwrot', dir: 'asc' as const }, STARY[2]])).toEqual(PLAN_SORT_DOMYSLNY);
+    // poprzednia wersja domyslnego: strategia, priorytet, Wysoki, zwrot, SP
+    expect(
+      migratePlanSort([
+        { by: 'strategia', dir: 'asc' as const },
+        { by: 'priority', dir: 'asc' as const },
+        { by: 'wysoki', dir: 'asc' as const },
+        { by: 'zwrot', dir: 'asc' as const },
+        { by: 'sp', dir: 'desc' as const },
+      ]),
+    ).toEqual(PLAN_SORT_DOMYSLNY);
+  });
+
+  it('obecny domyslny przechodzi bez zmian', () => {
+    expect(migratePlanSort(PLAN_SORT_DOMYSLNY)).toEqual(PLAN_SORT_DOMYSLNY);
   });
 
   it('stos ulozony przez uzytkownika zostaje bez zmian', () => {
