@@ -185,3 +185,15 @@ export const isBug = (t: { priority: string; tags: string[] }): boolean => isFla
 
 /** Tagi bez BUG — ten tag zastepuje robak przed tytulem, wiec drugi raz jako etykieta zbedny. */
 export const withoutBugTag = (tags: string[]): string[] => tags.filter((g) => g.toUpperCase() !== 'BUG');
+
+/**
+ * Tagi wystepujace w zadaniach, z liczba uzyc, ALFABETYCZNIE (po polsku, bez wzgledu na wielkosc
+ * liter). Do filtra po tagach, palety komend i okna edycji tagow — tam szuka sie nazwy, wiec
+ * ustawienie wedlug liczby uzyc (najpopularniejsze na gorze) kazalo czytac cala liste. Liczba
+ * zostaje przy kazdym tagu jako podpowiedz.
+ */
+export function tagCounts(tasks: readonly { tags: string[] }[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const t of tasks) for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pl', { sensitivity: 'base' }) || a[0].localeCompare(b[0]));
+}

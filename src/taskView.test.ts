@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasBugTag, isBug, isFlame, podzielNaTrafienia, relativeAge, tagsForWidth, withoutBugTag } from './taskView';
+import { hasBugTag, isBug, isFlame, podzielNaTrafienia, relativeAge, tagCounts, tagsForWidth, withoutBugTag } from './taskView';
 
 /** Skrot do czytelnych asercji: „ab[cd]ef" znaczy, ze `cd` jest podswietlone. */
 const zapis = (text: string, fraza: string) =>
@@ -130,5 +130,32 @@ describe('znaki błędu: płomień i BUG', () => {
   it('tag BUG znika z etykiet (zastępuje go robak), reszta zostaje w kolejności', () => {
     expect(withoutBugTag(['BUG', 'Wysoki', 'bug', 'ZWROT-3'])).toEqual(['Wysoki', 'ZWROT-3']);
     expect(withoutBugTag([])).toEqual([]);
+  });
+});
+
+describe('tagCounts', () => {
+  it('tagi alfabetycznie po polsku, bez względu na wielkość liter, z liczbą użyć', () => {
+    const tasks = [
+      { tags: ['ZWROT-3', 'bug', 'Wysoki'] },
+      { tags: ['bug', 'Źródło', 'DO-STARTU'] },
+      { tags: ['bug', 'Ćwiczenie'] },
+    ];
+    expect(tagCounts(tasks)).toEqual([
+      ['bug', 3],
+      ['Ćwiczenie', 1],
+      ['DO-STARTU', 1],
+      ['Wysoki', 1],
+      ['ZWROT-3', 1],
+      ['Źródło', 1], // w polskim alfabecie ź stoi PO z
+    ]);
+  });
+
+  it('najczęstszy tag nie wędruje na górę — liczy się nazwa', () => {
+    const tasks = [{ tags: ['Zebra'] }, { tags: ['Zebra'] }, { tags: ['Zebra', 'Alfa'] }];
+    expect(tagCounts(tasks).map(([t]) => t)).toEqual(['Alfa', 'Zebra']);
+  });
+
+  it('bez tagów — pusta lista', () => {
+    expect(tagCounts([{ tags: [] }])).toEqual([]);
   });
 });
