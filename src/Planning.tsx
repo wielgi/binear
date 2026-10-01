@@ -28,6 +28,7 @@ import { useDroppable } from '@dnd-kit/core';
 
 import { CLOSED_STATUSES, REVIEW_STATUSES, type Sprint, type Task } from './bitrix';
 import { planDropId } from './dnd';
+import { PLAN_SORT_DOMYSLNY } from './planSort';
 import { BarsIcon, CheckIcon, ChevronIcon, GripIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { tagsForWidth } from './taskView';
@@ -285,17 +286,13 @@ function Pasek({
   );
 }
 
-/** Kolejnosc waznosci: priorytet Bitriksa, tag „Wysoki", story pointy malejaco. */
+/** Kolejnosc waznosci: STRATEGIA, priorytet Bitriksa, tag „Wysoki", okres zwrotu, story pointy malejaco. */
 /** Kursor blizej gory kolumny niz tyle = na naglowku sprintu aktywnego, czyli zwin go. */
 const FOLD_PX = 56;
 /** Tyle trzeba przesunac mysz, zeby wcisniecie uchwytu stalo sie przeciaganiem. */
 const DRAG_PX = 4;
 
-export const SORT_DOMYSLNY: { by: string; dir: 'asc' | 'desc' }[] = [
-  { by: 'priority', dir: 'asc' },
-  { by: 'wysoki', dir: 'asc' },
-  { by: 'sp', dir: 'desc' },
-];
+export const SORT_DOMYSLNY: { by: string; dir: 'asc' | 'desc' }[] = PLAN_SORT_DOMYSLNY;
 
 const jestDomyslne = (sort: { by: string; dir: string }[]) =>
   sort.length === SORT_DOMYSLNY.length &&
