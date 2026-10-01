@@ -22,6 +22,10 @@
  * listy (BUG, Wysoki). Zadanie nowe, bez zadnego tagu gotowosci, to zadanie, o ktore
  * trzeba dopiero zapytac.
  *
+ * KONCEPT / KONCEPCJA leza POZA rejestrem: to pomysly na zbyt wczesnym etapie, zeby je wliczac —
+ * ani do „Poza sprintem", ani do zadnego stanu (w tym „Do wywiadu"). Pokazuje je tylko osobny
+ * kafelek „Koncept". Zadanie z koncepcja, ktore trafilo do aktywnego sprintu, zostaje w „W sprincie".
+ *
  * Odlozone (status 6) leza poza kolejka audytu i poza suma; pokazuje je osobna,
  * wyszarzona notka pod kafelkami.
  *
@@ -146,8 +150,11 @@ export const DEFERRED_STATUS = '6';
 const inAudit = (t: CounterTask, ctx: CounterCtx) => isOpen(t, ctx) && t.status !== DEFERRED_STATUS;
 const inSprint = (t: CounterTask, ctx: CounterCtx) =>
   ctx.sprintId !== null && t.sprintId === ctx.sprintId;
-/** Rejestr do przerobienia: otwarte, nieodlozone, spoza aktywnego sprintu. */
-const outside = (t: CounterTask, ctx: CounterCtx) => inAudit(t, ctx) && !inSprint(t, ctx);
+/** Pomysl na zbyt wczesnym etapie (KONCEPT, starszy KONCEPCJA) — nie jest czescia rejestru do przerobienia. */
+const isKoncept = (t: CounterTask) => TAGS_KONCEPT.some((g) => hasTag(t, g));
+/** Rejestr do przerobienia: otwarte, nieodlozone, spoza aktywnego sprintu i nie-koncepcje. */
+const outside = (t: CounterTask, ctx: CounterCtx) =>
+  inAudit(t, ctx) && !inSprint(t, ctx) && !isKoncept(t);
 
 const isStartu = (t: CounterTask) => hasTag(t, TAG_DO_STARTU);
 /** DO-STARTU ma pierwszenstwo — zadanie z dwoma tagami gotowosci liczy sie raz. */
@@ -300,9 +307,9 @@ export const COUNTERS: CounterDef[] = [
     label: 'Koncept',
     hint:
       'Otwarte zadania z tagiem KONCEPT (albo starszym KONCEPCJA), bez odłożonych — w sprincie i ' +
-      'poza nim. To cecha, a nie stan: takie zadanie jest też w jednym ze stanów obok, więc ' +
-      'kafelek nie wchodzi do sumy.',
-    match: (t, ctx) => inAudit(t, ctx) && TAGS_KONCEPT.some((g) => hasTag(t, g)),
+      'poza nim. To pomysły na zbyt wczesnym etapie, więc poza sprintem NIE wchodzą do „Poza ' +
+      'sprintem" ani do żadnego stanu (także „Do wywiadu") — liczy je tylko ten kafelek.',
+    match: (t, ctx) => inAudit(t, ctx) && isKoncept(t),
     separate: true,
     riseIsBad: false,
   },
