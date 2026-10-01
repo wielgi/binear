@@ -123,7 +123,7 @@ following the steps of the task audit. Left to right:
 | **To estimate** | outside the sprint, `DO-STARTU`, but **missing any of the three**: story points, a benefit category tag, or a payback period |
 | **Ready to start** | outside the sprint, `DO-STARTU`, with **all three** — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
-| **Bugs** *(apart, behind a divider)* | open tasks tagged `BUG`, in the sprint or outside it, deferred excluded |
+| **Bugs** *(apart, behind a divider)* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
 
 **The five middle cards add up to "Outside sprint" exactly.** "Bugs" is an attribute,
 not a state (a bug is also in one of the states), so it stands apart behind a
@@ -297,6 +297,19 @@ responsible person is **in IT**, they stay. A toast says how many tasks were han
 - **Unknown stays put.** If the employee list hasn't loaded, or the person isn't in it, the task is
   left alone — a wrong guess in the other direction would take a task away from someone in IT.
 - Only this planning path does it; the context menu and the board's drag-and-drop move tasks as before.
+
+## Bugs on the lists
+
+A bug gets red marks **before the title** — in the list, on the board cards and in planning:
+
+- a **flame** for Bitrix's high priority,
+- a **bug** for the `BUG` tag,
+- a task that has both shows both.
+
+The `BUG` tag is then not repeated as a label further along the row (the bug mark replaces it).
+The **Bugs** card counts flames and `BUG` tags together, each task once. The row's old priority
+bars are gone — the flame says the only thing about priority that mattered there; the priority
+is still editable in the detail panel and filterable.
 
 ## Status ≠ Stage
 
