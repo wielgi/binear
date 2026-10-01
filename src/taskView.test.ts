@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { podzielNaTrafienia, tagsForWidth } from './taskView';
+import { podzielNaTrafienia, relativeAge, tagsForWidth } from './taskView';
 
 /** Skrot do czytelnych asercji: „ab[cd]ef" znaczy, ze `cd` jest podswietlone. */
 const zapis = (text: string, fraza: string) =>
@@ -82,5 +82,25 @@ describe('tagsForWidth', () => {
 
   it('nie schodzi ponizej zera przy bzdurnej szerokosci', () => {
     expect(tagsForWidth(-100)).toBe(0);
+  });
+});
+
+describe('relativeAge', () => {
+  it('przed chwilą poniżej 5 s, potem sekundy, minuty, godziny i dni', () => {
+    expect(relativeAge(0)).toBe('przed chwilą');
+    expect(relativeAge(4_900)).toBe('przed chwilą');
+    expect(relativeAge(5_000)).toBe('5 s temu');
+    expect(relativeAge(59_000)).toBe('59 s temu');
+    expect(relativeAge(60_000)).toBe('1 min temu');
+    expect(relativeAge(185_000)).toBe('3 min temu');
+    expect(relativeAge(59 * 60_000)).toBe('59 min temu');
+    expect(relativeAge(60 * 60_000)).toBe('1 godz. temu');
+    expect(relativeAge(23 * 3_600_000)).toBe('23 godz. temu');
+    expect(relativeAge(24 * 3_600_000)).toBe('1 d temu');
+    expect(relativeAge(3 * 24 * 3_600_000 + 5_000)).toBe('3 d temu');
+  });
+
+  it('ujemny wiek (zegar cofnięty) nie wychodzi poniżej zera', () => {
+    expect(relativeAge(-30_000)).toBe('przed chwilą');
   });
 });

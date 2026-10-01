@@ -601,3 +601,33 @@ Two things to know:
 
 Coming back (keyboard or tab switch) **pulls full data at once** — during the gap a
 task could have been deleted, which the probe can't see.
+
+### Fresh data for the open task
+
+The probe above is blind to some edits: **story points and the epic live on the task's
+scrum entity, and changing them does not move the task's change date**, so an edit made
+in Bitrix never woke the probe and the list kept the old value until someone refreshed
+everything by hand.
+
+So the detail panel keeps **the task it shows** fresh by itself, and says how fresh it
+is. In the panel header, next to the icons:
+
+`↻ pobrano 12 s temu` — when this task's data last arrived from Bitrix. Click it to pull
+this one task again.
+
+- **On open** the panel shows what it has (list row, cached details and comments) at
+  once, labelled `z pamięci`, and in the same moment starts fetching the real thing in
+  the background; the label turns into `pobrano …` when it lands.
+- **While it stays open**, every 30 s it checks again — the task's list fields (tags,
+  stage, people, deadline, **story points, epic**), its details and its comments. The
+  thread is swapped quietly and only when it actually changed, so scroll and a draft
+  you're typing are left alone.
+- **It stops asking** when the tab is in the background or nobody has touched the
+  keyboard for 5 minutes (same rule as the list probe), and asks at once when you come
+  back to the tab.
+- **Cost**: one task is two requests for the row (`tasks.task.list` by `ID` +
+  `tasks.api.scrum.task.get`), one for the details and one or two for the comments —
+  a handful per 30 s, only while a task is open. Your own unconfirmed edits keep
+  priority over the fetched row, as with every fetch.
+- If a refresh fails the label turns amber (`nie udało się odświeżyć · 3 min temu`) and
+  the old data stays — an old number must not pass for a fresh one.
