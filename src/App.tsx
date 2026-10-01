@@ -8951,14 +8951,15 @@ export default function App() {
     searchRef.current?.setValue('');
     setEditingViewId(null);
   }, []);
-  /* Kazda RECZNA zmiana paska rozjezdza go z karta — wtedy wracasz do zwyklego
-     widoku. Porownujemy ze stanem karty zamiast reagowac na sama zmiane, bo
-     ustawienie paska przez karte tez jest zmiana. */
+  /* RECZNA zmiana zakresu, „Pokaż zakończone" albo „Tylko moje" rozjezdza pasek z karta — wtedy
+     wracasz do zwyklego widoku. Porownujemy ze stanem karty zamiast reagowac na sama zmiane, bo
+     ustawienie paska przez karte tez jest zmiana. FILTRY (epik, tag, ...) karty NIE zrywaja:
+     zawezaja jej zawartosc — klik w epik na liscie z wlaczona karta zostaje w obrebie karty. */
   useEffect(() => {
     if (!card) return;
     const st = stanKarty(card);
-    if (scopePref !== st.scope || showDone !== st.done || onlyMine || anyFilter(filters)) setCard(null);
-  }, [card, filters, onlyMine, showDone, scopePref]);
+    if (scopePref !== st.scope || showDone !== st.done || onlyMine) setCard(null);
+  }, [card, onlyMine, showDone, scopePref]);
 
   // Przelaczniki dzialaja niezaleznie od zakresu, zeby liczniki przy zakresach
   // pokazywaly to, co faktycznie zobaczysz po klliknieciu.
@@ -9039,8 +9040,13 @@ export default function App() {
   }, [queriedBase, query, opisyIndeks]);
 
   const filtered = useMemo(() => {
-    // Aktywna karta licznika: lista = dokladnie to, co karta liczy (plus szukanie).
-    if (cardTasks) return matchQuery(cardTasks, query, opisyIndeks);
+    // Aktywna karta licznika: lista = to, co karta liczy, zawezone filtrami z paska (plus szukanie).
+    if (cardTasks) {
+      const wKarcie = anyFilter(filters)
+        ? cardTasks.filter((t) => matchFilters(t, filters, stageNames))
+        : cardTasks;
+      return matchQuery(wKarcie, query, opisyIndeks);
+    }
     const inScope = base.filter((t) => {
       const inSprint = sprintId !== null && t.sprintId === sprintId;
       if (scope === 'sprint' && !inSprint) return false;
@@ -9048,7 +9054,7 @@ export default function App() {
       return true;
     });
     return matchQuery(inScope, query, opisyIndeks);
-  }, [base, scope, sprintId, query, opisyIndeks, cardTasks]);
+  }, [base, scope, sprintId, query, opisyIndeks, cardTasks, filters, stageNames]);
 
   /** Wszystkie tagi wystepujace w grupie, alfabetycznie, z liczba uzyc — do palety, filtra i edycji tagow. */
   const allTags = useMemo(() => tagCounts(tasks), [tasks]);
