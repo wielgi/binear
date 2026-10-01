@@ -3250,6 +3250,7 @@ function TaskRow({
   onSelect,
   onMenu,
   onTag,
+  onFlame,
 }: {
   task: Task;
   /** Szukana fraza — do podswietlenia trafienia w tytule. */
@@ -3288,6 +3289,8 @@ function TaskRow({
   onMark: (e: ReactMouseEvent) => void;
   onSelect: (e: ReactMouseEvent) => void;
   onMenu: (anchor: Anchor) => void;
+  /** Klik w plomien przy tytule — filtr po wysokim priorytecie. */
+  onFlame?: () => void;
   onTag: (name: string) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -3405,7 +3408,7 @@ function TaskRow({
       )}
 
       {/* Blad: czerwony plomien (wysoki priorytet) i/albo robak (tag BUG); tag BUG nie wraca nizej jako etykieta. */}
-      {isBug(task) && <BugBadge task={task} />}
+      {isBug(task) && <BugBadge task={task} onFlame={onFlame} onBug={() => onTag('BUG')} />}
 
       <span className="row-title">
         {podzielNaTrafienia(task.title || task.rawTitle, fraza).map((k, i) =>
@@ -8358,6 +8361,21 @@ export default function App() {
     [],
   );
 
+  /** Klik w plomien: filtr „Priorytet: wysoki"; ponowny klik go zdejmuje. */
+  const toggleFlame = useCallback(
+    () =>
+      setFilters((f) => {
+        const cond = f.find((c) => c.field === 'priority' && c.op !== 'isNot');
+        if (!cond) {
+          return [...f, { id: newCondId(), field: 'priority' as FilterField, op: 'anyOf' as FilterOp, values: ['2'] }];
+        }
+        const values = cond.values.includes('2') ? cond.values.filter((v) => v !== '2') : [...cond.values, '2'];
+        if (!values.length) return f.filter((c) => c !== cond);
+        return f.map((c) => (c === cond ? { ...c, values } : c));
+      }),
+    [],
+  );
+
   /** Czy tag jest gdziekolwiek dodatnio wybrany — do „✓" w palecie. */
   const tagActive = useCallback(
     (tag: string) => filters.some((c) => c.field === 'tag' && c.op !== 'noneOf' && c.values.includes(tag)),
@@ -11418,6 +11436,7 @@ export default function App() {
                 onSelect={(e) => clickRow(e, t.id)}
                 onMenu={(anchor) => setMenu({ taskId: t.id, targets: targetsFor(t.id), anchor })}
                 onTag={(name) => toggleTag(name)}
+                onFlame={toggleFlame}
               />
             )}
           />
@@ -11593,6 +11612,7 @@ export default function App() {
                         setMenu({ taskId: t.id, targets: targetsFor(t.id), anchor });
                       }}
                       onTag={(name) => toggleTag(name)}
+                      onFlame={toggleFlame}
                     />
                           ))}
                       </DropZone>
