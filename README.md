@@ -187,6 +187,22 @@ the tooltip. Numbers are rounded to whole values; the colour is computed from th
 
 It counts the whole group of tasks, not what the current filter lets through.
 
+### Planning: team vs manager
+
+The accounts in `BX_CAPACITY_EXCLUDE_IDS` (a manager who isn't part of the team's capacity) don't
+use up the sprint limit in the planning view either:
+
+- **The limit bars count the team only** — "planned" and "with carry-over" — so the manager's tasks,
+  moved in from the backlog or carried over from the running sprint, no longer eat into the limit
+  or show up as "over".
+- **"How much the register can still take"** (the points left before the red "doesn't fit"
+  line) is computed from the team's tasks only, and a manager's task is never marked as not fitting:
+  it takes no capacity.
+- The manager's work is still shown, **separately**: a bar of its own under the team's bars
+  (`Kierownik · poza limitem`, no limit marker, carried-over part hatched), and the panel header
+  reads `… SP zespołu · … SP kierownika` instead of one total.
+- Without `BX_CAPACITY_EXCLUDE_IDS` nothing changes: one bar set, one total.
+
 ## Search
 
 An identifier-shaped query (`IT-749`, `it 749`, `749`, `#114677`) is matched
