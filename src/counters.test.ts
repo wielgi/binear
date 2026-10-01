@@ -3,6 +3,7 @@ import {
   answerState,
   countAll,
   COUNTERS,
+  foldersOf,
   isSubstantiveAnswer,
   MIN_ANSWER_CHARS,
   plainBody,
@@ -25,6 +26,7 @@ const ctx = (o: Partial<CounterCtx> = {}): CounterCtx => ({
   sprintId: 70,
   closed: new Set(['5']),
   answered: new Set(),
+  folders: new Set<number>(),
   ...o,
 });
 
@@ -146,6 +148,64 @@ describe('countAll', () => {
     expect(w.wywiad.count).toBe(1);
     expect([w.czeka.count, w.odpowiedzi.count, w.wycena.count, w.gotowe.count]).toEqual([0, 0, 0, 0]);
     expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
+  });
+
+  describe('foldery: zadanie z otwartym podzadaniem to kontener, nie praca', () => {
+    const wiersz = (id: number, parentId: number | null, o: Record<string, unknown> = {}) => ({
+      ...zadanie({ id }),
+      parentId,
+      ...o,
+    });
+    const rejestr = (lista: ReturnType<typeof wiersz>[]) =>
+      countAll(lista, ctx({ folders: foldersOf(lista, new Set(['5'])) }));
+
+    it('rodzic z otwartym dzieckiem nie liczy sie ani do poza sprintem, ani do wywiadu', () => {
+      const w = rejestr([wiersz(1, null), wiersz(2, 1), wiersz(3, 1), wiersz(4, null)]);
+      expect(w.poza.count).toBe(3); // dzieci 2, 3 i zwykle 4 — bez folderu 1
+      expect(w.wywiad.count).toBe(3);
+      expect(w.foldery.count).toBe(1);
+      expect(stany.reduce((s2, k) => s2 + w[k].count, 0)).toBe(w.poza.count);
+    });
+
+    it('folder, ktorego wszystkie podzadania sa zamkniete, wraca do zwyklego rejestru', () => {
+      const w = rejestr([wiersz(1, null), wiersz(2, 1, { status: '5' }), wiersz(3, 1, { status: '5' })]);
+      expect(w.foldery.count).toBe(0);
+      expect(w.poza.count).toBe(1); // sam rodzic, dzieci zamkniete
+    });
+
+    it('wystarczy jedno otwarte dziecko; odlozone dziecko tez jest otwarte', () => {
+      expect(rejestr([wiersz(1, null), wiersz(2, 1, { status: '5' }), wiersz(3, 1)]).foldery.count).toBe(1);
+      expect(rejestr([wiersz(1, null), wiersz(2, 1, { status: '6' })]).foldery.count).toBe(1);
+    });
+
+    it('dziecko moze lezec w innym sprincie niz rodzic — i tak robi z rodzica folder', () => {
+      const w = rejestr([wiersz(1, null), wiersz(2, 1, { sprintId: 70 })]);
+      expect(w.foldery.count).toBe(1);
+      expect(w.poza.count).toBe(0);
+    });
+
+    it('folder w aktywnym sprincie zostaje w W sprincie, a w kafelku Foldery go nie ma', () => {
+      const w = rejestr([wiersz(1, null, { sprintId: 70 }), wiersz(2, 1, { sprintId: 70 })]);
+      expect(w.sprint.count).toBe(2);
+      expect(w.foldery.count).toBe(0);
+    });
+
+    it('odlozony folder nie jest liczony w rejestrze, tylko w notce o odlozonych', () => {
+      const w = rejestr([wiersz(1, null, { status: '6' }), wiersz(2, 1)]);
+      expect(w.foldery.count).toBe(0);
+      expect(w.odlozone.count).toBe(1);
+    });
+
+    it('koncepcja-folder liczy sie tylko jako koncepcja', () => {
+      const w = rejestr([wiersz(1, null, { tags: ['KONCEPCJA'] }), wiersz(2, 1)]);
+      expect(w.koncept.count).toBe(1);
+      expect(w.foldery.count).toBe(0);
+    });
+
+    it('foldersOf: tylko rodzice otwartych dzieci', () => {
+      const lista = [wiersz(1, null), wiersz(2, 1), wiersz(3, 9, { status: '5' }), wiersz(4, null)];
+      expect([...foldersOf(lista, new Set(['5']))]).toEqual([1]);
+    });
   });
 
   it('koncepcja w aktywnym sprincie zostaje w „W sprincie" i w „Koncept"', () => {
