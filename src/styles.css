@@ -2546,6 +2546,19 @@ input[type='search']::-webkit-search-decoration {
   vertical-align: -2px;
 }
 
+/* Klikalny znak: ten sam wyglad, tylko bez ramki przycisku; reka i lekkie podswietlenie. */
+.bug-badge-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.bug-badge-btn:hover {
+  filter: brightness(1.3);
+}
+
 .row-title {
   flex: 1;
   min-width: 5rem;
