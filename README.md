@@ -178,14 +178,20 @@ be read at all (no `im` scope) they stay on `…`.
 
 Missing any of the above puts the task on **To estimate**, not **Ready to start**.
 
-**Planning: sort order.** The default stack is now **`STRATEGIA` first**, then the Bitrix priority
-(flame), the `Wysoki` tag, **payback ascending**, and story points descending. `STRATEGIA` sits above
-everything, flame and `Wysoki` included: the board decides its order, so it doesn't mix with the rest
-(several of them fall through to the next level). Payback is read from the tags — `ZWROT-3`, then
-`ZWROT-6`, `ZWROT-12`, `ZWROT-12+` — with `WYMOG` first (nearest deadline first) and tasks without a
-payback tag last. Both are sort levels (**Tag STRATEGIA**, **Okres zwrotu**) you can reorder, reverse or
-drop from the sort menu. Sorting hides nothing: the register still shows every `DO-STARTU` task, also
-those with no payback worked out yet.
+**Planning: sort order.** The default stack is, in this order: the **Bitrix priority (flame)**,
+**`STRATEGIA`**, **payback ascending**, the `Wysoki` tag, and story points descending.
+
+- The flame means an outage (the company can't work), so nothing overtakes it — not even `STRATEGIA`.
+- `STRATEGIA` is next: the board decides its order, so it doesn't mix with the rest (several of them
+  fall through to the next levels).
+- Then **payback** sets the queue — `ZWROT-3`, `ZWROT-6`, `ZWROT-12`, `ZWROT-12+`, with `WYMOG`
+  first (nearest deadline first) and tasks without a payback tag last. A `ZWROT-3` task without
+  `Wysoki` comes before a `ZWROT-12` one that has it.
+- `Wysoki` only decides ties **within** the same payback band, and story points break what is left.
+
+Every level is a sort level (**Tag STRATEGIA**, **Okres zwrotu**, **Tag Wysoki**…) you can reorder,
+reverse or drop from the sort menu. Sorting hides nothing: the register still shows every
+`DO-STARTU` task, also those with no payback worked out yet.
 
 The sort is saved in the browser as a whole stack, so someone who never touched it would keep the old
 default for good. A saved stack that is exactly one of the old defaults is replaced by the new one; a

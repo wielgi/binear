@@ -47,15 +47,20 @@ const strategiaRank = (t: Task) => (hasTag(t, TAG_STRATEGIA) ? 0 : 1);
 const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki') ? 0 : 1);
 
 /**
- * Domyslna kolejnosc waznosci: STRATEGIA na samej gorze (o jej kolejnosci decyduje rada, wiec nie
- * miesza sie z reszta), potem priorytet Bitriksa, tag „Wysoki", okres zwrotu rosnaco (ZWROT-3 przed
- * ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu na koncu) i story pointy malejaco.
+ * Domyslna kolejnosc waznosci:
+ *   1. priorytet Bitriksa — plomien to awaria, firma nie moze pracowac, wiec nic go nie wyprzedza,
+ *   2. STRATEGIA (o jej kolejnosci decyduje rada, wiec nie miesza sie z reszta),
+ *   3. okres zwrotu rosnaco (ZWROT-3 przed ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu
+ *      na koncu) — to on ustawia kolejke,
+ *   4. tag „Wysoki" — dopiero rozstrzyga remis w obrebie tego samego zwrotu, a nie przeskakuje
+ *      zadania o lepszym zwrocie,
+ *   5. story pointy malejaco.
  */
 export const PLAN_SORT_DOMYSLNY: PlanSortLevel[] = [
-  { by: 'strategia', dir: 'asc' },
   { by: 'priority', dir: 'asc' },
-  { by: 'wysoki', dir: 'asc' },
+  { by: 'strategia', dir: 'asc' },
   { by: 'zwrot', dir: 'asc' },
+  { by: 'wysoki', dir: 'asc' },
   { by: 'sp', dir: 'desc' },
 ];
 
@@ -72,6 +77,13 @@ const STARE_DOMYSLNE: PlanSortLevel[][] = [
     { by: 'zwrot', dir: 'asc' },
     { by: 'sp', dir: 'desc' },
   ],
+  [
+    { by: 'strategia', dir: 'asc' },
+    { by: 'priority', dir: 'asc' },
+    { by: 'wysoki', dir: 'asc' },
+    { by: 'zwrot', dir: 'asc' },
+    { by: 'sp', dir: 'desc' },
+  ],
 ];
 
 const takSamo = (a: PlanSortLevel[], b: PlanSortLevel[]) =>
@@ -79,8 +91,7 @@ const takSamo = (a: PlanSortLevel[], b: PlanSortLevel[]) =>
 
 /**
  * Zapisane w przegladarce sortowanie planowania. Zapisany jest CALY stos, wiec kto nigdy go nie
- * zmienil, mial w localStorage stary domyslny — i nowy poziom (STRATEGIA na gorze, zwrot) nigdy by do
- * niego nie dotarl. Stary domyslny zastepujemy nowym; stos ulozony przez uzytkownika zostaje jak byl.
+ * zmienil, mial w localStorage stary domyslny — i nowa kolejnosc nigdy by do niego nie dotarla. Stary domyslny zastepujemy nowym; stos ulozony przez uzytkownika zostaje jak byl.
  */
 export function migratePlanSort(saved: PlanSortLevel[] | undefined): PlanSortLevel[] | undefined {
   if (!saved) return undefined;
