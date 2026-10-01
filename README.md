@@ -123,7 +123,7 @@ following the steps of the task audit. Left to right:
 | **To estimate** | outside the sprint, `DO-STARTU`, but **missing any of the three**: story points, a benefit category tag, or a payback period |
 | **Ready to start** | outside the sprint, `DO-STARTU`, with **all three** — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
-| **Bugs** *(apart, behind a divider)* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
+| **Bugs** *(stands alone, no group caption, between "Sprint" and "Out of the sums")* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
 | **Concept** *(apart, behind a divider)* | open tasks tagged `KONCEPCJA`, in the sprint or outside it — ideas too early to count, so outside the sprint they are in **no** other card |
 | **Folders** *(apart, behind a divider)* | tasks outside the sprint that have an **open subtask** — containers, the work sits in the subtasks, so (like in the audit queue) they are in **no** other card; a folder whose subtasks are all closed goes back to the register |
 
