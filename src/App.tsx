@@ -178,6 +178,7 @@ import { planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity } from './sprintClock';
+import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import {
   COUNTERS,
   counterDef,
@@ -949,6 +950,8 @@ interface Toast {
  * o same ID zmienionych zadan, wiec 30 s nie jest tu zadnym obciazeniem.
  */
 const POLL_MS = 30_000;
+/** Brak identyfikatorow — stala, zeby tablice w zaleznosciach nie zmienialy sie przy kazdym renderze. */
+const NO_IDS: readonly number[] = [];
 
 /* Ile czekamy przed ponowieniem po odmowie z limitu. Wiadro portalu leje sie
    2 zapytania na sekunde, wiec pare sekund wystarcza, zeby bylo z czego brac. */
@@ -10155,18 +10158,66 @@ export default function App() {
       if (nextSprint !== null && sprintId === nextSprint.id) {
         setPlanTura((t) => t + list.length);
       }
+      /*
+       * ODPOWIEDZIALNY PRZY WEJSCIU DO SPRINTU. Zadanie spoza IT, ktore ktos bierze z rejestru do
+       * sprintu, przechodzi na konto-zaslepke IT; jesli odpowiedzialny jest z IT, zostaje (patrz
+       * `planAssign.ts`). Dotyczy tylko tej drogi — rejestr → sprint — a gdy spis pracownikow nie
+       * doszedl, nic nie ruszamy.
+       */
+      const itCtx: ItContext | null = directory.length
+        ? {
+            me,
+            itUsers: config?.itUsers ?? NO_IDS,
+            itDepartments: config?.itDepartments ?? NO_IDS,
+            kierownicy: config?.capacityExcludeIds ?? NO_IDS,
+            unassignedId: UNASSIGNED_ID,
+            departmentsOf: new Map(directory.map((e) => [e.id, e.departments])),
+          }
+        : null;
+      const zaslepka = directory.find((e) => e.id === UNASSIGNED_ID);
+      let przepiete = 0;
+
       return Promise.all(
-        list.map((id) =>
-          mutate(
+        list.map((id) => {
+          const t = tasks.find((x) => x.id === id);
+          const nowy = itCtx && t ? ownerOnEnteringSprint(t, t.sprintId, sprintId, itCtx) : null;
+          if (nowy === null) {
+            return mutate(
+              id,
+              { sprintId, stageId: null },
+              () => moveToSprint(id, sprintId ?? backlogId ?? 0),
+              'sprint',
+            );
+          }
+          przepiete += 1;
+          return mutate(
             id,
-            { sprintId, stageId: null },
-            () => moveToSprint(id, sprintId ?? backlogId ?? 0),
-            'sprint',
-          ),
-        ),
-      ).then(() => reload(true));
+            {
+              sprintId,
+              stageId: null,
+              responsibleId: nowy,
+              responsibleName: zaslepka?.name ?? UNASSIGNED_LABEL,
+              responsiblePhoto: null,
+            },
+            async () => {
+              await moveToSprint(id, sprintId ?? backlogId ?? 0);
+              await updateTask(id, { RESPONSIBLE_ID: nowy });
+            },
+            'sprint i osobę',
+          );
+        }),
+      ).then(() => {
+        if (przepiete > 0) {
+          toast(
+            przepiete === 1
+              ? 'Odpowiedzialny zmieniony na konto IT — zadanie było spoza IT.'
+              : `Odpowiedzialny zmieniony na konto IT w ${przepiete} zadaniach spoza IT.`,
+          );
+        }
+        return reload(true);
+      });
     },
-    [nextSprint, mutate, backlogId, reload],
+    [nextSprint, mutate, backlogId, reload, directory, me, config, toast, tasks],
   );
 
   /**
