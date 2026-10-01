@@ -114,15 +114,16 @@ describe('countAll', () => {
     expect(w.bug.count).toBe(2);
   });
 
-  it('koncept: nowy tag KONCEPT i starszy KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+  it('koncept: tag KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {
     const w = countAll(
       [
-        zadanie({ id: 70, tags: ['KONCEPT'] }),
-        zadanie({ id: 71, tags: ['KONCEPCJA'] }),
-        zadanie({ id: 72, tags: ['koncepcja'], sprintId: 70 }),
-        zadanie({ id: 73, tags: ['KONCEPT'], status: '5' }),
-        zadanie({ id: 74, tags: ['KONCEPT'], status: '6' }),
-        zadanie({ id: 75, tags: ['KONCEPTY'] }),
+        zadanie({ id: 70, tags: ['KONCEPCJA'] }),
+        zadanie({ id: 71, tags: ['koncepcja'] }),
+        zadanie({ id: 72, tags: ['KONCEPCJA'], sprintId: 70 }),
+        zadanie({ id: 73, tags: ['KONCEPCJA'], status: '5' }),
+        zadanie({ id: 74, tags: ['KONCEPCJA'], status: '6' }),
+        zadanie({ id: 75, tags: ['KONCEPCJE'] }),
+        zadanie({ id: 76, tags: ['KONCEPT'] }), // takiego tagu nie ma — nie jest koncepcja
       ],
       ctx(),
     );
@@ -133,9 +134,9 @@ describe('countAll', () => {
     const w = countAll(
       [
         zadanie({ id: 80, tags: ['KONCEPCJA'] }),
-        zadanie({ id: 81, tags: ['KONCEPT', 'DO-WYWIADU'] }),
+        zadanie({ id: 81, tags: ['KONCEPCJA', 'DO-WYWIADU'] }),
         zadanie({ id: 82, tags: ['koncepcja', 'OCZEKUJE-NA-ODPOWIEDZ'] }),
-        zadanie({ id: 83, tags: ['KONCEPT', 'DO-STARTU'], storyPoints: 4 }),
+        zadanie({ id: 83, tags: ['KONCEPCJA', 'DO-STARTU'], storyPoints: 4 }),
         zadanie({ id: 84 }), // zwykle nowe zadanie — to ono jest w wywiadzie
       ],
       ctx(),
