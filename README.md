@@ -137,8 +137,9 @@ row counts them (`Odłożone (poza sumą): 5`) and clicking it lists them.
 The numbers are **global**: the whole group, regardless of scope, `Only mine`,
 `Completed` and filters. The point is to see whether the register holds 200 or 220
 tasks, not how many the current view shows. Clicking a card replaces the list
-with exactly the tasks it counts (search still applies); clicking it again, or
-changing scope, filters or toggles, returns to the normal view. Tag names match
+with exactly the tasks it counts (search still applies); filters you add afterwards (epic,
+tag, ...) narrow the card instead of leaving it; clicking it again, or changing scope
+or toggles, returns to the normal view. Tag names match
 case-insensitively, as in Bitrix.
 
 **Answers.** The anchor is the last comment by IT that looks like interview
