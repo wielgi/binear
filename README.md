@@ -550,7 +550,7 @@ this one task again.
   you're typing are left alone.
 - **It stops asking** when the tab is in the background or nobody has touched the
   keyboard for 5 minutes (same rule as the list probe), and asks at once when you come
-  back to the tab.
+  back — to the tab, or to the keyboard or mouse after a break.
 - **Cost**: one task is two requests for the row (`tasks.task.list` by `ID` +
   `tasks.api.scrum.task.get`), one for the details and one or two for the comments —
   a handful per 30 s, only while a task is open. Your own unconfirmed edits keep

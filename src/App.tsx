@@ -1575,6 +1575,12 @@ function useBitrixData() {
             ? t
             : {
                 ...fresh.task,
+                /*
+                 * Odswiezane jest tylko zadanie otwarte w panelu, a otwarcie zeruje licznik
+                 * (`markOpened`). Lista z Bitriksa potrafi jeszcze niesc stara liczbe — bez tego
+                 * znaczek nieprzeczytanych wracalby na zadanie, ktore wlasnie czytam.
+                 */
+                newComments: 0,
                 // Scrumowe pola: gdy sie nie udalo ich odczytac, zostaja dotychczasowe.
                 storyPoints: fresh.meta ? fresh.meta.storyPoints : t.storyPoints,
                 epicId: fresh.meta ? fresh.meta.epicId : t.epicId,
@@ -4145,6 +4151,16 @@ function Comments({
    * starsza odpowiedz nadpisalaby nowsza — takze w CACHE.
    */
   const loadSeq = useRef(0);
+  /*
+   * Trwa `load` — ciche odswiezenie wtedy nie startuje. Inaczej jego pobranie mogloby wyprzedzic
+   * `load` i zostawic watek na „Wczytywanie…", gdy samo sie nie uda (cichy blad nic nie pokazuje).
+   */
+  const loadPending = useRef(false);
+  /*
+   * Bumpowany przy kazdej lokalnej zmianie watku (poprawka, usuniecie, starsze). Ciche
+   * odswiezenie, ktore wystartowalo PRZED taka zmiana, niesie stary watek i nie moze jej cofnac.
+   */
+  const localSeq = useRef(0);
 
   const load = useCallback(() => {
     if (!ready) return; // bez chatId pytanie byloby niepelne
@@ -4152,7 +4168,11 @@ function Comments({
     const cached = getCachedComments(taskId);
     setComments(cached); // z cache (albo null przy pierwszym otwarciu -> "Wczytywanie…")
     setFailed(null);
+    loadPending.current = true;
     fetchComments(taskId, chatId)
+      .finally(() => {
+        if (seq === loadSeq.current) loadPending.current = false;
+      })
       .then((c) => {
         if (seq !== loadSeq.current) return;
         setComments(c);
@@ -4174,14 +4194,33 @@ function Comments({
    * `load` nie wraca do cache i nie pokazuje „Wczytywanie…" — podmienia tylko wtedy, gdy watek
    * naprawde sie zmienil, zeby nie przerysowywac go co 30 s i nie ruszac przewijania.
    */
+  const silentSeq = useRef(0);
+
   useEffect(() => {
-    if (refreshKey === 0 || !ready) return;
-    const seq = ++loadSeq.current;
+    if (refreshKey === 0 || !ready || loadPending.current) return;
+    const seq = ++silentSeq.current;
+    const startLoad = loadSeq.current;
+    const startLocal = localSeq.current;
     fetchComments(taskId, chatId)
       .then((c) => {
-        if (seq !== loadSeq.current) return;
-        setComments((prev) => (prev && JSON.stringify(prev) === JSON.stringify(c) ? prev : c));
-        setCachedComments(taskId, c);
+        if (seq !== silentSeq.current || startLoad !== loadSeq.current || startLocal !== localSeq.current) return;
+        setComments((prev) => {
+          /*
+           * `fetchComments` niesie tylko ostatnia porcje czatu. Starsze, dociagniete przez
+           * „pokaż starsze", zostaja — inaczej znikalyby co 30 s spod oczu czytajacego.
+           * Numery wiadomosci czatu rosna, wiec „starsze" = mniejszy numer niz najstarszy swiezy.
+           */
+          const najstarszy = c.find((x) => x.source === 'chat');
+          const doczytane = najstarszy
+            ? (prev ?? []).filter((x) => x.source === 'chat' && x.id < najstarszy.id)
+            : [];
+          const next = doczytane.length
+            ? [...doczytane, ...c].sort((a, b) => (Date.parse(a.date ?? '') || 0) - (Date.parse(b.date ?? '') || 0))
+            : c;
+          if (prev && JSON.stringify(prev) === JSON.stringify(next)) return prev;
+          setCachedComments(taskId, next);
+          return next;
+        });
       })
       .catch(() => {
         /* Cichy bonus — niepowodzenie zostawia to, co juz widac. */
@@ -4348,6 +4387,7 @@ function Comments({
         setStarszeBrak(true);
         return;
       }
+      localSeq.current++;
       setComments((prev) => {
         const znane = new Set((prev ?? []).map((c) => `${c.source}:${c.id}`));
         const nowe = starsze.filter((c) => !znane.has(`${c.source}:${c.id}`));
@@ -4488,6 +4528,7 @@ function Comments({
           try {
             await deleteComment(c, taskId);
             /* Znika lokalnie od razu — patrz `saveEdit`, ten sam powod. */
+            localSeq.current++;
             setComments((prev) => {
               if (!prev) return prev;
               const next = prev.filter((x) => !(x.source === c.source && x.id === c.id));
@@ -4533,6 +4574,7 @@ function Comments({
        * calosci gasilo na moment cala liste i przewijanie skakalo — a wiadomo
        * dokladnie, co sie zmienilo, bo sami to wyslalismy.
        */
+      localSeq.current++;
       setComments((prev) => {
         if (!prev) return prev;
         const next = prev.map((x) =>
@@ -5478,6 +5520,24 @@ function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) =
   );
 }
 
+/**
+ * „12 s temu" liczone na biezaco. Bez wlasnego zegara napis stal w miejscu miedzy odswiezeniami,
+ * a po 5 min bezczynnosci (albo w karcie w tle), kiedy panel przestaje pytac Bitriksa, zamarzal
+ * na „przed chwilą" — swiezo wygladajacy wiek przy danych, ktore wlasnie sie starzeja.
+ * Co sekunde, dopoki pokazujemy sekundy; potem co 30 s wystarczy na minuty i godziny.
+ */
+function FreshAge({ at }: { at: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  const age = now - at;
+
+  useEffect(() => {
+    const t = setTimeout(() => setNow(Date.now()), age < 60_000 ? 1000 : 30_000);
+    return () => clearTimeout(t);
+  }, [now, at]);
+
+  return <>{relativeAge(Math.max(0, Date.now() - at))}</>;
+}
+
 function DetailPanel({
   task,
   fraza,
@@ -5608,10 +5668,13 @@ function DetailPanel({
       if (inFlight.current === id) inFlight.current = null;
       if (currentId.current !== id) return;
       setRefreshing(false);
-      if (det.status === 'fulfilled') setDetail(det.value);
-      else if (!getCachedDetail(id)) setDetailError(true);
+      if (det.status === 'fulfilled') {
+        setDetail(det.value);
+        setDetailError(false);
+      } else if (!getCachedDetail(id)) setDetailError(true);
       if (opts.comments) setCommentsTick((n) => n + 1);
-      const ok = det.status === 'fulfilled' || (row.status === 'fulfilled' && row.value);
+      // „pobrano" tylko gdy przyszly OBA: story pointy i epik w panelu stoja z wiersza, nie ze szczegolow.
+      const ok = det.status === 'fulfilled' && row.status === 'fulfilled' && row.value;
       setRefreshFailed(!ok);
       if (ok) setFetchedAt(Date.now());
     },
@@ -5630,17 +5693,41 @@ function DetailPanel({
 
   // Dopoki zadanie jest otwarte, co pol minuty sprawdzamy, czy cos sie w nim nie zmienilo — ale
   // tylko gdy karta jest widoczna i ktos w ogole pracuje, zeby panel zostawiony na noc nie pytal
-  // Bitriksa w nieskonczonosc. Powrot na karte odswieza od razu.
+  // Bitriksa w nieskonczonosc.
+  //
+  // Powrot odswieza od razu, i na karte, i po bezczynnosci (ruch myszy przy otwartej karcie).
+  // Panel sam pamieta, ze stanal (`paused`), zamiast pytac `idle()` w chwili powrotu — wtedy
+  // liczylaby sie kolejnosc listenerow: gdyby App nie zdazyl jeszcze odnotowac aktywnosci,
+  // powrot wciaz wygladalby na bezczynnosc i odswiezenie by przepadlo.
   useEffect(() => {
+    let paused = false;
     const tick = () => {
-      if (document.hidden || idleRef.current()) return;
+      if (document.hidden || idleRef.current()) {
+        paused = true;
+        return;
+      }
       void refresh({ comments: true });
     };
+    const resume = () => {
+      if (!paused || document.hidden) return;
+      paused = false;
+      void refresh({ comments: true });
+    };
+    const onVisible = () => {
+      if (document.hidden) {
+        paused = true;
+        return;
+      }
+      resume();
+    };
     const timer = setInterval(tick, PANEL_POLL_MS);
-    const onVisible = () => !document.hidden && tick();
+    // Te same zdarzenia, po ktorych App uznaje, ze ktos pracuje.
+    const EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const;
+    for (const e of EVENTS) window.addEventListener(e, resume, { passive: true });
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearInterval(timer);
+      for (const e of EVENTS) window.removeEventListener(e, resume);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refresh]);
@@ -5843,9 +5930,9 @@ function DetailPanel({
                   ? 'odświeżam…'
                   : 'z pamięci · odświeżam…'
                 : refreshFailed
-                  ? `nie udało się odświeżyć${fetchedAt ? ` · ${relativeAge(Date.now() - fetchedAt)}` : ''}`
+                  ? <>nie udało się odświeżyć{fetchedAt ? <> · <FreshAge at={fetchedAt} /></> : ''}</>
                   : fetchedAt
-                    ? `pobrano ${relativeAge(Date.now() - fetchedAt)}`
+                    ? <>pobrano <FreshAge at={fetchedAt} /></>
                     : 'z pamięci'}
             </span>
           </button>
