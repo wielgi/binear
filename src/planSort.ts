@@ -7,7 +7,7 @@
  * byl niewidoczny w kodzie, a widoczny dopiero w kolejnosci wierszy.
  */
 import type { Task } from './bitrix';
-import { hasTag, TAG_STRATEGIA } from './counters';
+import { pula, TAGS_PULA } from './counters';
 
 export type Cmp = (a: Task, b: Task) => number;
 
@@ -40,8 +40,11 @@ const deadlineTime = (t: Task): number => {
   return Number.isNaN(ms) ? Number.MAX_SAFE_INTEGER : ms;
 };
 
-/** Ma tag STRATEGIA — ranga 0, inaczej 1. Strategia idzie na sam poczatek, przed wszystkim innym. */
-const strategiaRank = (t: Task) => (hasTag(t, TAG_STRATEGIA) ? 0 : 1);
+/** Pula: CIAGLOSC, RDZEN, DZIAL (w tej kolejnosci), bez puli na koncu. */
+const pulaRank = (t: Task) => {
+  const p = pula(t);
+  return p === null ? TAGS_PULA.length : TAGS_PULA.indexOf(p);
+};
 
 /** Ma tag „Wysoki" (bez wzgledu na wielkosc liter) — ranga 0, inaczej 1. */
 const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki') ? 0 : 1);
@@ -49,18 +52,17 @@ const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki'
 /**
  * Domyslna kolejnosc waznosci:
  *   1. priorytet Bitriksa — plomien to awaria, firma nie moze pracowac, wiec nic go nie wyprzedza,
- *   2. STRATEGIA (o jej kolejnosci decyduje rada, wiec nie miesza sie z reszta),
- *   3. okres zwrotu rosnaco (ZWROT-3 przed ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu
- *      na koncu) — to on ustawia kolejke,
- *   4. tag „Wysoki" — dopiero rozstrzyga remis w obrebie tego samego zwrotu, a nie przeskakuje
- *      zadania o lepszym zwrocie,
+ *   2. pula: CIAGLOSC, RDZEN, DZIAL, bez puli (pule ida kolejno, nie mieszaja sie ze soba),
+ *   3. tag „Wysoki",
+ *   4. okres zwrotu rosnaco (ZWROT-3 przed ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu
+ *      na koncu). W RDZEN zwrotu zwykle nie ma, wiec tam decyduja dalej story pointy albo reczna kolejnosc,
  *   5. story pointy malejaco.
  */
 export const PLAN_SORT_DOMYSLNY: PlanSortLevel[] = [
   { by: 'priority', dir: 'asc' },
-  { by: 'strategia', dir: 'asc' },
-  { by: 'zwrot', dir: 'asc' },
+  { by: 'pula', dir: 'asc' },
   { by: 'wysoki', dir: 'asc' },
+  { by: 'zwrot', dir: 'asc' },
   { by: 'sp', dir: 'desc' },
 ];
 
@@ -84,6 +86,13 @@ const STARE_DOMYSLNE: PlanSortLevel[][] = [
     { by: 'zwrot', dir: 'asc' },
     { by: 'sp', dir: 'desc' },
   ],
+  [
+    { by: 'priority', dir: 'asc' },
+    { by: 'strategia', dir: 'asc' },
+    { by: 'zwrot', dir: 'asc' },
+    { by: 'wysoki', dir: 'asc' },
+    { by: 'sp', dir: 'desc' },
+  ],
 ];
 
 const takSamo = (a: PlanSortLevel[], b: PlanSortLevel[]) =>
@@ -95,7 +104,11 @@ const takSamo = (a: PlanSortLevel[], b: PlanSortLevel[]) =>
  */
 export function migratePlanSort(saved: PlanSortLevel[] | undefined): PlanSortLevel[] | undefined {
   if (!saved) return undefined;
-  return STARE_DOMYSLNE.some((s) => takSamo(saved, s)) ? PLAN_SORT_DOMYSLNY : saved;
+  if (STARE_DOMYSLNE.some((s) => takSamo(saved, s))) return PLAN_SORT_DOMYSLNY;
+  /* Wlasny stos: poziom „strategia" (tag STRATEGIA juz nic nie znaczy) zamieniamy na „pula" w tym samym miejscu. */
+  return saved.some((l) => l.by === 'strategia')
+    ? saved.map((l) => (l.by === 'strategia' ? { ...l, by: 'pula' } : l))
+    : saved;
 }
 
 /**
@@ -133,8 +146,8 @@ export function planComparator(
     const f: Cmp =
       lvl.by === 'stage'
         ? (a, b) => deps.stageRank(a) - deps.stageRank(b)
-        : lvl.by === 'strategia'
-          ? (a, b) => strategiaRank(a) - strategiaRank(b)
+        : lvl.by === 'pula'
+          ? (a, b) => pulaRank(a) - pulaRank(b)
           : lvl.by === 'wysoki'
           ? (a, b) => wysokiRank(a) - wysokiRank(b)
           : lvl.by === 'sp'

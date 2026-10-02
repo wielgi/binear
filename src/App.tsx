@@ -622,8 +622,8 @@ const DEFAULT_SETTINGS: Settings = {
   showDone: false,
   planDone: false,
   planReview: true,
-  /* Domyslna kolejnosc waznosci: plomien (awaria) najpierw, potem STRATEGIA, okres zwrotu rosnaco,
-     tag „Wysoki" jako rozstrzygniecie remisu, a story pointy malejaco, bo tu wiecej znaczy wazniej.
+  /* Domyslna kolejnosc waznosci: plomien (awaria) najpierw, potem pula (CIAGLOSC, RDZEN, DZIAL), tag „Wysoki",
+     okres zwrotu rosnaco, a story pointy malejaco, bo tu wiecej znaczy wazniej.
      Zrodlo prawdy: PLAN_SORT_DOMYSLNY w planSort.ts (razem z migracja starego domyslnego). */
   planSort: PLAN_SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[],
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
@@ -667,7 +667,7 @@ function loadSettings(): Settings {
       ...DEFAULT_SETTINGS,
       ...saved,
       sort: { ...DEFAULT_SETTINGS.sort, ...saved.sort },
-      // Zapisany jest caly stos — stary domyslny zamieniamy na nowy (STRATEGIA na gorze, zwrot).
+      // Zapisany jest caly stos — stary domyslny zamieniamy na nowy (pula, Wysoki, zwrot).
       planSort: (migratePlanSort(saved.planSort) as Settings['planSort'] | undefined) ?? DEFAULT_SETTINGS.planSort,
     };
   } catch {
@@ -1805,7 +1805,7 @@ type Dir = 'asc' | 'desc';
  * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
  * na liscie i tak grupuje sie po etapie.
  */
-type PlanSortBy = SortBy | 'stage' | 'strategia' | 'wysoki' | 'sp' | 'zwrot';
+type PlanSortBy = SortBy | 'stage' | 'pula' | 'wysoki' | 'sp' | 'zwrot';
 
 const SORTS: { key: SortBy; label: string }[] = [
   { key: 'updated', label: 'Zaktualizowane' },
@@ -1822,9 +1822,9 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
    * pozycje bylyby niewidoczne w liscie i nie dalo by sie poprawic zadnego z nich
    * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
    */
-  { key: 'strategia', label: 'Tag STRATEGIA' },
+  { key: 'pula', label: 'Pula' },
   { key: 'wysoki', label: 'Tag „Wysoki”' },
-  /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), strategia, potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
+  /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
   { key: 'zwrot', label: 'Okres zwrotu' },
   { key: 'sp', label: 'Story pointy' },
   { key: 'stage', label: 'Etap w sprincie' },
