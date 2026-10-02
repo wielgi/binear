@@ -19,7 +19,7 @@ import {
   saveHistory,
   TAG_CZEKA,
   TAG_DO_STARTU,
-  TAG_STRATEGIA,
+  pula,
   type CounterDef,
   type CounterKey,
   type ChatFacts,
@@ -156,7 +156,7 @@ export function useAnsweredTasks(
  *
  *  - **rozpoznanie / analiza błędu** — wiadomość WYCENA ma dopisek „Rozpoznanie — bez okresu zwrotu".
  *    Takie zadanie jest gotowe do startu bez kategorii i bez tagu okresu zwrotu,
- *  - **strategia z uzasadnieniem** — zadanie ze STRATEGIĄ ma wiadomość WARTOŚĆ (jedno zdanie celu).
+ *  - **wartość w czacie** — zadanie z pulą RDZEN ma wiadomość WARTOŚĆ (jedno zdanie uzasadnienia).
  *
  * Kategorię i okres zwrotu zwykłych zadań widać w tagach, więc czatu nie czytamy dla nikogo, kto ma
  * komplet. Czytamy tylko zadania, o których kompletności rozstrzyga czat (`needsChat`). Zamknięte,
@@ -213,14 +213,14 @@ export function useChatFacts(
       // Wszystkie czaty odmówiły (np. brak zakresu `im`) — nie udajemy, że nic w nich nie ma.
       if (got.length > 0 && got.every((r) => r.status === 'rejected')) return;
       const recon = new Set<number>();
-      const strategic = new Set<number>();
+      const value = new Set<number>();
       got.forEach((r, i) => {
         if (r.status !== 'fulfilled') return;
         const t = candidates[i];
         if (hasReconMarker(r.value.messages)) recon.add(t.id);
-        if (hasTag(t, TAG_STRATEGIA) && hasValueMessage(r.value.messages)) strategic.add(t.id);
+        if (pula(t) === 'RDZEN' && hasValueMessage(r.value.messages)) value.add(t.id);
       });
-      if (!cancelled) setState({ group: groupId, facts: { recon, strategic } });
+      if (!cancelled) setState({ group: groupId, facts: { recon, value } });
     })().catch(() => {
       /* Czat nieczytelny — kafelki zostają przy ostatnim wyniku. */
     });
