@@ -57,6 +57,7 @@ import {
   WORK_END_HOUR,
   latestChange,
   moveToSprint,
+  moveToSprintViaEntry,
   deleteTask,
   moveToStage,
   setChecklistItem,
@@ -10502,8 +10503,9 @@ export default function App() {
           if (nowy === null) {
             return mutate(
               id,
-              { sprintId, stageId: null },
-              () => moveToSprint(id, sprintId ?? backlogId ?? 0),
+              { sprintId, stageId: stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null },
+              /* Do sprintu — przez kolumne wejsciowa (karta + numer IT-NNN); do rejestru — sama przynaleznosc. */
+              () => (sprintId === null ? moveToSprint(id, backlogId ?? 0) : moveToSprintViaEntry(id, sprintId)),
               'sprint',
             );
           }
@@ -10512,13 +10514,13 @@ export default function App() {
             id,
             {
               sprintId,
-              stageId: null,
+              stageId: stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null,
               responsibleId: nowy,
               responsibleName: zaslepka?.name ?? UNASSIGNED_LABEL,
               responsiblePhoto: null,
             },
             async () => {
-              await moveToSprint(id, sprintId ?? backlogId ?? 0);
+              await (sprintId === null ? moveToSprint(id, backlogId ?? 0) : moveToSprintViaEntry(id, sprintId));
               await updateTask(id, { RESPONSIBLE_ID: nowy });
             },
             'sprint i osobę',
@@ -10535,7 +10537,7 @@ export default function App() {
         return reload(true);
       });
     },
-    [nextSprint, activeSprint, mutate, backlogId, reload, directory, me, config, toast, tasks, planDodane],
+    [nextSprint, activeSprint, mutate, backlogId, reload, directory, me, config, toast, tasks, planDodane, stages],
   );
 
   /**
