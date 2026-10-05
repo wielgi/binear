@@ -120,8 +120,8 @@ following the steps of the task audit. Left to right:
 | **To interview** | outside the sprint, tagged `DO-WYWIADU` **or with no readiness tag at all** (new tasks, or ones tagged only `BUG`, `Wysoki`…) |
 | **Waiting for an answer** | outside the sprint, tagged `OCZEKUJE-NA-ODPOWIEDZ`, nobody outside IT has answered yet |
 | **Answers to read** | the same tag, and someone outside IT answered with substance after our last round of questions |
-| **To estimate** | outside the sprint, `DO-STARTU`, no story points |
-| **Ready to start** | outside the sprint, `DO-STARTU`, with story points — can be pulled into a sprint |
+| **To estimate** | outside the sprint, `DO-STARTU`, but **missing any of the three**: story points, a benefit category tag, or a payback period |
+| **Ready to start** | outside the sprint, `DO-STARTU`, with **all three** — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
 | **Bugs** *(apart, behind a divider)* | open tasks tagged `BUG`, in the sprint or outside it, deferred excluded |
 
@@ -140,6 +140,62 @@ tasks, not how many the current view shows. Clicking a card replaces the list
 with exactly the tasks it counts (search still applies); clicking it again, or
 changing scope, filters or toggles, returns to the normal view. Tag names match
 case-insensitively, as in Bitrix.
+
+**What "ready" means.** A `DO-STARTU` task needs three things to be ready to start, and all
+three are read from the task list itself — no chat requests for them:
+
+- **story points** (the estimate);
+- **a benefit category** — one tag out of `BUG`, `OSZCZEDNOSC`, `PRZYCHOD`, `RYZYKO`,
+  `ANALITYKA`, `UTRZYMANIE`, `WYMOG`, `STRATEGIA` (a tag outside this list, e.g. `Wysoki`, is not a category);
+- **a payback period** — one of the tags `ZWROT-3` (up to 3 months), `ZWROT-6` (3–6),
+  `ZWROT-12` (6–12) or `ZWROT-12+` (over 12, or "can't be counted"). The number is the band's
+  upper bound. The tag is a copy of the band written into the task's `WARTOŚĆ` chat message by
+  the value script, so a correction is a re-run that swaps the tag. If a task somehow carries two
+  of them, the worst one counts.
+
+Two categories have no payback period:
+
+- `WYMOG` (law, contract, a counterparty) has a deadline instead of a ranking: it needs **no
+  payback period but must have a deadline** (Bitrix's own `Termin` field).
+- `STRATEGIA` (strategically important, can't be honestly counted in time or money) has **no payback
+  tag either**; instead it needs the one-sentence justification in the task's `WARTOŚĆ` chat
+  message — so the tag alone doesn't complete it, the chat does. Only the IT manager or the board
+  gives it, never the requesting department.
+
+**Reconnaissance is the one exception to the category.** A task the estimate script marked as
+reconnaissance or a bug analysis (`--rozpoznanie`: up to 4 h, its result is the estimate and the
+value of the real task) is ready with just an estimate — no category, no payback tag. It is
+recognised the way the audit does it: by the line in its `WYCENA` chat message (`Rozpoznanie — bez
+okresu zwrotu`, or the older opening of the justification: Rozpoznanie / Weryfikacja / Przegląd kodu
+/ Sprawdzenie), or — with no chat read at all — by a title with "rozpoznanie" or "weryfikacja" on an
+estimate of up to 4 h.
+
+**Chats are read for two things only**, and only for open `DO-STARTU` tasks outside the sprint whose
+completeness a chat decides: tasks up to 4 h without a complete set of tags (reconnaissance) and
+`STRATEGIA` tasks (justification). Everything else — category, payback, deadline — comes from the
+task list. While those chats load, both cards show `…` rather than a wrong number, and if chats can't
+be read at all (no `im` scope) they stay on `…`.
+
+Missing any of the above puts the task on **To estimate**, not **Ready to start**.
+
+**Planning: sort order.** The default stack is, in this order: the **Bitrix priority (flame)**,
+**`STRATEGIA`**, **payback ascending**, the `Wysoki` tag, and story points descending.
+
+- The flame means an outage (the company can't work), so nothing overtakes it — not even `STRATEGIA`.
+- `STRATEGIA` is next: the board decides its order, so it doesn't mix with the rest (several of them
+  fall through to the next levels).
+- Then **payback** sets the queue — `ZWROT-3`, `ZWROT-6`, `ZWROT-12`, `ZWROT-12+`, with `WYMOG`
+  first (nearest deadline first) and tasks without a payback tag last. A `ZWROT-3` task without
+  `Wysoki` comes before a `ZWROT-12` one that has it.
+- `Wysoki` only decides ties **within** the same payback band, and story points break what is left.
+
+Every level is a sort level (**Tag STRATEGIA**, **Okres zwrotu**, **Tag Wysoki**…) you can reorder,
+reverse or drop from the sort menu. Sorting hides nothing: the register still shows every
+`DO-STARTU` task, also those with no payback worked out yet.
+
+The sort is saved in the browser as a whole stack, so someone who never touched it would keep the old
+default for good. A saved stack that is exactly one of the old defaults is replaced by the new one; a
+stack you arranged yourself is left alone.
 
 **Answers.** The anchor is the last comment by IT that looks like interview
 questions (a line starting with `[B]1.`). An answer is a later message from someone outside IT that has substance: numbered
@@ -198,6 +254,8 @@ use up the sprint limit in the planning view either:
 - **"How much the register can still take"** (the points left before the red "doesn't fit"
   line) is computed from the team's tasks only, and a manager's task is never marked as not fitting:
   it takes no capacity.
+- **"Last delivered"**, the fallback limit when no capacity is typed in, counts the team's tasks
+  only as well, so it is measured the same way as the bars it is compared against.
 - The manager's work is still shown, **separately**: a bar of its own under the team's bars
   (`Kierownik · poza limitem`, no limit marker, carried-over part hatched), and the panel header
   reads `… SP zespołu · … SP kierownika` instead of one total.
@@ -567,3 +625,33 @@ Two things to know:
 
 Coming back (keyboard or tab switch) **pulls full data at once** — during the gap a
 task could have been deleted, which the probe can't see.
+
+### Fresh data for the open task
+
+The probe above is blind to some edits: **story points and the epic live on the task's
+scrum entity, and changing them does not move the task's change date**, so an edit made
+in Bitrix never woke the probe and the list kept the old value until someone refreshed
+everything by hand.
+
+So the detail panel keeps **the task it shows** fresh by itself, and says how fresh it
+is. In the panel header, next to the icons:
+
+`↻ pobrano 12 s temu` — when this task's data last arrived from Bitrix. Click it to pull
+this one task again.
+
+- **On open** the panel shows what it has (list row, cached details and comments) at
+  once, labelled `z pamięci`, and in the same moment starts fetching the real thing in
+  the background; the label turns into `pobrano …` when it lands.
+- **While it stays open**, every 30 s it checks again — the task's list fields (tags,
+  stage, people, deadline, **story points, epic**), its details and its comments. The
+  thread is swapped quietly and only when it actually changed, so scroll and a draft
+  you're typing are left alone.
+- **It stops asking** when the tab is in the background or nobody has touched the
+  keyboard for 5 minutes (same rule as the list probe), and asks at once when you come
+  back — to the tab, or to the keyboard or mouse after a break.
+- **Cost**: one task is two requests for the row (`tasks.task.list` by `ID` +
+  `tasks.api.scrum.task.get`), one for the details and one or two for the comments —
+  a handful per 30 s, only while a task is open. Your own unconfirmed edits keep
+  priority over the fetched row, as with every fetch.
+- If a refresh fails the label turns amber (`nie udało się odświeżyć · 3 min temu`) and
+  the old data stays — an old number must not pass for a fresh one.

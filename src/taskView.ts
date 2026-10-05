@@ -152,3 +152,19 @@ export function tagsForWidth(width: number): number {
    */
   return 0;
 }
+
+/**
+ * Wiek pobrania danych po polsku: „przed chwilą", „12 s temu", „3 min temu", „2 godz. temu",
+ * „1 d temu". Do napisu przy zadaniu — zeby bylo widac, czy patrzymy na swieze dane, czy na te
+ * z pamieci (cache).
+ */
+export function relativeAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 5) return 'przed chwilą';
+  if (s < 60) return `${s} s temu`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min temu`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} godz. temu`;
+  return `${Math.floor(h / 24)} d temu`;
+}
