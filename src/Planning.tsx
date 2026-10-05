@@ -29,8 +29,8 @@ import { useDroppable } from '@dnd-kit/core';
 
 import { CLOSED_STATUSES, REVIEW_STATUSES, type Sprint, type Task } from './bitrix';
 import { planDropId } from './dnd';
-import { PLAN_SORT_DOMYSLNY } from './planSort';
 import { podzielNaZespolIKierownika, pozaLimitem, sumaDoLimitu, sumaKierownika } from './planCapacity';
+import { PLAN_SORT_DOMYSLNY } from './planSort';
 import { BarsIcon, CheckIcon, ChevronIcon, GripIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { tagsForWidth } from './taskView';
@@ -570,7 +570,7 @@ function Pane({
             <Pasek
               stats={statsMoc}
               limit={compare?.points ?? 0}
-              zawsze={Boolean(carryStats) || (compare?.points ?? 0) > 0}
+              zawsze={Boolean(carryStats) || maKierownika || (compare?.points ?? 0) > 0}
               note={compare && compare.points > 0 ? opisMocy(statsMoc.points, compare) : undefined}
             />
           </div>

@@ -3731,9 +3731,15 @@ body.resizing {
   color: var(--fg-dim);
   font-size: var(--t-micro);
   font-variant-numeric: tabular-nums;
+  line-height: 1; /* bez tego tekst niesie interlinie body i siedzi nizej niz ikona */
   white-space: nowrap;
   border-radius: var(--radius);
   transition: background 120ms ease, color 120ms ease;
+}
+
+/* Ikona i tekst jako flex, a nie inline — inaczej SVG staje na linii bazowej tekstu. */
+.detail-fresh > span {
+  display: inline-flex;
 }
 
 .detail-fresh:hover:not(:disabled) {
@@ -3750,7 +3756,6 @@ body.resizing {
 }
 
 .detail-fresh .spin {
-  display: inline-flex;
   animation: detail-fresh-spin 900ms linear infinite;
 }
 

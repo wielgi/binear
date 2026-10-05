@@ -257,6 +257,8 @@ use up the sprint limit in the planning view either:
 - **"How much the register can still take"** (the points left before the red "doesn't fit"
   line) is computed from the team's tasks only, and a manager's task is never marked as not fitting:
   it takes no capacity.
+- **"Last delivered"**, the fallback limit when no capacity is typed in, counts the team's tasks
+  only as well, so it is measured the same way as the bars it is compared against.
 - The manager's work is still shown, **separately**: a bar of its own under the team's bars
   (`Kierownik · poza limitem`, no limit marker, carried-over part hatched), and the panel header
   reads `… SP zespołu · … SP kierownika` instead of one total.
@@ -677,7 +679,7 @@ this one task again.
   you're typing are left alone.
 - **It stops asking** when the tab is in the background or nobody has touched the
   keyboard for 5 minutes (same rule as the list probe), and asks at once when you come
-  back to the tab.
+  back — to the tab, or to the keyboard or mouse after a break.
 - **Cost**: one task is two requests for the row (`tasks.task.list` by `ID` +
   `tasks.api.scrum.task.get`), one for the details and one or two for the comments —
   a handful per 30 s, only while a task is open. Your own unconfirmed edits keep

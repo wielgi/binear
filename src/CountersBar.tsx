@@ -175,7 +175,13 @@ export function useChatFacts(
   },
 ): ChatFacts | null {
   const { closed, sprintId, groupId, enabled } = opts;
-  const [state, setState] = useState<{ group: number | null; facts: ChatFacts } | null>(null);
+  // `read` — zadania, których czat choć raz udało się przeczytać; tylko dla nich wolno
+  // przenieść stary wynik, gdy kolejny odczyt się nie uda.
+  const [state, setState] = useState<{
+    group: number | null;
+    facts: ChatFacts;
+    read: ReadonlySet<number>;
+  } | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -210,17 +216,31 @@ export function useChatFacts(
 
     (async () => {
       const got = await Promise.allSettled(candidates.map((t) => fetchChatTail(t.chatId as number)));
-      // Wszystkie czaty odmówiły (np. brak zakresu `im`) — nie udajemy, że nic w nich nie ma.
-      if (got.length > 0 && got.every((r) => r.status === 'rejected')) return;
-      const recon = new Set<number>();
-      const value = new Set<number>();
-      got.forEach((r, i) => {
-        if (r.status !== 'fulfilled') return;
-        const t = candidates[i];
-        if (hasReconMarker(r.value.messages)) recon.add(t.id);
-        if (pula(t) === 'RDZEN' && hasValueMessage(r.value.messages)) value.add(t.id);
+      if (cancelled) return;
+      // Nieudany odczyt to „nie wiem", a nie „pusty czat" — inaczej rozpoznanie albo wartość RDZEN
+      // spadłyby do wyceny i ta zła liczba trafiłaby do historii. Zadanie czytane już wcześniej
+      // zachowuje stary wynik; zadanie nigdy nieprzeczytane trzyma cały wynik w „liczę"
+      // (to obejmuje też brak zakresu `im`, gdy odmawiają wszystkie czaty).
+      setState((prev) => {
+        const known = prev && prev.group === groupId ? prev : null;
+        const recon = new Set<number>();
+        const value = new Set<number>();
+        const read = new Set<number>();
+        for (const [i, r] of got.entries()) {
+          const t = candidates[i];
+          if (r.status === 'fulfilled') {
+            read.add(t.id);
+            if (hasReconMarker(r.value.messages)) recon.add(t.id);
+            if (pula(t) === 'RDZEN' && hasValueMessage(r.value.messages)) value.add(t.id);
+            continue;
+          }
+          if (!known?.read.has(t.id)) return prev;
+          read.add(t.id);
+          if (known.facts.recon.has(t.id)) recon.add(t.id);
+          if (known.facts.value.has(t.id)) value.add(t.id);
+        }
+        return { group: groupId, facts: { recon, value }, read };
       });
-      if (!cancelled) setState({ group: groupId, facts: { recon, value } });
     })().catch(() => {
       /* Czat nieczytelny — kafelki zostają przy ostatnim wyniku. */
     });
