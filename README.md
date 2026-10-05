@@ -285,6 +285,24 @@ also authored most tasks via the bulk import, their **Autor** field now says
 "Unassigned" too.) The id is configurable: `BX_UNASSIGNED_ID` in `.env`, served to the
 front end via `/api/config` (defaults to 251).
 
+## Planning: who owns a task entering a sprint
+
+When tasks are moved **from the register into a sprint** in the planning view, a task whose
+responsible person is **outside IT** is handed to the placeholder account (`BX_UNASSIGNED_ID`, the
+"Unassigned" account IT works under) — the requesting department isn't the one who will do it. If the
+responsible person is **in IT**, they stay. A toast says how many tasks were handed over.
+
+- **Who counts as IT**: the account binear runs under, accounts in `BX_IT_USERS`, people from the
+  departments in `BX_IT_DEPARTMENTS` (read from each employee's `UF_DEPARTMENT`), the accounts in
+  `BX_CAPACITY_EXCLUDE_IDS` (the manager), and the placeholder itself.
+- **Only register → sprint.** Moving a task between sprints, or back to the register, changes nothing.
+- **Unknown stays put.** If the employee list hasn't loaded, or the person isn't in it, the task is
+  left alone — a wrong guess in the other direction would take a task away from someone in IT.
+  The same goes for an empty `BX_IT_DEPARTMENTS`: without it nobody is handed over at all.
+- **Move first, owner second.** If the owner change fails, the task stays in the sprint with its old
+  owner and only the owner change is undone.
+- Only this planning path does it; the context menu and the board's drag-and-drop move tasks as before.
+
 ## Status ≠ Stage
 
 Two independent fields, and the main source of confusion:

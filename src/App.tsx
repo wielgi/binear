@@ -180,6 +180,7 @@ import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort'
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity } from './sprintClock';
+import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
 import {
   COUNTERS,
@@ -956,6 +957,8 @@ interface Toast {
  * o same ID zmienionych zadan, wiec 30 s nie jest tu zadnym obciazeniem.
  */
 const POLL_MS = 30_000;
+/** Brak identyfikatorow — stala, zeby tablice w zaleznosciach nie zmienialy sie przy kazdym renderze. */
+const NO_IDS: readonly number[] = [];
 /** Brak osob poza limitem — stala, zeby memo w planowaniu nie liczylo sie od nowa przy kazdym renderze. */
 const NO_CAPACITY_EXCLUDED: readonly number[] = [];
 /** Co ile panel otwartego zadania sprawdza w Bitriksie, czy cos sie w nim nie zmienilo. */
@@ -1602,9 +1605,10 @@ function useBitrixData() {
   }, []);
 
   const mutate = useCallback(
-    async (id: number, patch: Partial<Task>, run: () => Promise<unknown>, what: string) => {
+    /* `true` tylko po udanym zapisie — wolajacy, ktory robi cos dalej, musi wiedziec, czy jest na czym. */
+    async (id: number, patch: Partial<Task>, run: () => Promise<unknown>, what: string): Promise<boolean> => {
       const before = tasksRef.current.find((t) => t.id === id);
-      if (!before) return;
+      if (!before) return false;
 
       /*
        * NIE PRZENOSIMY zadan, dopoki na ekranie stoi migawka.
@@ -1622,7 +1626,7 @@ function useBitrixData() {
        */
       if (!pobrano.current && ('stageId' in patch || 'sprintId' in patch)) {
         toast('Poczekaj chwilę — lista jeszcze się wczytuje, kolumny mogą być z poprzedniego sprintu.');
-        return;
+        return false;
       }
 
       const rollback = Object.fromEntries(
@@ -1666,6 +1670,7 @@ function useBitrixData() {
           const cur = pinsRef.current.get(id);
           pinsRef.current.set(id, { at: Date.now(), fields: { ...cur?.fields, ...extra } });
         }
+        return true;
       } catch (e) {
         patchTasks(id, rollback);
         /* Zapis sie nie udal — nie ma juz czego bronic przed serwerem. */
@@ -1675,6 +1680,7 @@ function useBitrixData() {
           if (!Object.keys(failed.fields).length) pinsRef.current.delete(id);
         }
         toast(`Nie udało się zapisać (${what}): ${e instanceof Error ? e.message : String(e)}`);
+        return false;
       } finally {
         setPending((p) => {
           const next = new Set(p);
@@ -10431,18 +10437,65 @@ export default function App() {
       if (nextSprint !== null && sprintId === nextSprint.id) {
         setPlanTura((t) => t + list.length);
       }
+      /*
+       * ODPOWIEDZIALNY PRZY WEJSCIU DO SPRINTU. Zadanie spoza IT, ktore ktos bierze z rejestru do
+       * sprintu, przechodzi na konto-zaslepke IT; jesli odpowiedzialny jest z IT, zostaje (patrz
+       * `planAssign.ts`). Dotyczy tylko tej drogi — rejestr → sprint — a gdy spis pracownikow nie
+       * doszedl, nic nie ruszamy.
+       */
+      const itCtx: ItContext | null = directory.length
+        ? {
+            me,
+            itUsers: config?.itUsers ?? NO_IDS,
+            itDepartments: config?.itDepartments ?? NO_IDS,
+            kierownicy: config?.capacityExcludeIds ?? NO_IDS,
+            unassignedId: UNASSIGNED_ID,
+            departmentsOf: new Map(directory.map((e) => [e.id, e.departments])),
+          }
+        : null;
+      const zaslepka = directory.find((e) => e.id === UNASSIGNED_ID);
+      let przepiete = 0;
+
+      /*
+       * Najpierw sprint, potem osoba — dwa osobne zapisy. Gdy zmiana osoby sie nie uda, zadanie
+       * JEST juz w sprincie, wiec cofamy tylko osobe, a nie cale przeniesienie. Licznik w komunikacie
+       * liczy tylko udane zmiany osoby.
+       */
       return Promise.all(
-        list.map((id) =>
-          mutate(
+        list.map(async (id) => {
+          const t = tasks.find((x) => x.id === id);
+          const nowy = itCtx && t ? ownerOnEnteringSprint(t, t.sprintId, sprintId, itCtx) : null;
+          const wSprincie = await mutate(
             id,
             { sprintId, stageId: null },
             () => moveToSprint(id, sprintId ?? backlogId ?? 0),
             'sprint',
-          ),
-        ),
-      ).then(() => reload(true));
+          );
+          if (!wSprincie || nowy === null) return;
+          const zmieniony = await mutate(
+            id,
+            {
+              responsibleId: nowy,
+              responsibleName: zaslepka?.name ?? UNASSIGNED_LABEL,
+              responsiblePhoto: zaslepka?.photo ?? null,
+            },
+            () => updateTask(id, { RESPONSIBLE_ID: nowy }),
+            'osobę',
+          );
+          if (zmieniony) przepiete += 1;
+        }),
+      ).then(() => {
+        if (przepiete > 0) {
+          toast(
+            przepiete === 1
+              ? 'Odpowiedzialny zmieniony na konto IT — zadanie było spoza IT.'
+              : `Odpowiedzialny zmieniony na konto IT w ${przepiete} zadaniach spoza IT.`,
+          );
+        }
+        return reload(true);
+      });
     },
-    [nextSprint, mutate, backlogId, reload],
+    [nextSprint, mutate, backlogId, reload, directory, me, config, toast, tasks],
   );
 
   /**
