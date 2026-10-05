@@ -57,6 +57,7 @@ import {
   WORK_END_HOUR,
   latestChange,
   moveToSprint,
+  moveToSprintViaEntry,
   deleteTask,
   moveToStage,
   setChecklistItem,
@@ -10435,14 +10436,18 @@ export default function App() {
         list.map((id) =>
           mutate(
             id,
-            { sprintId, stageId: null },
-            () => moveToSprint(id, sprintId ?? backlogId ?? 0),
+            { sprintId, stageId: stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null },
+            /* Do sprintu — przez kolumne wejsciowa (karta na tablicy + numer IT-NNN); do rejestru — sama przynaleznosc. */
+            () =>
+              sprintId === null
+                ? moveToSprint(id, backlogId ?? 0)
+                : moveToSprintViaEntry(id, sprintId),
             'sprint',
           ),
         ),
       ).then(() => reload(true));
     },
-    [nextSprint, mutate, backlogId, reload],
+    [nextSprint, mutate, backlogId, reload, stages],
   );
 
   /**

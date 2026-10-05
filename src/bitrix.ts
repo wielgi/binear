@@ -2206,6 +2206,27 @@ export async function moveToSprint(
   return queued(() => enterSprint(taskId, entityId, stageId));
 }
 
+/**
+ * Wejscie do sprintu z rejestru: PRZEZ kolumne wejsciowa (typ NEW) tego sprintu.
+ *
+ * Sama przynaleznosc (`moveToSprint` bez etapu) zostawia zadanie w sprincie, ale bez karty na
+ * tablicy i bez etapu — widok sprintu uznaje je wtedy za „poza sprintem", a automatyzacja
+ * nadajaca numer IT-NNN nie odpala sie wcale. Widoczne od chwili, gdy planuje sie prosto w
+ * AKTYWNYM sprincie (w planowanym tablicy jeszcze nie ma, wiec nic tego nie zdradzalo).
+ *
+ * Gdy etapow sprintu nie da sie pobrac, zostaje sama przynaleznosc — zadanie ma trafic do sprintu
+ * nawet za cene braku karty.
+ */
+export async function moveToSprintViaEntry(
+  taskId: number,
+  entityId: number,
+): Promise<{ status: string } | undefined> {
+  const entry = (await fetchStages([entityId]).catch(() => [] as Stage[])).find(
+    (st) => st.type === 'NEW',
+  )?.id;
+  return moveToSprint(taskId, entityId, entry);
+}
+
 async function enterSprint(
   taskId: number,
   entityId: number,
