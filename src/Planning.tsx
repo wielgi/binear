@@ -484,6 +484,14 @@ function Pane({
           <span className="plan-num">
             <b>{stats.points}</b> SP
           </span>
+          {wMoce && statsMoc.points !== stats.points && (
+            <span
+              className="plan-num"
+              title="Praca w trakcie, oddana do akceptacji i zakończona nie zajmuje mocy — nie wchodzi do paska ani do tego, co zostało w rejestrze"
+            >
+              w mocach <b>{statsMoc.points}</b> SP
+            </span>
+          )}
           {compare && compare.points > 0 && statsMoc.points > compare.points && (
             <span className="plan-num plan-over" title={`${compare.label}: ${compare.points} SP`}>
               +{statsMoc.points - compare.points} SP ponad {compare.wlasne ? 'moce' : 'ostatni sprint'}
