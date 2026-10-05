@@ -180,6 +180,7 @@ import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort'
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity } from './sprintClock';
+import { sumaDoLimitu } from './planCapacity';
 import {
   COUNTERS,
   counterDef,
@@ -955,6 +956,8 @@ interface Toast {
  * o same ID zmienionych zadan, wiec 30 s nie jest tu zadnym obciazeniem.
  */
 const POLL_MS = 30_000;
+/** Brak osob poza limitem — stala, zeby memo w planowaniu nie liczylo sie od nowa przy kazdym renderze. */
+const NO_CAPACITY_EXCLUDED: readonly number[] = [];
 /** Co ile panel otwartego zadania sprawdza w Bitriksie, czy cos sie w nim nie zmienilo. */
 const PANEL_POLL_MS = 30_000;
 
@@ -10490,15 +10493,20 @@ export default function App() {
    *
    * Uwaga: z tego samego powodu NIE da sie tak odtworzyc, ile bylo ZAPLANOWANE —
    * i dlatego pokazujemy tylko "dowiezione".
+   *
+   * Bez zadan kierownika: planowanie mierzy do tego limitu sam zespol, wiec
+   * punkty kierownika w odniesieniu zawyzalyby wolne miejsce o jego udzial.
    */
+  const kierownicy = config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED;
   const lastDone = useMemo(() => {
     const done = [...sprints].reverse().find((sp) => sp.status === 'completed');
     if (!done) return null;
-    const points = tasks
-      .filter((t) => t.sprintId === done.id)
-      .reduce((a, t) => a + (t.storyPoints ?? 0), 0);
+    const points = sumaDoLimitu(
+      tasks.filter((t) => t.sprintId === done.id),
+      kierownicy,
+    );
     return points > 0 ? { name: done.name, points } : null;
-  }, [sprints, tasks]);
+  }, [sprints, tasks, kierownicy]);
 
   /*
    * WLASNA baza planowania: te same filtry i wyszukiwanie co lista, ale BEZ
@@ -11677,6 +11685,7 @@ export default function App() {
             onPrzeniesienie={() => setPlanPrzeniesienie((v) => !v)}
             onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
             sort={planSort}
+            kierownicy={kierownicy}
             sortFields={PLAN_SORTS}
             onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}
             /*
