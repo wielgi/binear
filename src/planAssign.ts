@@ -49,6 +49,11 @@ export function ownerOnEnteringSprint(
 ): number | null {
   // Tylko rejestr → sprint.
   if (fromSprintId !== null || toSprintId === null) return null;
+  /*
+   * Bez dzialow IT kazdy programista spoza BX_IT_USERS wygladalby na kogos spoza IT i tracilby
+   * zadanie. BX_IT_DEPARTMENTS jest opcjonalne, wiec gdy go brak, nikogo nie przepinamy.
+   */
+  if (ctx.itDepartments.length === 0) return null;
   if (task.responsibleId === null || task.responsibleId === ctx.unassignedId) return null;
   return isIt(task.responsibleId, ctx) === false ? ctx.unassignedId : null;
 }
