@@ -561,6 +561,7 @@ export function Planning({
   tasks,
   activeSprint,
   nextSprint,
+  etapyWToku,
   onCreateSprint,
   lastDone,
   people,
@@ -606,6 +607,8 @@ export function Planning({
   rejestrTasks: Task[];
   activeSprint: Sprint | null;
   nextSprint: Sprint | null;
+  /** Etapy typu WORK („W toku") aktywnego sprintu — praca w nich nie liczy sie do mocy. */
+  etapyWToku?: ReadonlySet<number>;
   /**
    * Zalozenie kolejnego sprintu. `undefined`, gdy nie ma z czego go zaproponowac
    * (brak aktywnego sprintu albo jego nazwa nie konczy sie numerem) — wtedy
@@ -697,6 +700,16 @@ export function Planning({
   const plannable = useCallback(
     (t: Task) => !CLOSED_STATUSES.has(t.status) && !REVIEW_STATUSES.has(t.status),
     [],
+  );
+  /*
+   * Co ZAJMUJE MOCE sprintu: otwarta praca, ktora nie jest w trakcie. Zadanie w trakcie (etap „W toku"
+   * albo status „w toku") przyszlo zwykle z poprzedniego sprintu i nie wiadomo, w ilu procentach jest
+   * zrobione, wiec jego SP nie da sie uczciwie policzyc — nie wchodzi do sumy ani do paska.
+   */
+  const zajmujeMoce = useCallback(
+    (t: Task) =>
+      plannable(t) && t.status !== '3' && !(t.stageId !== null && (etapyWToku?.has(t.stageId) ?? false)),
+    [plannable, etapyWToku],
   );
   const inSprintView = useCallback(
     (t: Task) =>
@@ -805,7 +818,7 @@ export function Planning({
   const planujeWAktywnym = !nextSprint && activeSprint !== null;
   const sumaNext = cel
     ? tasks
-        .filter((t) => t.sprintId === cel.id && plannable(t))
+        .filter((t) => t.sprintId === cel.id && zajmujeMoce(t))
         .reduce((n, t) => n + (t.storyPoints ?? 0), 0)
     : 0;
   /* Wlaczone przeniesienie zajmuje moce tak samo jak wybrane recznie — inaczej
@@ -1400,7 +1413,7 @@ export function Planning({
             /* Licznik mocy tylko, gdy to wlasnie ten sprint jest planowany (brak kolejnego);
                inaczej w trwajacym sprincie nie ma juz czego planowac. */
             compare={planujeWAktywnym ? compare : undefined}
-            wMoce={planujeWAktywnym ? plannable : undefined}
+            wMoce={planujeWAktywnym ? zajmujeMoce : undefined}
           />
         )}
 
@@ -1444,7 +1457,7 @@ export function Planning({
             onZwin={() => onZwin(nextSprint.id)}
             compare={compare}
             carry={carry}
-            wMoce={plannable}
+            wMoce={zajmujeMoce}
           />
         ) : activeSprint ? null : (
           /* Bez zadnego sprintu planowac nie ma dokad — mowimy to wprost,
