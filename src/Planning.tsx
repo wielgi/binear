@@ -841,7 +841,9 @@ export function Planning({
    * Doliczanie jej zawyzalo przeniesienie i kazalo planowac ponizej mozliwosci.
    */
   const carry = useMemo(() => {
-    if (!activeSprint || !przeniesienie) return undefined;
+    /* Bez planowanego sprintu nie ma dokad przenosic — planujemy w aktywnym, a jego zadania
+       sa juz w nim, wiec doliczanie ich drugi raz podwajaloby obciazenie. */
+    if (!activeSprint || !nextSprint || !przeniesienie) return undefined;
     const zostajace = tasks.filter(
       (t) =>
         t.sprintId === activeSprint.id &&
@@ -849,7 +851,7 @@ export function Planning({
         !REVIEW_STATUSES.has(t.status),
     );
     return zostajace.length > 0 ? { tasks: zostajace, label: activeSprint.name } : undefined;
-  }, [tasks, activeSprint, przeniesienie]);
+  }, [tasks, activeSprint, nextSprint, przeniesienie]);
 
   /*
    * Odniesienie dla sum SP. Recznie wpisane moce maja pierwszenstwo nad tym, co
@@ -873,10 +875,17 @@ export function Planning({
    * widoku, a moce sprintu nie zaleza od tego, co ktos wlasnie ma na ekranie.
    * Zakonczone i oddane do akceptacji nie zajmuja juz mocy (`plannable`).
    */
+  /*
+   * Dokad sie planuje: kolejny sprint, a gdy go nie ma — AKTYWNY. Tak wyglada proces, w ktorym
+   * stary sprint zamyka sie przed planowaniem, a nowy startuje od razu: tylko wtedy zadania
+   * wchodzace do sprintu dostaja numery IT-NNN.
+   */
+  const cel = nextSprint ?? activeSprint;
+  const planujeWAktywnym = !nextSprint && activeSprint !== null;
   /* Tylko zespol: zadania kierownika nie zajmuja mocy, wiec nie odejmuja sie od tego, co zostalo. */
-  const sumaNext = nextSprint
+  const sumaNext = cel
     ? sumaDoLimitu(
-        tasks.filter((t) => t.sprintId === nextSprint.id && plannable(t)),
+        tasks.filter((t) => t.sprintId === cel.id && plannable(t)),
         kierownicy,
       )
     : 0;
@@ -1461,8 +1470,8 @@ export function Planning({
         {activeSprint && (
           <Pane
             title={activeSprint.name}
-            subtitle="aktywny"
-            grow="var(--plan-split)"
+            subtitle={planujeWAktywnym ? 'aktywny · planowanie' : 'aktywny'}
+            grow={planujeWAktywnym ? 1 : 'var(--plan-split)'}
             sprintId={activeSprint.id}
             tasks={inActive}
             people={people}
@@ -1471,7 +1480,10 @@ export function Planning({
             zwiniety={zwiniete.includes(activeSprint.id)}
             onZwin={() => onZwin(activeSprint.id)}
             kierownicy={kierownicy}
-            /* Bez licznika mocy: w trwajacym sprincie nie ma juz czego planowac. */
+            /* Licznik mocy tylko, gdy to wlasnie ten sprint jest planowany (brak kolejnego);
+               inaczej w trwajacym sprincie nie ma juz czego planowac. */
+            compare={planujeWAktywnym ? compare : undefined}
+            wMoce={planujeWAktywnym ? plannable : undefined}
           />
         )}
 
@@ -1518,8 +1530,8 @@ export function Planning({
             wMoce={plannable}
             kierownicy={kierownicy}
           />
-        ) : (
-          /* Bez kolejnego sprintu planowac nie ma dokad — mowimy to wprost,
+        ) : activeSprint ? null : (
+          /* Bez zadnego sprintu planowac nie ma dokad — mowimy to wprost,
              zamiast pokazywac pusty panel bez wyjasnienia. */
           <section className="plan-pane plan-pane-none">
             <div className="plan-empty">
