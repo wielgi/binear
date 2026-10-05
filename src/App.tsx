@@ -10124,7 +10124,8 @@ export default function App() {
        * Tylko sprint PLANOWANY: przelozenie czegos do aktywnego albo z
        * powrotem do rejestru nie jest wyborem w tej rundzie.
        */
-      if (nextSprint !== null && sprintId === nextSprint.id) {
+      const celPlanowania = nextSprint ?? activeSprint;
+      if (celPlanowania !== null && sprintId === celPlanowania.id) {
         setPlanTura((t) => t + list.length);
       }
       const zapis = zapiszPrzeniesienie(planDodane, list, sprintId !== null, planDodaneNext.current);
@@ -10141,7 +10142,7 @@ export default function App() {
         ),
       ).then(() => reload(true));
     },
-    [nextSprint, mutate, backlogId, reload, planDodane],
+    [nextSprint, activeSprint, mutate, backlogId, reload, planDodane],
   );
 
   /**
