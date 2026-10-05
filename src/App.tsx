@@ -10352,6 +10352,11 @@ export default function App() {
    * Kolejny sprint do planowania: najwczesniejszy ze statusem `planned`.
    * Sprinty przychodza posortowane po dacie startu, wiec wystarczy pierwszy.
    */
+  /* Etapy „W toku" aktywnego sprintu — zadania w nich nie wchodza do mocy w widoku planowania. */
+  const etapyWToku = useMemo(
+    () => new Set(stages.filter((s) => s.type === 'WORK').map((s) => s.id)),
+    [stages],
+  );
   const nextSprint = useMemo(
     () => sprints.find((sp) => sp.status === 'planned') ?? null,
     [sprints],
@@ -11652,6 +11657,7 @@ export default function App() {
             rejestrTasks={planTasks}
             activeSprint={activeSprint}
             nextSprint={nextSprint}
+            etapyWToku={etapyWToku}
             onCreateSprint={nastepnySprint && me !== null ? zalozSprint : undefined}
             lastDone={lastDone}
             people={people}

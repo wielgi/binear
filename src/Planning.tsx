@@ -433,6 +433,8 @@ function Pane({
   /* Naglowek opisuje to, co panel POKAZUJE, wiec dzieli wszystkie wyswietlane zadania. */
   const spZespolu = sumaDoLimitu(tasks, kierownicy);
   const spKierownika = sumaKierownika(tasks, kierownicy);
+  /* To, co z zadan zespolu liczy sie do mocy (bez pracy w trakcie, oddanej i zakonczonej). */
+  const spMoceZespolu = sumaDoLimitu(wMoce ? tasks.filter(wMoce) : tasks, kierownicy);
   const { setNodeRef, isOver, active } = useDroppable({ id: planDropId(sprintId) });
 
   /* Szerokosc TEGO panelu — zmienia sie przy ciagnieciu uchwytu i przy otwarciu
@@ -536,6 +538,14 @@ function Pane({
               <b>{stats.points}</b> SP
             </span>
           )}
+          {wMoce && spMoceZespolu !== spZespolu && (
+            <span
+              className="plan-num"
+              title="Praca w trakcie, oddana do akceptacji i zakończona nie zajmuje mocy — nie wchodzi do paska ani do tego, co zostało w rejestrze"
+            >
+              w mocach <b>{spMoceZespolu}</b> SP
+            </span>
+          )}
           {compare && compare.points > 0 && statsMoc.points > compare.points && (
             <span className="plan-num plan-over" title={`${compare.label}: ${compare.points} SP`}>
               +{statsMoc.points - compare.points} SP ponad {compare.wlasne ? 'moce' : 'ostatni sprint'}
@@ -636,6 +646,7 @@ export function Planning({
   tasks,
   activeSprint,
   nextSprint,
+  etapyWToku,
   onCreateSprint,
   lastDone,
   people,
@@ -687,6 +698,8 @@ export function Planning({
   rejestrTasks: Task[];
   activeSprint: Sprint | null;
   nextSprint: Sprint | null;
+  /** Etapy typu WORK („W toku") aktywnego sprintu — praca w nich nie liczy sie do mocy. */
+  etapyWToku?: ReadonlySet<number>;
   /**
    * Zalozenie kolejnego sprintu. `undefined`, gdy nie ma z czego go zaproponowac
    * (brak aktywnego sprintu albo jego nazwa nie konczy sie numerem) — wtedy
@@ -778,6 +791,16 @@ export function Planning({
   const plannable = useCallback(
     (t: Task) => !CLOSED_STATUSES.has(t.status) && !REVIEW_STATUSES.has(t.status),
     [],
+  );
+  /*
+   * Co ZAJMUJE MOCE sprintu: otwarta praca, ktora nie jest w trakcie. Zadanie w trakcie (etap „W toku"
+   * albo status „w toku") przyszlo zwykle z poprzedniego sprintu i nie wiadomo, w ilu procentach jest
+   * zrobione, wiec jego SP nie da sie uczciwie policzyc — nie wchodzi do sumy ani do paska.
+   */
+  const zajmujeMoce = useCallback(
+    (t: Task) =>
+      plannable(t) && t.status !== '3' && !(t.stageId !== null && (etapyWToku?.has(t.stageId) ?? false)),
+    [plannable, etapyWToku],
   );
   const inSprintView = useCallback(
     (t: Task) =>
@@ -885,7 +908,7 @@ export function Planning({
   /* Tylko zespol: zadania kierownika nie zajmuja mocy, wiec nie odejmuja sie od tego, co zostalo. */
   const sumaNext = cel
     ? sumaDoLimitu(
-        tasks.filter((t) => t.sprintId === cel.id && plannable(t)),
+        tasks.filter((t) => t.sprintId === cel.id && zajmujeMoce(t)),
         kierownicy,
       )
     : 0;
@@ -1483,7 +1506,7 @@ export function Planning({
             /* Licznik mocy tylko, gdy to wlasnie ten sprint jest planowany (brak kolejnego);
                inaczej w trwajacym sprincie nie ma juz czego planowac. */
             compare={planujeWAktywnym ? compare : undefined}
-            wMoce={planujeWAktywnym ? plannable : undefined}
+            wMoce={planujeWAktywnym ? zajmujeMoce : undefined}
           />
         )}
 
@@ -1527,7 +1550,7 @@ export function Planning({
             onZwin={() => onZwin(nextSprint.id)}
             compare={compare}
             carry={carry}
-            wMoce={plannable}
+            wMoce={zajmujeMoce}
             kierownicy={kierownicy}
           />
         ) : activeSprint ? null : (
