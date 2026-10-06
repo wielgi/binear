@@ -38,6 +38,7 @@ import {
   fetchScrumMeta,
   fetchEpics,
   fetchTaskDetail,
+  fetchTaskFresh,
   fetchTaskHistory,
   BxError,
   createSprint,
@@ -142,6 +143,7 @@ import {
 import {
   MONTHS,
   podzielNaTrafienia,
+  relativeAge,
   tagsForWidth,
   withoutBugTag,
   shortDate,
@@ -177,12 +179,17 @@ import { BugBadge } from './BugBadge';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
-import { planComparator } from './planSort';
-import { CountersBar, useAnsweredTasks, useCounterHistory } from './CountersBar';
+import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
+import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
+import { CapacityChip, useNow } from './CapacityChip';
+import { sprintCapacity } from './sprintClock';
+import { ownerOnEnteringSprint, type ItContext } from './planAssign';
+import { sumaDoLimitu } from './planCapacity';
 import {
   COUNTERS,
   counterDef,
   countAll,
+  paybackRank,
   type CounterCtx,
   type CounterKey,
   type DaySnapshot,
@@ -624,13 +631,10 @@ const DEFAULT_SETTINGS: Settings = {
   showDone: false,
   planDone: false,
   planReview: true,
-  /* Domyslna kolejnosc waznosci — plomien rosnaco (ranga 0 = wysoki), tag tak
-     samo, a story pointy malejaco, bo tu wiecej znaczy wazniej. */
-  planSort: [
-    { by: 'priority', dir: 'asc' },
-    { by: 'wysoki', dir: 'asc' },
-    { by: 'sp', dir: 'desc' },
-  ],
+  /* Domyslna kolejnosc waznosci: plomien (awaria) najpierw, potem STRATEGIA, okres zwrotu rosnaco,
+     tag „Wysoki" jako rozstrzygniecie remisu, a story pointy malejaco, bo tu wiecej znaczy wazniej.
+     Zrodlo prawdy: PLAN_SORT_DOMYSLNY w planSort.ts (razem z migracja starego domyslnego). */
+  planSort: PLAN_SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[],
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
   listTint: 'fade',
   deadlineLook: 'mark',
@@ -668,7 +672,13 @@ function loadSettings(): Settings {
     if (!raw) return DEFAULT_SETTINGS;
     const saved = JSON.parse(raw) as Partial<Settings>;
     // Scalamy z domyslnymi, zeby dolozenie nowego ustawienia nie wywrocilo startu.
-    return { ...DEFAULT_SETTINGS, ...saved, sort: { ...DEFAULT_SETTINGS.sort, ...saved.sort } };
+    return {
+      ...DEFAULT_SETTINGS,
+      ...saved,
+      sort: { ...DEFAULT_SETTINGS.sort, ...saved.sort },
+      // Zapisany jest caly stos — stary domyslny zamieniamy na nowy (STRATEGIA na gorze, zwrot).
+      planSort: (migratePlanSort(saved.planSort) as Settings['planSort'] | undefined) ?? DEFAULT_SETTINGS.planSort,
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -950,6 +960,12 @@ interface Toast {
  * o same ID zmienionych zadan, wiec 30 s nie jest tu zadnym obciazeniem.
  */
 const POLL_MS = 30_000;
+/** Brak identyfikatorow — stala, zeby tablice w zaleznosciach nie zmienialy sie przy kazdym renderze. */
+const NO_IDS: readonly number[] = [];
+/** Brak osob poza limitem — stala, zeby memo w planowaniu nie liczylo sie od nowa przy kazdym renderze. */
+const NO_CAPACITY_EXCLUDED: readonly number[] = [];
+/** Co ile panel otwartego zadania sprawdza w Bitriksie, czy cos sie w nim nie zmienilo. */
+const PANEL_POLL_MS = 30_000;
 
 /* Ile czekamy przed ponowieniem po odmowie z limitu. Wiadro portalu leje sie
    2 zapytania na sekunde, wiec pare sekund wystarcza, zeby bylo z czego brac. */
@@ -1551,10 +1567,51 @@ function useBitrixData() {
       tasks: d.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
     }));
 
+  /**
+   * Odswieza JEDNO zadanie z Bitriksa — pola wiersza listy, story pointy i epik — i wstawia je do
+   * listy. Panel szczegolow wola to przy otwarciu, co pol minuty i na klikniecie.
+   *
+   * Osobno od przeladowania calej grupy, bo sonda calej listy patrzy tylko na date zmiany, a
+   * story pointy i epik leza na scrumowym bycie zadania i tej daty NIE przesuwaja — zmiana ich w
+   * Bitriksie byla dla binear niewidoczna, dopoki ktos nie odswiezyl wszystkiego recznie.
+   *
+   * Pinezki (wlasne, jeszcze niepotwierdzone zapisy) maja pierwszenstwo, jak przy kazdym pobraniu.
+   * `false` = Bitrix nie zna juz tego zadania; wiersz zostaje, a dopiero pelne przeladowanie
+   * zdecyduje, co z nim zrobic.
+   */
+  const refreshTask = useCallback(async (id: number): Promise<boolean> => {
+    const fresh = await fetchTaskFresh(id);
+    if (!fresh) return false;
+    setData((d) => ({
+      ...d,
+      tasks: applyPins(
+        d.tasks.map((t) =>
+          t.id !== id
+            ? t
+            : {
+                ...fresh.task,
+                /*
+                 * Odswiezane jest tylko zadanie otwarte w panelu, a otwarcie zeruje licznik
+                 * (`markOpened`). Lista z Bitriksa potrafi jeszcze niesc stara liczbe — bez tego
+                 * znaczek nieprzeczytanych wracalby na zadanie, ktore wlasnie czytam.
+                 */
+                newComments: 0,
+                // Scrumowe pola: gdy sie nie udalo ich odczytac, zostaja dotychczasowe.
+                storyPoints: fresh.meta ? fresh.meta.storyPoints : t.storyPoints,
+                epicId: fresh.meta ? fresh.meta.epicId : t.epicId,
+              },
+        ),
+        pinsRef.current,
+      ),
+    }));
+    return true;
+  }, []);
+
   const mutate = useCallback(
-    async (id: number, patch: Partial<Task>, run: () => Promise<unknown>, what: string) => {
+    /* `true` tylko po udanym zapisie — wolajacy, ktory robi cos dalej, musi wiedziec, czy jest na czym. */
+    async (id: number, patch: Partial<Task>, run: () => Promise<unknown>, what: string): Promise<boolean> => {
       const before = tasksRef.current.find((t) => t.id === id);
-      if (!before) return;
+      if (!before) return false;
 
       /*
        * NIE PRZENOSIMY zadan, dopoki na ekranie stoi migawka.
@@ -1572,7 +1629,7 @@ function useBitrixData() {
        */
       if (!pobrano.current && ('stageId' in patch || 'sprintId' in patch)) {
         toast('Poczekaj chwilę — lista jeszcze się wczytuje, kolumny mogą być z poprzedniego sprintu.');
-        return;
+        return false;
       }
 
       const rollback = Object.fromEntries(
@@ -1616,6 +1673,7 @@ function useBitrixData() {
           const cur = pinsRef.current.get(id);
           pinsRef.current.set(id, { at: Date.now(), fields: { ...cur?.fields, ...extra } });
         }
+        return true;
       } catch (e) {
         patchTasks(id, rollback);
         /* Zapis sie nie udal — nie ma juz czego bronic przed serwerem. */
@@ -1625,6 +1683,7 @@ function useBitrixData() {
           if (!Object.keys(failed.fields).length) pinsRef.current.delete(id);
         }
         toast(`Nie udało się zapisać (${what}): ${e instanceof Error ? e.message : String(e)}`);
+        return false;
       } finally {
         setPending((p) => {
           const next = new Set(p);
@@ -1722,6 +1781,9 @@ function useBitrixData() {
     newIds,
     reload: load,
     mutate,
+    refreshTask,
+    /** Kiedy ostatnio cokolwiek zrobiles — panel zadania nie pyta Bitriksa, gdy nikt nie pracuje. */
+    activeAtRef,
     removeTask,
     toast,
     selectProject,
@@ -1804,7 +1866,7 @@ type Dir = 'asc' | 'desc';
  * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
  * na liscie i tak grupuje sie po etapie.
  */
-type PlanSortBy = SortBy | 'stage' | 'wysoki' | 'sp';
+type PlanSortBy = SortBy | 'stage' | 'strategia' | 'wysoki' | 'sp' | 'zwrot';
 
 const SORTS: { key: SortBy; label: string }[] = [
   { key: 'updated', label: 'Zaktualizowane' },
@@ -1821,7 +1883,10 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
    * pozycje bylyby niewidoczne w liscie i nie dalo by sie poprawic zadnego z nich
    * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
    */
+  { key: 'strategia', label: 'Tag STRATEGIA' },
   { key: 'wysoki', label: 'Tag „Wysoki”' },
+  /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), strategia, potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
+  { key: 'zwrot', label: 'Okres zwrotu' },
   { key: 'sp', label: 'Story pointy' },
   { key: 'stage', label: 'Etap w sprincie' },
   ...SORTS,
@@ -3321,7 +3386,7 @@ function TaskRow({
       {...listeners}
       className={`row${active ? ' row-active' : ''}${selected ? ' row-selected' : ''}${
         marked ? ' row-marked' : ''
-      }${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
+      }${isBug(task) ? ' row-bug' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
       /* Shift+klik zaznaczylby tekst miedzy wierszami, Ctrl+klik potrafi zaczac
          zaznaczanie w niektorych przegladarkach. Blokujemy TYLKO z modyfikatorem,
          zeby zwykle zaznaczanie i kopiowanie tytulu dzialalo dalej.
@@ -3354,6 +3419,16 @@ function TaskRow({
       >
         {marked ? <CheckIcon /> : null}
       </button>
+      {/*
+        Blad: czerwony plomien (wysoki priorytet) i/albo robak (tag BUG); tag BUG nie wraca nizej jako
+        etykieta. Stoi W MIEJSCU checkboxa, ktory i tak jest niewidoczny, dopoki nie najedzie sie na
+        wiersz — osobna kolumna bylaby pusta w wiekszosci wierszy. Pod kursorem znak ustepuje checkboxowi.
+      */}
+      {isBug(task) && (
+        <span className="bug-slot">
+          <BugBadge task={task} />
+        </span>
+      )}
 
       {/*
         Wciecie zaczyna sie DOPIERO tutaj, a nie na paddingu wiersza — dzieki temu
@@ -3403,9 +3478,6 @@ function TaskRow({
           {parentRef.label}
         </button>
       )}
-
-      {/* Blad: czerwony plomien (wysoki priorytet) i/albo robak (tag BUG); tag BUG nie wraca nizej jako etykieta. */}
-      {isBug(task) && <BugBadge task={task} />}
 
       <span className="row-title">
         {podzielNaTrafienia(task.title || task.rawTitle, fraza).map((k, i) =>
@@ -3870,6 +3942,7 @@ function Comments({
   chatId,
   fraza,
   ready,
+  refreshKey,
   me,
   people,
   onConfirm,
@@ -3882,6 +3955,8 @@ function Comments({
   chatId: number | null;
   /** Szczegoly zadania juz doszly (albo sie nie udaly) — dopiero wtedy znamy `chatId`. */
   ready: boolean;
+  /** Rosnie przy kazdym odswiezeniu panelu — watek dociaga sie wtedy po cichu, bez migniecia. */
+  refreshKey: number;
   me: number | null;
   /** Osoby do wzmianek `@` — te same, co w filtrze i pickerze osoby. */
   people: Person[];
@@ -4108,6 +4183,16 @@ function Comments({
    * starsza odpowiedz nadpisalaby nowsza — takze w CACHE.
    */
   const loadSeq = useRef(0);
+  /*
+   * Trwa `load` — ciche odswiezenie wtedy nie startuje. Inaczej jego pobranie mogloby wyprzedzic
+   * `load` i zostawic watek na „Wczytywanie…", gdy samo sie nie uda (cichy blad nic nie pokazuje).
+   */
+  const loadPending = useRef(false);
+  /*
+   * Bumpowany przy kazdej lokalnej zmianie watku (poprawka, usuniecie, starsze). Ciche
+   * odswiezenie, ktore wystartowalo PRZED taka zmiana, niesie stary watek i nie moze jej cofnac.
+   */
+  const localSeq = useRef(0);
 
   const load = useCallback(() => {
     if (!ready) return; // bez chatId pytanie byloby niepelne
@@ -4115,7 +4200,11 @@ function Comments({
     const cached = getCachedComments(taskId);
     setComments(cached); // z cache (albo null przy pierwszym otwarciu -> "Wczytywanie…")
     setFailed(null);
+    loadPending.current = true;
     fetchComments(taskId, chatId)
+      .finally(() => {
+        if (seq === loadSeq.current) loadPending.current = false;
+      })
       .then((c) => {
         if (seq !== loadSeq.current) return;
         setComments(c);
@@ -4131,6 +4220,45 @@ function Comments({
   }, [ready, taskId, chatId]);
 
   useEffect(load, [load]);
+
+  /*
+   * Ciche odswiezenie watku (panel odswieza sie co pol minuty i na klikniecie). W odroznieniu od
+   * `load` nie wraca do cache i nie pokazuje „Wczytywanie…" — podmienia tylko wtedy, gdy watek
+   * naprawde sie zmienil, zeby nie przerysowywac go co 30 s i nie ruszac przewijania.
+   */
+  const silentSeq = useRef(0);
+
+  useEffect(() => {
+    if (refreshKey === 0 || !ready || loadPending.current) return;
+    const seq = ++silentSeq.current;
+    const startLoad = loadSeq.current;
+    const startLocal = localSeq.current;
+    fetchComments(taskId, chatId)
+      .then((c) => {
+        if (seq !== silentSeq.current || startLoad !== loadSeq.current || startLocal !== localSeq.current) return;
+        setComments((prev) => {
+          /*
+           * `fetchComments` niesie tylko ostatnia porcje czatu. Starsze, dociagniete przez
+           * „pokaż starsze", zostaja — inaczej znikalyby co 30 s spod oczu czytajacego.
+           * Numery wiadomosci czatu rosna, wiec „starsze" = mniejszy numer niz najstarszy swiezy.
+           */
+          const najstarszy = c.find((x) => x.source === 'chat');
+          const doczytane = najstarszy
+            ? (prev ?? []).filter((x) => x.source === 'chat' && x.id < najstarszy.id)
+            : [];
+          const next = doczytane.length
+            ? [...doczytane, ...c].sort((a, b) => (Date.parse(a.date ?? '') || 0) - (Date.parse(b.date ?? '') || 0))
+            : c;
+          if (prev && JSON.stringify(prev) === JSON.stringify(next)) return prev;
+          setCachedComments(taskId, next);
+          return next;
+        });
+      })
+      .catch(() => {
+        /* Cichy bonus — niepowodzenie zostawia to, co juz widac. */
+      });
+    // Tylko zmiana klucza odswiezenia; reszta jest ta sama co przy `load`.
+  }, [refreshKey]);
 
   /**
    * Pierwszy komentarz, ktorego jeszcze nie widzialem — nad nim staje kreska.
@@ -4291,6 +4419,7 @@ function Comments({
         setStarszeBrak(true);
         return;
       }
+      localSeq.current++;
       setComments((prev) => {
         const znane = new Set((prev ?? []).map((c) => `${c.source}:${c.id}`));
         const nowe = starsze.filter((c) => !znane.has(`${c.source}:${c.id}`));
@@ -4431,6 +4560,7 @@ function Comments({
           try {
             await deleteComment(c, taskId);
             /* Znika lokalnie od razu — patrz `saveEdit`, ten sam powod. */
+            localSeq.current++;
             setComments((prev) => {
               if (!prev) return prev;
               const next = prev.filter((x) => !(x.source === c.source && x.id === c.id));
@@ -4476,6 +4606,7 @@ function Comments({
        * calosci gasilo na moment cala liste i przewijanie skakalo — a wiadomo
        * dokladnie, co sie zmienilo, bo sami to wyslalismy.
        */
+      localSeq.current++;
       setComments((prev) => {
         if (!prev) return prev;
         const next = prev.map((x) =>
@@ -5421,6 +5552,24 @@ function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) =
   );
 }
 
+/**
+ * „12 s temu" liczone na biezaco. Bez wlasnego zegara napis stal w miejscu miedzy odswiezeniami,
+ * a po 5 min bezczynnosci (albo w karcie w tle), kiedy panel przestaje pytac Bitriksa, zamarzal
+ * na „przed chwilą" — swiezo wygladajacy wiek przy danych, ktore wlasnie sie starzeja.
+ * Co sekunde, dopoki pokazujemy sekundy; potem co 30 s wystarczy na minuty i godziny.
+ */
+function FreshAge({ at }: { at: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  const age = now - at;
+
+  useEffect(() => {
+    const t = setTimeout(() => setNow(Date.now()), age < 60_000 ? 1000 : 30_000);
+    return () => clearTimeout(t);
+  }, [now, at]);
+
+  return <>{relativeAge(Math.max(0, Date.now() - at))}</>;
+}
+
 function DetailPanel({
   task,
   fraza,
@@ -5444,6 +5593,8 @@ function DetailPanel({
   onDeadline,
   onTitle,
   onClose,
+  onRefresh,
+  idle,
   onDelete,
   onConfirm,
   onHistory,
@@ -5480,6 +5631,13 @@ function DetailPanel({
   onDeadline: (date: string) => void;
   onTitle: (title: string) => void;
   onClose: () => void;
+  /**
+   * Pobiera TO zadanie z Bitriksa od nowa (pola listy, story pointy, epik) i wstawia do listy;
+   * `false`, gdy Bitrix go nie zna. Szczegoly i komentarze panel dociaga sam.
+   */
+  onRefresh: () => Promise<boolean>;
+  /** Czy nikt nic nie robi od dluzszego czasu — wtedy panel przestaje pytac Bitriksa. */
+  idle: () => boolean;
   /** Usuniecie zadania — panel sam pyta o potwierdzenie przez App (setConfirm). */
   onDelete: () => void;
   /** To samo okno dla drobniejszych nieodwracalnych — dzis: usuniecie komentarza. */
@@ -5495,27 +5653,116 @@ function DetailPanel({
   const [detailError, setDetailError] = useState(false);
 
   /*
+   * ŚWIEŻOŚĆ danych tego zadania. Panel pokazuje od razu to, co ma w pamięci (lista, cache
+   * szczegółów i komentarzy), a swieze dane dociąga w tle — więc musi być widać, od kiedy
+   * jest to, na co patrzysz. `fetchedAt` = kiedy ostatnio przyszły z Bitriksa (null = jeszcze nie,
+   * widać wersję z pamięci).
+   */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  /* Podbijany przy odswiezeniu — `Comments` po zmianie dociaga watek po cichu. */
+  const [commentsTick, setCommentsTick] = useState(0);
+  const currentId = useRef(task.id);
+  currentId.current = task.id;
+  const inFlight = useRef<number | null>(null);
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
+  const idleRef = useRef(idle);
+  idleRef.current = idle;
+  /* Napis „pobrano X temu" przelicza sie sam, bez nowych danych. */
+  const [, setClock] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setClock((n) => n + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  /*
    * Podglad obrazkow Z OPISU. Trzymamy komplet (lista + pozycja) w jednym stanie, bo
    * przy obrazku spoza zalacznikow galeria sklada sie tylko z niego — sam indeks nie
    * mialby wtedy do czego wskazywac.
    */
   const [preview, setPreview] = useState<{ items: PreviewItem[]; index: number } | null>(null);
 
+  /**
+   * Odswiezenie tego zadania: wiersz listy (z story pointami i epikiem), szczegoly i — gdy
+   * `comments` — komentarze. Jedno naraz na zadanie, a wynik z POPRZEDNIEGO zadania odpada (panel
+   * nie jest kluczowany po zadaniu). Blad szczegolow pokazujemy tylko, gdy nie mamy nawet cache —
+   * inaczej zostaje stara wersja z dopiskiem, ze odswiezenie sie nie udalo.
+   */
+  const refresh = useCallback(
+    async (opts: { comments: boolean }) => {
+      const id = task.id;
+      if (inFlight.current === id) return;
+      inFlight.current = id;
+      setRefreshing(true);
+      const [row, det] = await Promise.allSettled([onRefreshRef.current(), fetchTaskDetail(id)]);
+      if (inFlight.current === id) inFlight.current = null;
+      if (currentId.current !== id) return;
+      setRefreshing(false);
+      if (det.status === 'fulfilled') {
+        setDetail(det.value);
+        setDetailError(false);
+      } else if (!getCachedDetail(id)) setDetailError(true);
+      if (opts.comments) setCommentsTick((n) => n + 1);
+      // „pobrano" tylko gdy przyszly OBA: story pointy i epik w panelu stoja z wiersza, nie ze szczegolow.
+      const ok = det.status === 'fulfilled' && row.status === 'fulfilled' && row.value;
+      setRefreshFailed(!ok);
+      if (ok) setFetchedAt(Date.now());
+    },
+    [task.id],
+  );
+
+  // Otwarcie: od razu z pamieci (albo null przy pierwszym otwarciu), a swieze dane ruszaja w tle.
+  // Komentarze ladują się same przy montowaniu, więc ich tu nie ruszamy.
   useEffect(() => {
-    let stale = false;
-    const cached = getCachedDetail(task.id);
-    setDetail(cached); // od razu z cache (albo null, gdy zadania jeszcze nie otwierano)
+    setDetail(getCachedDetail(task.id));
     setDetailError(false);
+    setFetchedAt(null);
+    setRefreshFailed(false);
+    void refresh({ comments: false });
+  }, [task.id, refresh]);
 
-    fetchTaskDetail(task.id)
-      .then((d) => !stale && setDetail(d))
-      // Blad pokazujemy tylko, gdy nie mamy nawet cache — inaczej zostaje stara wersja.
-      .catch(() => !stale && !cached && setDetailError(true));
-
-    return () => {
-      stale = true;
+  // Dopoki zadanie jest otwarte, co pol minuty sprawdzamy, czy cos sie w nim nie zmienilo — ale
+  // tylko gdy karta jest widoczna i ktos w ogole pracuje, zeby panel zostawiony na noc nie pytal
+  // Bitriksa w nieskonczonosc.
+  //
+  // Powrot odswieza od razu, i na karte, i po bezczynnosci (ruch myszy przy otwartej karcie).
+  // Panel sam pamieta, ze stanal (`paused`), zamiast pytac `idle()` w chwili powrotu — wtedy
+  // liczylaby sie kolejnosc listenerow: gdyby App nie zdazyl jeszcze odnotowac aktywnosci,
+  // powrot wciaz wygladalby na bezczynnosc i odswiezenie by przepadlo.
+  useEffect(() => {
+    let paused = false;
+    const tick = () => {
+      if (document.hidden || idleRef.current()) {
+        paused = true;
+        return;
+      }
+      void refresh({ comments: true });
     };
-  }, [task.id]);
+    const resume = () => {
+      if (!paused || document.hidden) return;
+      paused = false;
+      void refresh({ comments: true });
+    };
+    const onVisible = () => {
+      if (document.hidden) {
+        paused = true;
+        return;
+      }
+      resume();
+    };
+    const timer = setInterval(tick, PANEL_POLL_MS);
+    // Te same zdarzenia, po ktorych App uznaje, ze ktos pracuje.
+    const EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const;
+    for (const e of EVENTS) window.addEventListener(e, resume, { passive: true });
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      for (const e of EVENTS) window.removeEventListener(e, resume);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refresh]);
 
   /* Wszystkie obrazki zadania — takze te doczepione, a nie wstawione w opis; skoro
      podglad juz jest, ma po czym chodzic strzalkami. */
@@ -5691,6 +5938,36 @@ function DetailPanel({
           {task.code && <TaskCode code={`#${task.id}`} copy={String(task.id)} onCopied={() => {}} />}
         </span>
         <div className="detail-head-right">
+          {/*
+            Kiedy dane tego zadania przyszly z Bitriksa, z przyciskiem odswiezenia. Do czasu pierwszego
+            pobrania widac wersje z pamieci — napis mowi to wprost, zeby stara liczba nie wygladala jak
+            aktualna.
+          */}
+          <button
+            className={`detail-fresh${refreshFailed ? ' detail-fresh-fail' : ''}`}
+            onClick={() => void refresh({ comments: true })}
+            disabled={refreshing}
+            title={
+              fetchedAt
+                ? `Pobrano z Bitriksa o ${new Date(fetchedAt).toLocaleTimeString('pl-PL')} — kliknij, aby odświeżyć to zadanie`
+                : 'Pokazuję wersję z pamięci — kliknij, aby pobrać to zadanie z Bitriksa'
+            }
+          >
+            <span className={refreshing ? 'spin' : undefined}>
+              <RefreshIcon />
+            </span>
+            <span className="detail-fresh-text">
+              {refreshing
+                ? fetchedAt
+                  ? 'odświeżam…'
+                  : 'z pamięci · odświeżam…'
+                : refreshFailed
+                  ? <>nie udało się odświeżyć{fetchedAt ? <> · <FreshAge at={fetchedAt} /></> : ''}</>
+                  : fetchedAt
+                    ? <>pobrano <FreshAge at={fetchedAt} /></>
+                    : 'z pamięci'}
+            </span>
+          </button>
           {/*
             Droga w druga strone niz z dziennika do zadania: stad pytamy „co
             binear zrobil TEMU zadaniu". Bez tego trzeba bylo otworzyc dziennik
@@ -6275,6 +6552,7 @@ function DetailPanel({
           fraza={fraza}
           chatId={mine?.chatId ?? null}
           ready={mine !== null || detailError}
+          refreshKey={commentsTick}
           me={me}
           people={people}
           onConfirm={onConfirm}
@@ -8047,6 +8325,8 @@ export default function App() {
     newIds,
     reload,
     mutate,
+    refreshTask,
+    activeAtRef,
     removeTask,
     toast,
     selectProject,
@@ -8625,6 +8905,36 @@ export default function App() {
   const sprintId = activeSprint?.id ?? null;
 
   /*
+   * Odliczanie do konca sprintu przy etapie „Nowe / Oczekujace" (patrz sprintClock.ts).
+   * Liczy sie z CALEJ grupy zadan, nie z tego, co przepuscil filtr — pytanie brzmi
+   * „zdazymy?", a nie „ile widze". Etap „Nowe" to ten o typie NEW w AKTYWNYM sprincie
+   * (id etapow sa per sprint, wiec po nazwie nie da sie ich odroznic od cudzych).
+   */
+  const now = useNow();
+  const waitingStages = useMemo(
+    () => stages.filter((s) => sprintId !== null && s.sprintId === sprintId && s.type === 'NEW'),
+    [stages, sprintId],
+  );
+  const waitingStageIds = useMemo(() => new Set(waitingStages.map((s) => s.id)), [waitingStages]);
+  const waitingStageNames = useMemo(() => new Set(waitingStages.map((s) => s.name)), [waitingStages]);
+  const capacity = useMemo(
+    () =>
+      sprintCapacity({
+        now,
+        dateEnd: activeSprint?.dateEnd ?? null,
+        devs: config?.capacityDevs ?? 4,
+        sprintId,
+        waitingStageIds,
+        excludedIds: config?.capacityExcludeIds ?? [],
+        tasks,
+      }),
+    [now, activeSprint?.dateEnd, config?.capacityDevs, config?.capacityExcludeIds, sprintId, waitingStageIds, tasks],
+  );
+  /* Chip tylko wtedy, gdy widok naprawde pokazuje ten sprint — w „Wszystkich" etap „Nowe"
+     zlewa zadania z wielu sprintow i liczba nie odpowiadalaby temu, co widac. */
+  const capacityShown = scope === 'sprint' ? capacity : null;
+
+  /*
    * Liczniki nad lista (patrz counters.ts). Licza CALA grupe — bez zakresu,
    * przelacznikow i filtrow — bo odpowiadaja na pytanie „ile tego jest", a nie „ile
    * widze". Klikniecie karty podmienia liste na dokladnie te zadania, ktore liczy.
@@ -8638,9 +8948,16 @@ export default function App() {
     groupId,
     enabled: metaReady,
   });
+  /* Fakty z czatow: rozpoznania i uzasadnienia STRATEGII — nie widac ich w tagach. */
+  const chatFacts = useChatFacts(tasks, {
+    closed: CLOSED_STATUSES,
+    sprintId,
+    groupId,
+    enabled: metaReady,
+  });
   const counterCtx = useMemo<CounterCtx>(
-    () => ({ sprintId, closed: CLOSED_STATUSES, answered }),
-    [sprintId, answered],
+    () => ({ sprintId, closed: CLOSED_STATUSES, answered, chat: chatFacts }),
+    [sprintId, answered, chatFacts],
   );
   const counterDefs = useMemo(
     () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),
@@ -8655,12 +8972,16 @@ export default function App() {
   const counterPending = useMemo(() => {
     const s = new Set<CounterKey>();
     for (const d of counterDefs) {
-      if (!metaReady || ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null)) {
+      if (
+        !metaReady ||
+        ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null) ||
+        (d.needsChatFacts && chatFacts === null)
+      ) {
         s.add(d.key);
       }
     }
     return s;
-  }, [counterDefs, metaReady, answered]);
+  }, [counterDefs, metaReady, answered, chatFacts]);
   const counterSnap = useMemo<DaySnapshot>(() => {
     const s: DaySnapshot = {};
     for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
@@ -10130,18 +10451,65 @@ export default function App() {
       if (nextSprint !== null && sprintId === nextSprint.id) {
         setPlanTura((t) => t + list.length);
       }
+      /*
+       * ODPOWIEDZIALNY PRZY WEJSCIU DO SPRINTU. Zadanie spoza IT, ktore ktos bierze z rejestru do
+       * sprintu, przechodzi na konto-zaslepke IT; jesli odpowiedzialny jest z IT, zostaje (patrz
+       * `planAssign.ts`). Dotyczy tylko tej drogi — rejestr → sprint — a gdy spis pracownikow nie
+       * doszedl, nic nie ruszamy.
+       */
+      const itCtx: ItContext | null = directory.length
+        ? {
+            me,
+            itUsers: config?.itUsers ?? NO_IDS,
+            itDepartments: config?.itDepartments ?? NO_IDS,
+            kierownicy: config?.capacityExcludeIds ?? NO_IDS,
+            unassignedId: UNASSIGNED_ID,
+            departmentsOf: new Map(directory.map((e) => [e.id, e.departments])),
+          }
+        : null;
+      const zaslepka = directory.find((e) => e.id === UNASSIGNED_ID);
+      let przepiete = 0;
+
+      /*
+       * Najpierw sprint, potem osoba — dwa osobne zapisy. Gdy zmiana osoby sie nie uda, zadanie
+       * JEST juz w sprincie, wiec cofamy tylko osobe, a nie cale przeniesienie. Licznik w komunikacie
+       * liczy tylko udane zmiany osoby.
+       */
       return Promise.all(
-        list.map((id) =>
-          mutate(
+        list.map(async (id) => {
+          const t = tasks.find((x) => x.id === id);
+          const nowy = itCtx && t ? ownerOnEnteringSprint(t, t.sprintId, sprintId, itCtx) : null;
+          const wSprincie = await mutate(
             id,
             { sprintId, stageId: null },
             () => moveToSprint(id, sprintId ?? backlogId ?? 0),
             'sprint',
-          ),
-        ),
-      ).then(() => reload(true));
+          );
+          if (!wSprincie || nowy === null) return;
+          const zmieniony = await mutate(
+            id,
+            {
+              responsibleId: nowy,
+              responsibleName: zaslepka?.name ?? UNASSIGNED_LABEL,
+              responsiblePhoto: zaslepka?.photo ?? null,
+            },
+            () => updateTask(id, { RESPONSIBLE_ID: nowy }),
+            'osobę',
+          );
+          if (zmieniony) przepiete += 1;
+        }),
+      ).then(() => {
+        if (przepiete > 0) {
+          toast(
+            przepiete === 1
+              ? 'Odpowiedzialny zmieniony na konto IT — zadanie było spoza IT.'
+              : `Odpowiedzialny zmieniony na konto IT w ${przepiete} zadaniach spoza IT.`,
+          );
+        }
+        return reload(true);
+      });
     },
-    [nextSprint, mutate, backlogId, reload],
+    [nextSprint, mutate, backlogId, reload, directory, me, config, toast, tasks],
   );
 
   /**
@@ -10192,15 +10560,20 @@ export default function App() {
    *
    * Uwaga: z tego samego powodu NIE da sie tak odtworzyc, ile bylo ZAPLANOWANE —
    * i dlatego pokazujemy tylko "dowiezione".
+   *
+   * Bez zadan kierownika: planowanie mierzy do tego limitu sam zespol, wiec
+   * punkty kierownika w odniesieniu zawyzalyby wolne miejsce o jego udzial.
    */
+  const kierownicy = config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED;
   const lastDone = useMemo(() => {
     const done = [...sprints].reverse().find((sp) => sp.status === 'completed');
     if (!done) return null;
-    const points = tasks
-      .filter((t) => t.sprintId === done.id)
-      .reduce((a, t) => a + (t.storyPoints ?? 0), 0);
+    const points = sumaDoLimitu(
+      tasks.filter((t) => t.sprintId === done.id),
+      kierownicy,
+    );
     return points > 0 ? { name: done.name, points } : null;
-  }, [sprints, tasks]);
+  }, [sprints, tasks, kierownicy]);
 
   /*
    * WLASNA baza planowania: te same filtry i wyszukiwanie co lista, ale BEZ
@@ -10243,6 +10616,7 @@ export default function App() {
       axis: (by, a, b) => compareBy(by as SortBy, a, b),
       stageRank,
       me,
+      paybackRank,
     });
   }, [planSort, me, stageNames, stageOrder]);
 
@@ -11378,6 +11752,7 @@ export default function App() {
             onPrzeniesienie={() => setPlanPrzeniesienie((v) => !v)}
             onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
             sort={planSort}
+            kierownicy={kierownicy}
             sortFields={PLAN_SORTS}
             onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}
             /*
@@ -11431,6 +11806,7 @@ export default function App() {
             epicOf={epicOf}
             subCounts={childStats}
             relatedIds={relatedIds}
+            headExtra={(s) => (capacityShown && waitingStageIds.has(s.id) ? <CapacityChip cap={capacityShown} /> : null)}
             pending={pending}
             activeId={flat[cursor]?.id ?? null}
             openId={openId}
@@ -11508,6 +11884,9 @@ export default function App() {
                     {g.tasks.length}
                   </HoverNote>
                   <GroupPoints tasks={g.tasks} />
+                  {groupBy === 'stage' && capacityShown && waitingStageNames.has(g.key) && (
+                    <CapacityChip cap={capacityShown} />
+                  )}
                 </div>
                 )}
                 {/*
@@ -11549,6 +11928,9 @@ export default function App() {
                               {sub.tasks.length}
                             </HoverNote>
                             <GroupPoints tasks={sub.tasks} />
+                            {subGroupBy === 'stage' && capacityShown && waitingStageNames.has(sub.key) && (
+                              <CapacityChip cap={capacityShown} />
+                            )}
                           </div>
                         )}
                         {!subCollapsed &&
@@ -11669,6 +12051,8 @@ export default function App() {
             )
           }
           onClose={() => setOpenId(null)}
+          onRefresh={() => refreshTask(openTask.id)}
+          idle={() => Date.now() - activeAtRef.current > IDLE_MS}
           onHistory={(id) => {
             setHistFocus(id);
             setHistSeq((n) => n + 1);

@@ -158,7 +158,7 @@ export function tagsForWidth(width: number): number {
  *  - plomien — priorytet Bitriksa „wysoki" (`2`, ikona plomienia w Bitriksie),
  *  - robak — tag BUG.
  * Zadanie z obu na raz dostaje oba. Tag BUG nie jest wtedy pokazywany drugi raz jako etykieta (robak
- * go zastepuje). Kafelek „Bledy" liczy plomienie i tagi BUG razem, kazde zadanie raz (patrz `counters.ts`).
+ * go zastepuje). Kafelek „Wazne" liczy plomienie i tagi BUG razem, kazde zadanie raz (patrz `counters.ts`).
  */
 export const isFlame = (t: { priority: string }): boolean => t.priority === '2';
 
@@ -169,3 +169,19 @@ export const isBug = (t: { priority: string; tags: string[] }): boolean => isFla
 
 /** Tagi bez BUG — ten tag zastepuje robak przed tytulem, wiec drugi raz jako etykieta zbedny. */
 export const withoutBugTag = (tags: string[]): string[] => tags.filter((g) => g.toUpperCase() !== 'BUG');
+
+/**
+ * Wiek pobrania danych po polsku: „przed chwilą", „12 s temu", „3 min temu", „2 godz. temu",
+ * „1 d temu". Do napisu przy zadaniu — zeby bylo widac, czy patrzymy na swieze dane, czy na te
+ * z pamieci (cache).
+ */
+export function relativeAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 5) return 'przed chwilą';
+  if (s < 60) return `${s} s temu`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min temu`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} godz. temu`;
+  return `${Math.floor(h / 24)} d temu`;
+}

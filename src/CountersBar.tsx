@@ -10,13 +10,19 @@ import {
   dayKey,
   DEFERRED_STATUS,
   hasTag,
+  hasReconMarker,
+  hasValueMessage,
   loadHistory,
+  needsChat,
   previousDay,
   recordDay,
   saveHistory,
   TAG_CZEKA,
+  TAG_DO_STARTU,
+  TAG_STRATEGIA,
   type CounterDef,
   type CounterKey,
+  type ChatFacts,
   type CounterValue,
   type DaySnapshot,
 } from './counters';
@@ -145,6 +151,109 @@ export function useAnsweredTasks(
 }
 
 /**
+ * Fakty z czatów zadań DO-STARTU, których nie widać w tagach (patrz `ChatFacts`):
+ *
+ *  - **rozpoznanie / analiza błędu** — wiadomość WYCENA ma dopisek „Rozpoznanie — bez okresu zwrotu".
+ *    Takie zadanie jest gotowe do startu bez kategorii i bez tagu okresu zwrotu,
+ *  - **strategia z uzasadnieniem** — zadanie ze STRATEGIĄ ma wiadomość WARTOŚĆ (jedno zdanie celu).
+ *
+ * Kategorię i okres zwrotu zwykłych zadań widać w tagach, więc czatu nie czytamy dla nikogo, kto ma
+ * komplet. Czytamy tylko zadania, o których kompletności rozstrzyga czat (`needsChat`). Zamknięte,
+ * odłożone i z aktywnego sprintu pomijamy — kafelki ich nie liczą.
+ *
+ * `null` dopóki pierwszy przebieg dla tego projektu się nie skończy albo gdy czatów nie da się
+ * przeczytać (brak zakresu `im`): kafelki pokazują wtedy wielokropek, a nie „wszystko do wyceny".
+ */
+export function useChatFacts(
+  tasks: Task[],
+  opts: {
+    closed: ReadonlySet<string>;
+    sprintId: number | null;
+    groupId: number | null;
+    enabled: boolean;
+  },
+): ChatFacts | null {
+  const { closed, sprintId, groupId, enabled } = opts;
+  // `read` — zadania, których czat choć raz udało się przeczytać; tylko dla nich wolno
+  // przenieść stary wynik, gdy kolejny odczyt się nie uda.
+  const [state, setState] = useState<{
+    group: number | null;
+    facts: ChatFacts;
+    read: ReadonlySet<number>;
+  } | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((x) => x + 1), ANSWERS_REFRESH_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const candidates = useMemo(
+    () =>
+      tasks.filter(
+        (t) =>
+          !closed.has(t.status) &&
+          t.status !== DEFERRED_STATUS &&
+          (sprintId === null || t.sprintId !== sprintId) &&
+          hasTag(t, TAG_DO_STARTU) &&
+          needsChat(t) &&
+          t.chatId !== null,
+      ),
+    [tasks, closed, sprintId],
+  );
+
+  const key = useMemo(
+    () =>
+      `${groupId}#${tick}#` +
+      candidates.map((t) => `${t.id}:${t.chatId}:${t.changedDate}:${t.newComments}`).join('|'),
+    [candidates, groupId, tick],
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+
+    (async () => {
+      const got = await Promise.allSettled(candidates.map((t) => fetchChatTail(t.chatId as number)));
+      if (cancelled) return;
+      // Nieudany odczyt to „nie wiem", a nie „pusty czat" — inaczej rozpoznanie albo STRATEGIA
+      // spadłyby do wyceny i ta zła liczba trafiłaby do historii. Zadanie czytane już wcześniej
+      // zachowuje stary wynik; zadanie nigdy nieprzeczytane trzyma cały wynik w „liczę"
+      // (to obejmuje też brak zakresu `im`, gdy odmawiają wszystkie czaty).
+      setState((prev) => {
+        const known = prev && prev.group === groupId ? prev : null;
+        const recon = new Set<number>();
+        const strategic = new Set<number>();
+        const read = new Set<number>();
+        for (const [i, r] of got.entries()) {
+          const t = candidates[i];
+          if (r.status === 'fulfilled') {
+            read.add(t.id);
+            if (hasReconMarker(r.value.messages)) recon.add(t.id);
+            if (hasTag(t, TAG_STRATEGIA) && hasValueMessage(r.value.messages)) strategic.add(t.id);
+            continue;
+          }
+          if (!known?.read.has(t.id)) return prev;
+          read.add(t.id);
+          if (known.facts.recon.has(t.id)) recon.add(t.id);
+          if (known.facts.strategic.has(t.id)) strategic.add(t.id);
+        }
+        return { group: groupId, facts: { recon, strategic }, read };
+      });
+    })().catch(() => {
+      /* Czat nieczytelny — kafelki zostają przy ostatnim wyniku. */
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // `candidates` i reszta są w kluczu — efekt ma ruszać tylko, gdy klucz się zmieni.
+  }, [key, enabled]);
+
+  return state && state.group === groupId ? state.facts : null;
+}
+
+/**
  * Dzienna historia licznikow w przegladarce (binear.counters.v1, osobno per projekt)
  * i punkt odniesienia dla strzalek — ostatni zapisany dzien przed dzisiejszym.
  *
@@ -183,7 +292,7 @@ const ICONS: Record<CounterKey, ReactNode> = {
   wycena: <HashIcon />,
   gotowe: <CheckIcon />,
   sprint: <CalendarIcon />,
-  bug: <BugIcon />,
+  wazne: <BugIcon />,
   koncept: <BulbIcon />,
   odlozone: <LayersIcon />,
 };

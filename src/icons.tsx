@@ -109,7 +109,7 @@ export function BulbIcon() {
 }
 
 /**
- * Plomien — znacznik BLEDU na listach i kafelek „Bledy". Jeden znak na dwa zrodla: priorytet
+ * Plomien — znacznik BLEDU na listach i kafelek „Wazne". Jeden znak na dwa zrodla: priorytet
  * Bitriksa „wysoki" (plomien) i tag BUG. Ten sam kaligraficzny rys co reszta ikon.
  */
 export function FlameIcon() {
