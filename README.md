@@ -123,7 +123,7 @@ following the steps of the task audit. Left to right:
 | **To estimate** | outside the sprint, `DO-STARTU`, but **missing any of the three**: story points, a benefit category tag, or a payback period |
 | **Ready to start** | outside the sprint, `DO-STARTU`, with **all three** — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
-| **Bugs** *(apart, behind a divider)* | open tasks tagged `BUG`, in the sprint or outside it, deferred excluded |
+| **Ważne** (important) *(apart, behind a divider)* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
 
 **The five middle cards add up to "Outside sprint" exactly.** "Bugs" is an attribute,
 not a state (a bug is also in one of the states), so it stands apart behind a
@@ -284,6 +284,26 @@ reads as a real person in one place and a placeholder in another. (Since the acc
 also authored most tasks via the bulk import, their **Autor** field now says
 "Unassigned" too.) The id is configurable: `BX_UNASSIGNED_ID` in `.env`, served to the
 front end via `/api/config` (defaults to 251).
+
+## Bugs on the lists
+
+A bug gets a red mark — in the list, on the board cards and in planning:
+
+- a **flame** for Bitrix's high priority ("Ważne"),
+- a **bug** for the `BUG` tag,
+- a task that has both shows both (smaller, one above the other, in the list).
+
+**Where it sits.** In the list (and planning) the mark takes the place of the row's checkbox, which is
+invisible until you hover the row anyway — so it needs no column of its own and every title still
+starts in the same place. On hover the checkbox appears around the mark in the same red; once the
+row is selected, the red tick replaces the mark. On the board cards the mark stands before the title.
+
+The `BUG` tag is then not repeated as a label further along the row (the bug mark replaces it).
+The **Ważne** (important) card counts flames and `BUG` tags together, each task once. Its day-to-day
+history is kept under a new key, so the first day after the change shows "—" instead of comparing
+against yesterday's `BUG`-only number. The row's old priority bars are gone — Bitrix only knows
+"important or not", which is what the flame says; the priority is still editable in the detail
+panel and filterable.
 
 ## Planning: who owns a task entering a sprint
 

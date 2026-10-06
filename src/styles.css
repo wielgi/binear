@@ -1535,7 +1535,7 @@ input[type='search']::-webkit-search-decoration {
 
 .counter-poza { --c: var(--accent); }
 .counter-czeka { --c: #e879a6; }
-.counter-bug { --c: var(--danger); }
+.counter-wazne { --c: var(--danger); }
 .counter-koncept { --c: #58a6ff; }
 .counter-wywiad { --c: var(--accent-orange); }
 .counter-odpowiedzi { --c: var(--accent-amber); }
@@ -2405,12 +2405,6 @@ input[type='search']::-webkit-search-decoration {
   box-shadow: inset 0 0 0 1px var(--border-strong);
   opacity: 0;
   transition: opacity 120ms ease, background 120ms ease;
-  /*
-   * Znosi odstep `gap` wiersza PO checkboxie, zeby ikona priorytetu stala tuz
-   * przy nim. Sam slot 16 px ZOSTAJE — gdyby znikal razem z widocznoscia, cala
-   * zawartosc wiersza przeskakiwalaby w bok przy kazdym najechaniu.
-   */
-  margin-right: calc(var(--s2) * -1);
 }
 
 .row:hover .row-check,
@@ -2522,6 +2516,89 @@ input[type='search']::-webkit-search-decoration {
  * rezerwuje mu kawalek, ktorego nic juz nie zabierze; wielokropek dziala jak
  * dotad, tylko na wezszym polu.
  */
+/*
+ * Znaki bledu przed tytulem — czerwony plomien (wysoki priorytet) i czerwony robak (tag BUG). Ta sama
+ * czerwien, bo oba mowia „to jest blad"; ksztalt mowi, skad sie wziely, i podpowiedz tez. Stoja PRZED
+ * tytulem, w tej samej linii: na liscie sa flex-itemami obok tytulu, na karcie wchodza w jego tekst.
+ */
+.bug-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-right: var(--s1);
+  color: var(--danger);
+  vertical-align: -2px;
+}
+
+/*
+ * Znaki bledu w wierszu listy — na miejscu checkboxa (ujemny margines cofa je o szerokosc checkboxa
+ * i odstep), wiec nie zajmuja wlasnej kolumny i tytuly dalej zaczynaja sie rowno. Nie lapia klikniec
+ * (klik trafia w checkbox pod spodem); znikaja dopiero przy zaznaczonym wierszu, gdzie stoi ptaszek.
+ */
+.bug-slot {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  margin-left: calc(-16px - var(--s2));
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.row-marked .bug-slot {
+  opacity: 0;
+}
+
+/* Pod kursorem znak zostaje, tylko maleje — czerwony checkbox obrysowuje go, zamiast go chowac. */
+.bug-slot svg {
+  transition: width 120ms ease, height 120ms ease;
+}
+
+.row:hover .bug-slot svg {
+  width: 10px;
+  height: 10px;
+}
+
+.row:hover .bug-slot .bug-badge + .bug-badge svg,
+.row:hover .bug-slot .bug-badge:has(+ .bug-badge) svg {
+  width: 7px;
+  height: 7px;
+}
+
+@media (hover: none) {
+  .bug-slot svg {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+.bug-slot .bug-badge {
+  margin-right: 0;
+}
+
+/* Checkbox, ktory zastepuje znak bledu pod kursorem, jest w tej samej czerwieni — znak nie znika bez sladu. */
+.row-bug .row-check {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+.row-bug .row-check:hover {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+
+.row-bug .row-check-on {
+  background: var(--danger);
+  box-shadow: none;
+}
+
+/* Oba znaki naraz — mniejsze, jeden nad drugim, zeby zmiescily sie w miejscu checkboxa. */
+.bug-slot .bug-badge + .bug-badge svg,
+.bug-slot .bug-badge:has(+ .bug-badge) svg {
+  width: 11px;
+  height: 11px;
+}
+
 .row-title {
   flex: 1;
   min-width: 5rem;
@@ -8226,12 +8303,6 @@ a.mention:hover {
  */
 .plan-pane .row-twisty-spacer {
   display: none;
-}
-
-/* Bez rozpornika ujemny margines checkboxa skleilby go z ikona priorytetu —
-   przywracamy zwykly odstep wiersza. */
-.plan-pane .row-check {
-  margin-right: 0;
 }
 
 /* Bardzo waski panel planowania: data ustepuje, zeby awatar i tytul zmiescily

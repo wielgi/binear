@@ -292,7 +292,7 @@ const ICONS: Record<CounterKey, ReactNode> = {
   wycena: <HashIcon />,
   gotowe: <CheckIcon />,
   sprint: <CalendarIcon />,
-  bug: <BugIcon />,
+  wazne: <BugIcon />,
   koncept: <BulbIcon />,
   odlozone: <LayersIcon />,
 };

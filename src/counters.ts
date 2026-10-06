@@ -31,6 +31,7 @@
  * Modul jest czysty (bez Reacta i bez zapytan), zeby dalo sie go przetestowac.
  */
 import type { Task } from './bitrix';
+import { isBug } from './taskView';
 
 export type CounterKey =
   | 'poza'
@@ -40,7 +41,7 @@ export type CounterKey =
   | 'wycena'
   | 'gotowe'
   | 'sprint'
-  | 'bug'
+  | 'wazne'
   | 'koncept'
   | 'odlozone';
 
@@ -107,7 +108,7 @@ export interface ChatFacts {
 
 type CounterTask = Pick<
   Task,
-  'id' | 'title' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId' | 'deadline'
+  'id' | 'title' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId' | 'deadline' | 'priority'
 >;
 
 export interface CounterDef {
@@ -283,12 +284,19 @@ export const COUNTERS: CounterDef[] = [
     riseIsBad: false,
   },
   {
-    key: 'bug',
-    label: 'Błędy',
+    /*
+     * Klucz `wazne`, nie dawny `bug`: kafelek liczy teraz tez plomienie, a historia dzienna jest
+     * zapisywana po kluczu. Pod starym kluczem wczorajsza liczba (same tagi BUG) porownana z dzisiejsza
+     * pokazalaby falszywy czerwony wzrost; pod nowym pierwszy dzien ma „—", a potem porownuje juz rowno.
+     */
+    key: 'wazne',
+    label: 'Ważne',
     hint:
-      'Otwarte zadania z tagiem BUG (bez odłożonych) — w sprincie i poza nim. To cecha, a nie ' +
-      'stan: zadanie z BUG jest też w jednym ze stanów obok, więc kafelek nie wchodzi do sumy.',
-    match: (t, ctx) => inAudit(t, ctx) && hasTag(t, TAG_BUG),
+      'Otwarte zadania z płomieniem (wysoki priorytet w Bitriksie) albo z tagiem BUG, bez ' +
+      'odłożonych — w sprincie i poza nim, każde liczone raz. To cecha, a nie stan: takie zadanie ' +
+      'jest też w jednym ze stanów obok, więc kafelek nie wchodzi do sumy. Na listach mają czerwony ' +
+      'płomień i/albo robaka przed tytułem.',
+    match: (t, ctx) => inAudit(t, ctx) && isBug(t),
     separate: true,
     riseIsBad: true,
   },

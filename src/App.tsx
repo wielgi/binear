@@ -145,7 +145,9 @@ import {
   podzielNaTrafienia,
   relativeAge,
   tagsForWidth,
+  withoutBugTag,
   shortDate,
+  isBug,
   isUnassigned,
   setUnassignedId,
   stageOf,
@@ -173,6 +175,7 @@ import {
   noteMine,
 } from './history';
 import { TaskCode } from './TaskCode';
+import { BugBadge } from './BugBadge';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
@@ -3383,7 +3386,7 @@ function TaskRow({
       {...listeners}
       className={`row${active ? ' row-active' : ''}${selected ? ' row-selected' : ''}${
         marked ? ' row-marked' : ''
-      }${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
+      }${isBug(task) ? ' row-bug' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
       /* Shift+klik zaznaczylby tekst miedzy wierszami, Ctrl+klik potrafi zaczac
          zaznaczanie w niektorych przegladarkach. Blokujemy TYLKO z modyfikatorem,
          zeby zwykle zaznaczanie i kopiowanie tytulu dzialalo dalej.
@@ -3416,6 +3419,16 @@ function TaskRow({
       >
         {marked ? <CheckIcon /> : null}
       </button>
+      {/*
+        Blad: czerwony plomien (wysoki priorytet) i/albo robak (tag BUG); tag BUG nie wraca nizej jako
+        etykieta. Stoi W MIEJSCU checkboxa, ktory i tak jest niewidoczny, dopoki nie najedzie sie na
+        wiersz — osobna kolumna bylaby pusta w wiekszosci wierszy. Pod kursorem znak ustepuje checkboxowi.
+      */}
+      {isBug(task) && (
+        <span className="bug-slot">
+          <BugBadge task={task} />
+        </span>
+      )}
 
       {/*
         Wciecie zaczyna sie DOPIERO tutaj, a nie na paddingu wiersza — dzieki temu
@@ -3443,7 +3456,6 @@ function TaskRow({
         />
       )}
 
-      <PriorityIcon priority={task.priority} />
       {/* Pierscien pokazuje ETAP — to on niesie stan pracy. Poza sprintem
           etapu nie ma, wiec awaryjnie pokazujemy wbudowany status. */}
       {stage ? (
@@ -3498,7 +3510,9 @@ function TaskRow({
           );
         })()}
       {/* Liczba tagow w wierszu zalezy od szerokosci listy — reszta jako "+N". */}
-      {task.tags.length > 0 && <TagStrip tags={task.tags} limit={tagLimit} onPick={onTag} />}
+      {withoutBugTag(task.tags).length > 0 && (
+        <TagStrip tags={withoutBugTag(task.tags)} limit={tagLimit} onPick={onTag} />
+      )}
 
 
       {/*

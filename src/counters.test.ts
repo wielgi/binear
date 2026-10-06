@@ -25,6 +25,7 @@ const zadanie = (o: Partial<Parameters<typeof countAll>[0][number]> & { id: numb
   tags: [],
   storyPoints: null,
   epicId: 141,
+  priority: '1',
   title: 'Zadanie',
   deadline: null as string | null,
   ...o,
@@ -322,7 +323,7 @@ describe('countAll', () => {
     expect([wynik.czeka.count, wynik.odpowiedzi.count]).toEqual([1, 1]);
   });
 
-  it('bug: otwarte z tagiem BUG w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+  it('wazne: otwarte z tagiem BUG w sprincie i poza nim, bez zamknietych i odlozonych', () => {
     const w = countAll(
       [
         zadanie({ id: 60, tags: ['BUG'] }),
@@ -333,7 +334,23 @@ describe('countAll', () => {
       ],
       ctx(),
     );
-    expect(w.bug.count).toBe(2);
+    expect(w.wazne.count).toBe(2);
+  });
+
+  it('bledy: plomien (priorytet wysoki) i tag BUG liczone razem, kazde zadanie raz', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 80, priority: '2' }),
+        zadanie({ id: 81, tags: ['BUG'] }),
+        zadanie({ id: 82, priority: '2', tags: ['bug'] }), // oba zrodla, a liczy sie raz
+        zadanie({ id: 83, priority: '1', tags: ['Wysoki'] }),
+        zadanie({ id: 84, priority: '2', status: '5' }), // zamkniete
+        zadanie({ id: 85, priority: '2', status: '6' }), // odlozone
+        zadanie({ id: 86, priority: '2', sprintId: 70 }), // w sprincie tez
+      ],
+      ctx(),
+    );
+    expect(w.wazne.count).toBe(4);
   });
 
   it('koncept: nowy tag KONCEPT i starszy KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {
@@ -363,7 +380,7 @@ describe('countAll', () => {
       [zadanie({ id: 70, tags: ['BUG', 'DO-STARTU', 'ZWROT-6'], storyPoints: 4 })],
       ctx(),
     );
-    expect([w.bug.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);
+    expect([w.wazne.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);
     expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
   });
 
