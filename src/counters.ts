@@ -22,6 +22,10 @@
  * listy (BUG, Wysoki). Zadanie nowe, bez zadnego tagu gotowosci, to zadanie, o ktore
  * trzeba dopiero zapytac.
  *
+ * KONCEPCJA lezy POZA rejestrem: to pomysly na zbyt wczesnym etapie, zeby je wliczac —
+ * ani do „Poza sprintem", ani do zadnego stanu (w tym „Do wywiadu"). Pokazuje je tylko osobny
+ * kafelek „Koncept". Zadanie z koncepcja, ktore trafilo do aktywnego sprintu, zostaje w „W sprincie".
+ *
  * Odlozone (status 6) leza poza kolejka audytu i poza suma; pokazuje je osobna,
  * wyszarzona notka pod kafelkami.
  *
@@ -31,7 +35,7 @@
  * Modul jest czysty (bez Reacta i bez zapytan), zeby dalo sie go przetestowac.
  */
 import type { Task } from './bitrix';
-import { isBug } from './taskView';
+import { isImportant } from './taskView';
 
 export type CounterKey =
   | 'poza'
@@ -50,10 +54,10 @@ export const TAG_CZEKA = 'OCZEKUJE-NA-ODPOWIEDZ';
 export const TAG_WYWIAD = 'DO-WYWIADU';
 export const TAG_BUG = 'BUG';
 /**
- * Pomysl, a nie zadanie do zrobienia. Nowy tag to KONCEPT; starsze zadania
- * maja KONCEPCJA — liczymy oba, zeby kafelek nie zgubil tych sprzed zmiany.
+ * Pomysl, a nie zadanie do zrobienia — temat na etapie koncepcji (reguly zadan: tag KONCEPCJA).
+ * Nie ma drugiego tagu o tym znaczeniu; `KONCEPT` nie istnieje ani w regulach, ani w Bitriksie.
  */
-export const TAGS_KONCEPT = ['KONCEPT', 'KONCEPCJA'];
+export const TAG_KONCEPCJA = 'KONCEPCJA';
 
 /*
  * Kategoria korzyści zadania — jeden tag na zadanie. `BUG` jest kategorią „naprawa błędu"
@@ -146,8 +150,11 @@ export const DEFERRED_STATUS = '6';
 const inAudit = (t: CounterTask, ctx: CounterCtx) => isOpen(t, ctx) && t.status !== DEFERRED_STATUS;
 const inSprint = (t: CounterTask, ctx: CounterCtx) =>
   ctx.sprintId !== null && t.sprintId === ctx.sprintId;
-/** Rejestr do przerobienia: otwarte, nieodlozone, spoza aktywnego sprintu. */
-const outside = (t: CounterTask, ctx: CounterCtx) => inAudit(t, ctx) && !inSprint(t, ctx);
+/** Pomysl na zbyt wczesnym etapie (KONCEPCJA) — nie jest czescia rejestru do przerobienia. */
+const isKoncept = (t: CounterTask) => hasTag(t, TAG_KONCEPCJA);
+/** Rejestr do przerobienia: otwarte, nieodlozone, spoza aktywnego sprintu i nie-koncepcje. */
+const outside = (t: CounterTask, ctx: CounterCtx) =>
+  inAudit(t, ctx) && !inSprint(t, ctx) && !isKoncept(t);
 
 const isStartu = (t: CounterTask) => hasTag(t, TAG_DO_STARTU);
 /** DO-STARTU ma pierwszenstwo — zadanie z dwoma tagami gotowosci liczy sie raz. */
@@ -212,7 +219,7 @@ export const COUNTERS: CounterDef[] = [
     key: 'poza',
     label: 'Poza sprintem',
     hint:
-      'Otwarte zadania spoza aktywnego sprintu, bez odłożonych — cały rejestr, niezależnie ' +
+      'Otwarte zadania spoza aktywnego sprintu, bez odłożonych i bez KONCEPCJA — cały rejestr, niezależnie ' +
       'od widoku i filtrów. Kafelki obok rozbijają tę liczbę co do sztuki.',
     match: (t, ctx) => outside(t, ctx),
     riseIsBad: true,
@@ -294,9 +301,9 @@ export const COUNTERS: CounterDef[] = [
     hint:
       'Otwarte zadania z płomieniem (wysoki priorytet w Bitriksie) albo z tagiem BUG, bez ' +
       'odłożonych — w sprincie i poza nim, każde liczone raz. To cecha, a nie stan: takie zadanie ' +
-      'jest też w jednym ze stanów obok, więc kafelek nie wchodzi do sumy. Na listach mają czerwony ' +
-      'płomień i/albo robaka przed tytułem.',
-    match: (t, ctx) => inAudit(t, ctx) && isBug(t),
+      'jest też w jednym ze stanów obok (poza KONCEPCJA, której stany nie liczą), więc kafelek nie ' +
+      'wchodzi do sumy. Na listach mają czerwony płomień i/albo robaka w miejscu checkboxa.',
+    match: (t, ctx) => inAudit(t, ctx) && isImportant(t),
     separate: true,
     riseIsBad: true,
   },
@@ -304,10 +311,10 @@ export const COUNTERS: CounterDef[] = [
     key: 'koncept',
     label: 'Koncept',
     hint:
-      'Otwarte zadania z tagiem KONCEPT (albo starszym KONCEPCJA), bez odłożonych — w sprincie i ' +
-      'poza nim. To cecha, a nie stan: takie zadanie jest też w jednym ze stanów obok, więc ' +
-      'kafelek nie wchodzi do sumy.',
-    match: (t, ctx) => inAudit(t, ctx) && TAGS_KONCEPT.some((g) => hasTag(t, g)),
+      'Otwarte zadania z tagiem KONCEPCJA, bez odłożonych — w sprincie i ' +
+      'poza nim. To pomysły na zbyt wczesnym etapie, więc poza sprintem NIE wchodzą do „Poza ' +
+      'sprintem" ani do żadnego stanu (także „Do wywiadu") — ze stanów liczy je tylko ten kafelek.',
+    match: (t, ctx) => inAudit(t, ctx) && isKoncept(t),
     separate: true,
     riseIsBad: false,
   },

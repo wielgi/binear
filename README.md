@@ -116,7 +116,7 @@ following the steps of the task audit. Left to right:
 
 | card | counts |
 | --- | --- |
-| **Outside sprint** | open tasks outside the active sprint, **deferred excluded** |
+| **Outside sprint** | open tasks outside the active sprint, **deferred and `KONCEPCJA` excluded** |
 | **To interview** | outside the sprint, tagged `DO-WYWIADU` **or with no readiness tag at all** (new tasks, or ones tagged only `BUG`, `Wysoki`…) |
 | **Waiting for an answer** | outside the sprint, tagged `OCZEKUJE-NA-ODPOWIEDZ`, nobody outside IT has answered yet |
 | **Answers to read** | the same tag, and someone outside IT answered with substance after our last round of questions |
@@ -124,15 +124,19 @@ following the steps of the task audit. Left to right:
 | **Ready to start** | outside the sprint, `DO-STARTU`, with **all three** — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
 | **Ważne** (important) *(apart, behind a divider)* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
+| **Concept** *(apart, behind a divider)* | open tasks tagged `KONCEPCJA`, in the sprint or outside it — ideas too early to count, so outside the sprint they are in **no** state card (an important one among them still shows under Ważne) |
+| **Odłożone** (deferred) *(apart, behind a divider)* | deferred tasks (status 6) outside the active sprint — not part of the sum |
 
-**The five middle cards add up to "Outside sprint" exactly.** "Bugs" is an attribute,
-not a state (a bug is also in one of the states), so it stands apart behind a
+**The five middle cards add up to "Outside sprint" exactly.** "Ważne" is an attribute,
+not a state (an important task is also in one of the states, unless it's a `KONCEPCJA`, which no
+state counts), so it stands apart behind a
 vertical divider and is not part of the sum. A task outside the
 sprint is in exactly one of those states; "To interview" is the remainder, so the
 sum holds by construction, also for a task with two readiness tags (`DO-STARTU`
 wins over `OCZEKUJE-NA-ODPOWIEDZ`) or a tag outside the list. Deferred tasks
-(status 6) are left out of the sum and of every card; a greyed note under the
-row counts them (`Odłożone (poza sumą): 5`) and clicking it lists them.
+(status 6) are left out of the sum and of every state card; the **Odłożone** card next to
+"Ważne" and "Koncept" (under "Poza sumą") counts the deferred ones outside the sprint, and
+clicking it lists them.
 
 The numbers are **global**: the whole group, regardless of scope, `Only mine`,
 `Completed` and filters. The point is to see whether the register holds 200 or 220
@@ -285,9 +289,9 @@ also authored most tasks via the bulk import, their **Autor** field now says
 "Unassigned" too.) The id is configurable: `BX_UNASSIGNED_ID` in `.env`, served to the
 front end via `/api/config` (defaults to 251).
 
-## Bugs on the lists
+## Important tasks on the lists
 
-A bug gets a red mark — in the list, on the board cards and in planning:
+An important task gets a red mark — in the list, on the board cards and in planning:
 
 - a **flame** for Bitrix's high priority ("Ważne"),
 - a **bug** for the `BUG` tag,

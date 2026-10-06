@@ -147,7 +147,7 @@ import {
   tagsForWidth,
   withoutBugTag,
   shortDate,
-  isBug,
+  isImportant,
   isUnassigned,
   setUnassignedId,
   stageOf,
@@ -175,7 +175,7 @@ import {
   noteMine,
 } from './history';
 import { TaskCode } from './TaskCode';
-import { BugBadge } from './BugBadge';
+import { ImportantMarks } from './ImportantMarks';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
@@ -3386,7 +3386,7 @@ function TaskRow({
       {...listeners}
       className={`row${active ? ' row-active' : ''}${selected ? ' row-selected' : ''}${
         marked ? ' row-marked' : ''
-      }${isBug(task) ? ' row-bug' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
+      }${isImportant(task) ? ' row-important' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
       /* Shift+klik zaznaczylby tekst miedzy wierszami, Ctrl+klik potrafi zaczac
          zaznaczanie w niektorych przegladarkach. Blokujemy TYLKO z modyfikatorem,
          zeby zwykle zaznaczanie i kopiowanie tytulu dzialalo dalej.
@@ -3420,13 +3420,13 @@ function TaskRow({
         {marked ? <CheckIcon /> : null}
       </button>
       {/*
-        Blad: czerwony plomien (wysoki priorytet) i/albo robak (tag BUG); tag BUG nie wraca nizej jako
+        Wazne: czerwony plomien („Ważne" w Bitriksie) i/albo robak (tag BUG); tag BUG nie wraca nizej jako
         etykieta. Stoi W MIEJSCU checkboxa, ktory i tak jest niewidoczny, dopoki nie najedzie sie na
         wiersz — osobna kolumna bylaby pusta w wiekszosci wierszy. Pod kursorem znak ustepuje checkboxowi.
       */}
-      {isBug(task) && (
-        <span className="bug-slot">
-          <BugBadge task={task} />
+      {isImportant(task) && (
+        <span className="important-slot">
+          <ImportantMarks task={task} />
         </span>
       )}
 

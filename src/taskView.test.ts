@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasBugTag, isBug, isFlame, podzielNaTrafienia, relativeAge, tagsForWidth, withoutBugTag } from './taskView';
+import { hasBugTag, isImportant, isFlame, podzielNaTrafienia, relativeAge, tagsForWidth, withoutBugTag } from './taskView';
 
 /** Skrot do czytelnych asercji: „ab[cd]ef" znaczy, ze `cd` jest podswietlone. */
 const zapis = (text: string, fraza: string) =>
@@ -85,7 +85,7 @@ describe('tagsForWidth', () => {
   });
 });
 
-describe('znaki błędu: płomień i BUG', () => {
+describe('zadania ważne: płomień i BUG', () => {
   const t = (priority: string, tags: string[] = []) => ({ priority, tags });
 
   it('płomień to wysoki priorytet Bitriksa, nie inne', () => {
@@ -100,11 +100,11 @@ describe('znaki błędu: płomień i BUG', () => {
     expect(hasBugTag(t('1', ['BUGFIX', 'debug']))).toBe(false);
   });
 
-  it('błąd to płomień albo BUG — jedno z nich wystarcza, oba też', () => {
-    expect(isBug(t('2'))).toBe(true);
-    expect(isBug(t('1', ['BUG']))).toBe(true);
-    expect(isBug(t('2', ['BUG']))).toBe(true);
-    expect(isBug(t('1', ['OSZCZEDNOSC']))).toBe(false);
+  it('ważne to płomień albo BUG — jedno z nich wystarcza, oba też', () => {
+    expect(isImportant(t('2'))).toBe(true);
+    expect(isImportant(t('1', ['BUG']))).toBe(true);
+    expect(isImportant(t('2', ['BUG']))).toBe(true);
+    expect(isImportant(t('1', ['OSZCZEDNOSC']))).toBe(false);
   });
 
   it('tag BUG znika z etykiet (zastępuje go robak), reszta zostaje w kolejności', () => {

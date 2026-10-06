@@ -88,7 +88,7 @@ export function StageIcon({ progress, color }: { progress: number | null; color:
 }
 
 /** Dymek przy liczniku nieprzeczytanych komentarzy. */
-/** Zarowka — kafelek KONCEPT (pomysl). Ta sama kreska co reszta ikon. */
+/** Zarowka — kafelek KONCEPCJA (pomysl). Ta sama kreska co reszta ikon. */
 export function BulbIcon() {
   return (
     <svg
@@ -109,8 +109,8 @@ export function BulbIcon() {
 }
 
 /**
- * Plomien — znacznik BLEDU na listach i kafelek „Wazne". Jeden znak na dwa zrodla: priorytet
- * Bitriksa „wysoki" (plomien) i tag BUG. Ten sam kaligraficzny rys co reszta ikon.
+ * Plomien — znak zadania WAZNEGO na listach („Ważne" w Bitriksie, priorytet 2); drugi znak, robak,
+ * oznacza tag BUG. Ten sam kaligraficzny rys co reszta ikon.
  */
 export function FlameIcon() {
   return (

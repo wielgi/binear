@@ -2517,11 +2517,11 @@ input[type='search']::-webkit-search-decoration {
  * dotad, tylko na wezszym polu.
  */
 /*
- * Znaki bledu przed tytulem — czerwony plomien (wysoki priorytet) i czerwony robak (tag BUG). Ta sama
- * czerwien, bo oba mowia „to jest blad"; ksztalt mowi, skad sie wziely, i podpowiedz tez. Stoja PRZED
- * tytulem, w tej samej linii: na liscie sa flex-itemami obok tytulu, na karcie wchodza w jego tekst.
+ * Znaki zadania waznego — czerwony plomien („Ważne" w Bitriksie) i czerwony robak (tag BUG). Ta sama
+ * czerwien, bo oba mowia „to jest wazne"; ksztalt mowi, skad sie wziely, i podpowiedz tez. Na karcie
+ * tablicy stoja przed tytulem, w jego tekscie; na liscie — w miejscu checkboxa (nizej).
  */
-.bug-badge {
+.important-mark {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
@@ -2531,11 +2531,11 @@ input[type='search']::-webkit-search-decoration {
 }
 
 /*
- * Znaki bledu w wierszu listy — na miejscu checkboxa (ujemny margines cofa je o szerokosc checkboxa
+ * Znaki zadania waznego w wierszu listy — na miejscu checkboxa (ujemny margines cofa je o szerokosc checkboxa
  * i odstep), wiec nie zajmuja wlasnej kolumny i tytuly dalej zaczynaja sie rowno. Nie lapia klikniec
  * (klik trafia w checkbox pod spodem); znikaja dopiero przy zaznaczonym wierszu, gdzie stoi ptaszek.
  */
-.bug-slot {
+.important-slot {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -2547,54 +2547,54 @@ input[type='search']::-webkit-search-decoration {
   transition: opacity 120ms ease;
 }
 
-.row-marked .bug-slot {
+.row-marked .important-slot {
   opacity: 0;
 }
 
 /* Pod kursorem znak zostaje, tylko maleje — czerwony checkbox obrysowuje go, zamiast go chowac. */
-.bug-slot svg {
+.important-slot svg {
   transition: width 120ms ease, height 120ms ease;
 }
 
-.row:hover .bug-slot svg {
+.row:hover .important-slot svg {
   width: 10px;
   height: 10px;
 }
 
-.row:hover .bug-slot .bug-badge + .bug-badge svg,
-.row:hover .bug-slot .bug-badge:has(+ .bug-badge) svg {
+.row:hover .important-slot .important-mark + .important-mark svg,
+.row:hover .important-slot .important-mark:has(+ .important-mark) svg {
   width: 7px;
   height: 7px;
 }
 
 @media (hover: none) {
-  .bug-slot svg {
+  .important-slot svg {
     width: 10px;
     height: 10px;
   }
 }
 
-.bug-slot .bug-badge {
+.important-slot .important-mark {
   margin-right: 0;
 }
 
-/* Checkbox, ktory zastepuje znak bledu pod kursorem, jest w tej samej czerwieni — znak nie znika bez sladu. */
-.row-bug .row-check {
+/* Checkbox, ktory obrysowuje znak zadania waznego pod kursorem, jest w tej samej czerwieni — znak nie znika bez sladu. */
+.row-important .row-check {
   box-shadow: inset 0 0 0 1px var(--danger);
 }
 
-.row-bug .row-check:hover {
+.row-important .row-check:hover {
   box-shadow: inset 0 0 0 1.5px var(--danger);
 }
 
-.row-bug .row-check-on {
+.row-important .row-check-on {
   background: var(--danger);
   box-shadow: none;
 }
 
 /* Oba znaki naraz — mniejsze, jeden nad drugim, zeby zmiescily sie w miejscu checkboxa. */
-.bug-slot .bug-badge + .bug-badge svg,
-.bug-slot .bug-badge:has(+ .bug-badge) svg {
+.important-slot .important-mark + .important-mark svg,
+.important-slot .important-mark:has(+ .important-mark) svg {
   width: 11px;
   height: 11px;
 }
