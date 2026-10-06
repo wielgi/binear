@@ -179,6 +179,8 @@ import {
 import { TaskCode } from './TaskCode';
 import { BugBadge } from './BugBadge';
 import { zapiszPrzeniesienie, type Dodane } from './planRecent';
+import { ParentBar, parentBarTitle } from './ParentBar';
+import { groupChildren, parentProgress, type ParentProgress } from './parentProgress';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
@@ -3298,6 +3300,7 @@ function TaskRow({
   childCount,
   hiddenSubCount,
   elsewhereSubCount,
+  progress,
   collapsed,
   marked,
   isNew,
@@ -3329,6 +3332,8 @@ function TaskRow({
   hiddenSubCount: number;
   /** Podzadania widoczne, ale w innej grupie — sa na liscie, tylko nie tutaj. */
   elsewhereSubCount: number;
+  /** Postep rodzica z podzadan (suma SP + pasek); `null` dla zadan bez podzadan. */
+  progress?: ParentProgress | null;
   collapsed: boolean;
   /** Nalezy do zaznaczenia wielokrotnego (Ctrl/Shift + klik). */
   marked: boolean;
@@ -3561,8 +3566,18 @@ function TaskRow({
         </span>
       )}
 
+      {/* Rodzic: pasek z podzadan (kazde proporcjonalnie do SP: zrobione / w toku / czeka) i ich suma. */}
+      {progress && progress.points > 0 && (
+        <>
+          <ParentBar progress={progress} className="row-parent-bar" />
+          <HoverNote label="Suma SP podzadań" value={parentBarTitle(progress)} className="row-sp row-sp-sum">
+            Σ{progress.points}
+          </HoverNote>
+        </>
+      )}
+
       {/* Story pointy scruma — dociagane w tle, wiec pojawiaja sie chwile po liscie. */}
-      {task.storyPoints != null && (
+      {!(progress && progress.points > 0) && task.storyPoints != null && (
         <HoverNote label="Story points" value={task.storyPoints} className="row-sp">
           {task.storyPoints}
         </HoverNote>
@@ -5779,6 +5794,7 @@ function DetailPanel({
   const parent = task.parentId ? allTasks.find((t) => t.id === task.parentId) : undefined;
   const children = allTasks.filter((t) => t.parentId === task.id);
   const doneChildren = children.filter((t) => CLOSED_STATUSES.has(t.status)).length;
+  const childProgress = parentProgress(children);
 
   /*
    * Zadania POWIAZANE (Bitrix DEPENDS_ON). Poza danymi listy — dociagamy osobno per
@@ -6216,6 +6232,11 @@ function DetailPanel({
           <section className="subtasks">
             <h2>
               Podzadania · {doneChildren}/{children.length}
+              {childProgress && childProgress.points > 0 && (
+                <span className="subtasks-sum" title={parentBarTitle(childProgress)}>
+                  Σ {childProgress.points} SP
+                </span>
+              )}
               {hiddenChildren > 0 && (
                 <span
                   className="row-hidden-subs"
@@ -6226,6 +6247,7 @@ function DetailPanel({
                 </span>
               )}
             </h2>
+            {childProgress && <ParentBar progress={childProgress} className="subtasks-bar" />}
             {children.map((c) => {
               const hidden = !visibleIds.has(c.id);
               // Podzadanie widoczne, ale stojace w innej grupie niz rodzic —
@@ -10676,6 +10698,9 @@ export default function App() {
    * zalezala od tego, czego ktos wlasnie szukal. Rejestr przeciwnie: tam sie szuka
    * i zawezanie jest cala jego robota.
    */
+  /* Podzadania pogrupowane po rodzicu — z CALEJ listy, takze tych ukrytych filtrem. */
+  const childrenByParent = useMemo(() => groupChildren(tasks), [tasks]);
+
   const planAll = useMemo(() => [...tasks].sort(planCmp), [tasks, planCmp]);
 
   const onDragEnd = useCallback(
@@ -11802,6 +11827,7 @@ export default function App() {
                 selected={openId === t.id}
                 busy={pending.has(t.id)}
                 depth={0}
+                progress={parentProgress(childrenByParent.get(t.id))}
                 childCount={0}
                 hiddenSubCount={childStats.get(t.id)?.hidden ?? 0}
                 elsewhereSubCount={0}
@@ -11975,6 +12001,7 @@ export default function App() {
                       selected={openId === t.id}
                       busy={pending.has(t.id)}
                       depth={depth}
+                      progress={parentProgress(childrenByParent.get(t.id))}
                       childCount={visibleKids}
                       hiddenSubCount={childStats.get(t.id)?.hidden ?? 0}
                       elsewhereSubCount={(childStats.get(t.id)?.inFilter ?? 0) - visibleKids}
