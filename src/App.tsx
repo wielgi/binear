@@ -184,7 +184,7 @@ import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
-import { sprintCapacity, sprintDeadline, workHoursBetween } from './sprintClock';
+import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
 import {
@@ -8925,7 +8925,7 @@ export default function App() {
     const start = activeSprint?.dateStart ? new Date(activeSprint.dateStart) : null;
     if (!end || !start || Number.isNaN(start.getTime())) return { total: null, source: null } as const;
     const from = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 8);
-    const hours = workHoursBetween(from, end);
+    const hours = workHoursBetween(from, sprintWorkEnd(end));
     return hours > 0 ? ({ total: hours * (config?.capacityDevs ?? 4), source: 'konfiguracja' } as const) : ({ total: null, source: null } as const);
   }, [activeSprint?.dateStart, activeSprint?.dateEnd, config?.capacityDevs]);
   /* Etapy „W toku" aktywnego sprintu — do podsumowania sprintu. */
