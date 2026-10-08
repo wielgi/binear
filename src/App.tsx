@@ -110,6 +110,7 @@ import {
   ListIcon,
   BoardIcon,
   ChartIcon,
+  SummaryIcon,
   ClipIcon,
   GripIcon,
   PersonIcon,
@@ -183,6 +184,7 @@ import { ParentBar, parentBarTitle } from './ParentBar';
 import { groupChildren, parentProgress, type ParentProgress } from './parentProgress';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
+import { SprintSummary } from './SprintSummary';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
@@ -243,7 +245,7 @@ type PickerKind =
   | 'parent'
   | 'epic'
   | 'tags';
-type ViewMode = 'list' | 'board' | 'charts' | 'planning';
+type ViewMode = 'list' | 'board' | 'charts' | 'planning' | 'summary';
 
 /**
  * Wyglad terminu w wierszu listy. Trzy warianty ZOSTAJA na stale — nie sa
@@ -8757,8 +8759,10 @@ export default function App() {
       ? 'Planowanie zestawia rejestr ze sprintami, więc zawsze patrzy na wszystkie zadania.'
       : viewMode === 'charts'
         ? 'Wykresy liczą cały projekt — zakres, filtry i szukanie ich nie dotyczą.'
-        : null;
-  const scope: Scope = activeSprint && viewMode !== 'planning' ? scopePref : 'all';
+        : viewMode === 'summary'
+          ? 'Podsumowanie liczy cały aktywny sprint — zakres, filtry i szukanie go nie dotyczą.'
+          : null;
+  const scope: Scope = activeSprint && viewMode !== 'planning' && viewMode !== 'summary' ? scopePref : 'all';
 
   /**
    * Zmiana projektu to inny zbior zadan, wiec caly stan chwilowy odnoszacy sie do
@@ -8946,6 +8950,8 @@ export default function App() {
     () => stages.filter((s) => sprintId !== null && s.sprintId === sprintId && s.type === 'NEW'),
     [stages, sprintId],
   );
+  /* Etapy „W toku" aktywnego sprintu — do podsumowania sprintu. */
+  const workStageIds = useMemo(() => new Set(stages.filter((s) => s.type === 'WORK').map((s) => s.id)), [stages]);
   const waitingStageIds = useMemo(() => new Set(waitingStages.map((s) => s.id)), [waitingStages]);
   const waitingStageNames = useMemo(() => new Set(waitingStages.map((s) => s.name)), [waitingStages]);
   /* Zespol i grafik tygodniowy (zapis w przegladarce). Pusty zespol = moce liczone po staremu. */
@@ -10055,7 +10061,7 @@ export default function App() {
        * (W/M/A/P/S): wszystkie dzialaja na `current`, wiec na wykresach musi byc
        * pusty. Klawisze globalne (widoki, filtry, odswiezenie, sciagawka) zostaja.
        */
-      const rowless = viewMode === 'charts';
+      const rowless = viewMode === 'charts' || viewMode === 'summary';
       const current = rowless ? undefined : flat[cursor];
 
       if (rowless && ['j', 'k', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key))
@@ -10082,7 +10088,7 @@ export default function App() {
          * dostaje swoja cyfre.
          */
         e.preventDefault();
-        setViewMode((['list', 'board', 'charts', 'planning'] as const)[Number(e.key) - 1]);
+        setViewMode((['list', 'board', 'charts', 'planning', 'summary'] as const)[Number(e.key) - 1]);
       } else if (e.key === 'v') {
         /*
          * Menu kotwiczymy do PRZYCISKU, nie do srodka ekranu: to samo miejsce,
@@ -10867,6 +10873,12 @@ export default function App() {
         run: () => setViewMode('charts'),
       },
       {
+        id: 'view-summary',
+        section: 'Widok',
+        label: 'Podsumowanie sprintu (jak na radzie)',
+        run: () => setViewMode('summary'),
+      },
+      {
         id: 'view-planning',
         section: 'Widok',
         label: 'Planowanie (rejestr obok sprintów)',
@@ -11439,6 +11451,7 @@ export default function App() {
                 { key: 'board', icon: <BoardIcon />, label: 'Tablica (2)' },
                 { key: 'charts', icon: <ChartIcon />, label: 'Wykresy (3)' },
                 { key: 'planning', icon: <PlanIcon />, label: 'Planowanie (4)' },
+                { key: 'summary', icon: <SummaryIcon />, label: 'Podsumowanie sprintu (5)' },
               ] as const
             ).map((m) => (
               <button
@@ -11557,9 +11570,9 @@ export default function App() {
           przelaczeniu widoku — wygaszamy go i odcinamy od klikniec.
         */}
         <div
-          className={`scopebar${viewMode === 'charts' ? ' scopebar-locked' : ''}`}
-          title={viewMode === 'charts' ? 'Na wykresach te ustawienia nic nie zmieniają' : undefined}
-          aria-disabled={viewMode === 'charts' || undefined}
+          className={`scopebar${viewMode === 'charts' || viewMode === 'summary' ? ' scopebar-locked' : ''}`}
+          title={viewMode === 'charts' || viewMode === 'summary' ? 'W tym widoku te ustawienia nic nie zmieniają' : undefined}
+          aria-disabled={viewMode === 'charts' || viewMode === 'summary' || undefined}
         >
           {/*
             Przezroczysta warstwa na czas wykresow. Sam pasek ma odciete klikanie,
@@ -11764,6 +11777,16 @@ export default function App() {
         >
         {viewMode === 'charts' ? (
           <Dashboard groupId={groupId} people={people} />
+        ) : viewMode === 'summary' ? (
+          <SprintSummary
+            sprint={activeSprint}
+            tasks={tasks}
+            workStageIds={workStageIds}
+            epicName={(id) => (id === null ? 'Bez epika' : (epicNames.get(id)?.name ?? `#${id}`))}
+            now={now}
+            teamCapacity={teamCapacity}
+            onOpen={setOpenId}
+          />
         ) : viewMode === 'planning' ? (
           /*
            * Planowanie dostaje zadania PO filtrach i wyszukiwaniu — dzieki temu
