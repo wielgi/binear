@@ -157,6 +157,11 @@ export interface CounterDef {
   note?: boolean;
   /** Cecha, nie stan: kafelek stoi w grupie „Poza sumą", poza rozbiciem „Poza sprintem". */
   separate?: boolean;
+  /**
+   * Cecha, ktora przecina OBA swiaty: liczy zadania i ze sprintu, i spoza niego (np. bledy). Nie
+   * pasuje wiec ani do grupy „Sprint", ani do „Poza sumą" — stoi sama, bez podpisu, miedzy nimi.
+   */
+  standalone?: boolean;
   /** Stan, ktory wchodzi do SUMY „Poza sprintem" — kafelki z tym znacznikiem sumuja sie do niej. */
   inSum?: boolean;
   /** Wzrost to zla wiadomosc (wiecej roboty). Dla sprintu kierunek nic nie znaczy. */
@@ -330,6 +335,7 @@ export const COUNTERS: CounterDef[] = [
       'wchodzi do sumy. Na listach mają czerwony płomień i/albo robaka w miejscu checkboxa.',
     match: (t, ctx) => inAudit(t, ctx) && isImportant(t),
     separate: true,
+    standalone: true,
     riseIsBad: true,
   },
   {

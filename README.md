@@ -123,14 +123,15 @@ following the steps of the task audit. Left to right:
 | **To estimate** | outside the sprint, `DO-STARTU`, but **missing any of the three**: story points, a benefit category tag, or a payback period |
 | **Ready to start** | outside the sprint, `DO-STARTU`, with **all three** — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
-| **Ważne** (important) *(in "Poza sumą")* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
+| **Ważne** (important) *(stands alone, no group caption, between "Sprint" and "Poza sumą")* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
 | **Concept** *(in "Poza sumą")* | open tasks tagged `KONCEPCJA`, in the sprint or outside it — ideas too early to count, so outside the sprint they are in **no** state card (an important one among them still shows under Ważne) |
 | **Odłożone** (deferred) *(in "Poza sumą")* | deferred tasks (status 6) outside the active sprint — not part of the sum |
 | **Folders** *(in "Poza sumą")* | tasks outside the sprint that have an **open subtask** — containers, the work sits in the subtasks, so (like in the audit queue) they are in **no** state card (an important one still shows under Ważne); a folder whose subtasks are all closed goes back to the register |
 
 **The five middle cards add up to "Outside sprint" exactly.** "Ważne" is an attribute,
 not a state (an important task is also in one of the states, unless it's a `KONCEPCJA` or a folder,
-which no state counts), so it sits in the "Poza sumą" group and is not part of the sum. A task outside the
+which no state counts), so it is not part of the sum. It counts tasks both in the sprint and outside it,
+so it stands on its own between "Sprint" and "Poza sumą", with no group caption. A task outside the
 sprint is in exactly one of those states; "To interview" is the remainder, so the
 sum holds by construction, also for a task with two readiness tags (`DO-STARTU`
 wins over `OCZEKUJE-NA-ODPOWIEDZ`) or a tag outside the list. Deferred tasks

@@ -377,15 +377,19 @@ export function CountersBar({
    *  - ROZBICIE: stany, ktore skladaja sie na „Poza sprintem" (`inSum`); sama suma stoi w podpisie
    *    grupy (`totalCap`). Podpis przechodzi w linie siegajaca do konca tych kafelkow,
    *  - SPRINT: kafelek sprintu, osobna miara,
+   *  - BEZ PODPISU: cechy, ktore licza zadania i ze sprintu, i spoza niego (`standalone`, wazne) —
+   *    nie pasuja ani do „Sprint", ani do „Poza sumą", wiec stoja same miedzy nimi,
    *  - POZA SUMA: odlozone (status 6 nie wchodzi do „Poza sprintem") i cechy
-   *    (`separate`, np. bledy — bug jest tez w ktoryms ze stanow).
+   *    (`separate`, np. koncepcja, foldery — kazde jest tez w ktoryms ze stanow albo poza nimi).
    * Wczesniej byl jeden rzad z golym pionowym separatorem, a odlozone wisialy
    * pod nim jako szara notka — nic nie mowilo, co sie sumuje, a co nie.
    */
   const total = tiles.find((d) => d.key === 'poza');
-  const parts = tiles.filter((d) => d.inSum);
-  const sprint = tiles.filter((d) => d.key !== 'poza' && !d.inSum && !d.separate);
-  const outside = [...(note ? [note] : []), ...tiles.filter((d) => d.separate)];
+  /* `standalone` wyklucza kazda inna grupe — inaczej taki kafelek bez `separate` rysowalby sie dwa razy. */
+  const parts = tiles.filter((d) => d.inSum && !d.standalone);
+  const sprint = tiles.filter((d) => d.key !== 'poza' && !d.inSum && !d.separate && !d.standalone);
+  const standalone = tiles.filter((d) => d.standalone);
+  const outside = [...(note ? [note] : []), ...tiles.filter((d) => d.separate && !d.standalone)];
 
   const tile = (d: CounterDef) => {
     const v = values[d.key];
@@ -424,6 +428,12 @@ Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
   const cap = (text: string) => (
     <span className="counters-cap">
       <span className="counters-cap-text">{text}</span>
+    </span>
+  );
+  /* Pusty podpis: zajmuje to samo miejsce, co zwykly, zeby kafelki stały na jednej wysokosci. */
+  const emptyCap = (
+    <span className="counters-cap counters-cap-empty" aria-hidden>
+      <span className="counters-cap-text">&nbsp;</span>
     </span>
   );
 
@@ -468,6 +478,12 @@ Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
         <div className="counters-group" style={nStyle(sprint.length)}>
           {cap('Sprint')}
           <div className="counters-group-row">{sprint.map((d) => tile(d))}</div>
+        </div>
+      )}
+      {standalone.length > 0 && (
+        <div className="counters-group" style={nStyle(standalone.length)}>
+          {emptyCap}
+          <div className="counters-group-row">{standalone.map((d) => tile(d))}</div>
         </div>
       )}
       {outside.length > 0 && (

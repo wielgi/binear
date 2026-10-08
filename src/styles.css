@@ -1442,7 +1442,9 @@ input[type='search']::-webkit-search-decoration {
   --counter-min: 150px;
   display: flex;
   align-items: flex-end;
-  gap: var(--s4);
+  /* Odstep miedzy GRUPAMI. --s3, nie --s4: przy czterech grupach (z „Ważne" stojacym osobno) szerszy
+     wypychal ostatni kafelek o kilka pikseli poza okno 1600 px. */
+  gap: var(--s3);
   padding: var(--s2) var(--s4);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
@@ -1482,6 +1484,15 @@ input[type='search']::-webkit-search-decoration {
   flex: 1;
   height: 1px;
   background: var(--border-strong);
+}
+
+/* Grupa bez podpisu — to samo miejsce, ale bez tekstu i bez linii. */
+.counters-cap-empty::after {
+  display: none;
+}
+
+.counters-cap-empty .counters-cap-text {
+  visibility: hidden;
 }
 
 /* Podpis grupy rozbicia jest przyciskiem z suma „Poza sprintem" (patrz `totalCap` w CountersBar). */

@@ -454,6 +454,15 @@ describe('countAll', () => {
     expect(w.poza.count).toBe(0);
   });
 
+  it('wazne stoja same (bez podpisu grupy): liczy zadania i ze sprintu, i spoza niego', () => {
+    expect(COUNTERS.filter((d) => d.standalone).map((d) => d.key)).toEqual(['wazne']);
+    const w = countAll(
+      [zadanie({ id: 90, tags: ['BUG'], sprintId: 70 }), zadanie({ id: 91, tags: ['BUG'] })],
+      ctx(),
+    );
+    expect(w.wazne.count).toBe(2); // jeden w sprincie, jeden poza nim
+  });
+
   it('bug to cecha: zadanie z BUG jest tez w swoim stanie, wiec suma stanow sie nie zmienia', () => {
     const w = countAll(
       [zadanie({ id: 70, tags: ['BUG', 'DO-STARTU', 'ZWROT-6'], storyPoints: 4 })],
