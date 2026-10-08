@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { podzielNaTrafienia, tagsForWidth } from './taskView';
+import { hasBugTag, isImportant, isFlame, podzielNaTrafienia, relativeAge, tagCounts, tagsForWidth, withoutBugTag } from './taskView';
 
 /** Skrot do czytelnych asercji: „ab[cd]ef" znaczy, ze `cd` jest podswietlone. */
 const zapis = (text: string, fraza: string) =>
@@ -82,5 +82,85 @@ describe('tagsForWidth', () => {
 
   it('nie schodzi ponizej zera przy bzdurnej szerokosci', () => {
     expect(tagsForWidth(-100)).toBe(0);
+  });
+});
+
+describe('tagCounts', () => {
+  it('tagi alfabetycznie po polsku, bez względu na wielkość liter, z liczbą użyć', () => {
+    const tasks = [
+      { tags: ['ZWROT-3', 'bug', 'Wysoki'] },
+      { tags: ['bug', 'Źródło', 'DO-STARTU'] },
+      { tags: ['bug', 'Ćwiczenie'] },
+    ];
+    expect(tagCounts(tasks)).toEqual([
+      ['bug', 3],
+      ['Ćwiczenie', 1],
+      ['DO-STARTU', 1],
+      ['Wysoki', 1],
+      ['ZWROT-3', 1],
+      ['Źródło', 1], // w polskim alfabecie ź stoi PO z
+    ]);
+  });
+
+  it('najczęstszy tag nie wędruje na górę — liczy się nazwa', () => {
+    const tasks = [{ tags: ['Zebra'] }, { tags: ['Zebra'] }, { tags: ['Zebra', 'Alfa'] }];
+    expect(tagCounts(tasks).map(([t]) => t)).toEqual(['Alfa', 'Zebra']);
+  });
+
+  it('liczby w nazwie po kolei, nie znak po znaku — ZWROT-3 przed ZWROT-12', () => {
+    const tasks = [{ tags: ['ZWROT-12+', 'ZWROT-12', 'ZWROT-3', 'ZWROT-6'] }];
+    expect(tagCounts(tasks).map(([t]) => t)).toEqual(['ZWROT-3', 'ZWROT-6', 'ZWROT-12', 'ZWROT-12+']);
+  });
+
+  it('bez tagów — pusta lista', () => {
+    expect(tagCounts([{ tags: [] }])).toEqual([]);
+  });
+});
+
+describe('zadania ważne: płomień i BUG', () => {
+  const t = (priority: string, tags: string[] = []) => ({ priority, tags });
+
+  it('płomień to wysoki priorytet Bitriksa, nie inne', () => {
+    expect(isFlame(t('2'))).toBe(true);
+    expect(isFlame(t('1'))).toBe(false);
+    expect(isFlame(t('0'))).toBe(false);
+  });
+
+  it('tag BUG poznaje bez względu na wielkość liter, a nie podobne nazwy', () => {
+    expect(hasBugTag(t('1', ['BUG']))).toBe(true);
+    expect(hasBugTag(t('1', ['bug', 'Wysoki']))).toBe(true);
+    expect(hasBugTag(t('1', ['BUGFIX', 'debug']))).toBe(false);
+  });
+
+  it('ważne to płomień albo BUG — jedno z nich wystarcza, oba też', () => {
+    expect(isImportant(t('2'))).toBe(true);
+    expect(isImportant(t('1', ['BUG']))).toBe(true);
+    expect(isImportant(t('2', ['BUG']))).toBe(true);
+    expect(isImportant(t('1', ['OSZCZEDNOSC']))).toBe(false);
+  });
+
+  it('tag BUG znika z etykiet (zastępuje go robak), reszta zostaje w kolejności', () => {
+    expect(withoutBugTag(['BUG', 'Wysoki', 'bug', 'ZWROT-3'])).toEqual(['Wysoki', 'ZWROT-3']);
+    expect(withoutBugTag([])).toEqual([]);
+  });
+});
+
+describe('relativeAge', () => {
+  it('przed chwilą poniżej 5 s, potem sekundy, minuty, godziny i dni', () => {
+    expect(relativeAge(0)).toBe('przed chwilą');
+    expect(relativeAge(4_900)).toBe('przed chwilą');
+    expect(relativeAge(5_000)).toBe('5 s temu');
+    expect(relativeAge(59_000)).toBe('59 s temu');
+    expect(relativeAge(60_000)).toBe('1 min temu');
+    expect(relativeAge(185_000)).toBe('3 min temu');
+    expect(relativeAge(59 * 60_000)).toBe('59 min temu');
+    expect(relativeAge(60 * 60_000)).toBe('1 godz. temu');
+    expect(relativeAge(23 * 3_600_000)).toBe('23 godz. temu');
+    expect(relativeAge(24 * 3_600_000)).toBe('1 d temu');
+    expect(relativeAge(3 * 24 * 3_600_000 + 5_000)).toBe('3 d temu');
+  });
+
+  it('ujemny wiek (zegar cofnięty) nie wychodzi poniżej zera', () => {
+    expect(relativeAge(-30_000)).toBe('przed chwilą');
   });
 });

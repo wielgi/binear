@@ -10,18 +10,24 @@ import {
   dayKey,
   DEFERRED_STATUS,
   hasTag,
+  hasReconMarker,
+  hasValueMessage,
   loadHistory,
+  needsChat,
   previousDay,
   recordDay,
   saveHistory,
   TAG_CZEKA,
+  TAG_DO_STARTU,
+  TAG_STRATEGIA,
   type CounterDef,
   type CounterKey,
+  type ChatFacts,
   type CounterValue,
   type DaySnapshot,
 } from './counters';
 import {
-  BugIcon,
+  FlameIcon,
   BulbIcon,
   CalendarIcon,
   CheckIcon,
@@ -146,6 +152,109 @@ export function useAnsweredTasks(
 }
 
 /**
+ * Fakty z czatów zadań DO-STARTU, których nie widać w tagach (patrz `ChatFacts`):
+ *
+ *  - **rozpoznanie / analiza błędu** — wiadomość WYCENA ma dopisek „Rozpoznanie — bez okresu zwrotu".
+ *    Takie zadanie jest gotowe do startu bez kategorii i bez tagu okresu zwrotu,
+ *  - **strategia z uzasadnieniem** — zadanie ze STRATEGIĄ ma wiadomość WARTOŚĆ (jedno zdanie celu).
+ *
+ * Kategorię i okres zwrotu zwykłych zadań widać w tagach, więc czatu nie czytamy dla nikogo, kto ma
+ * komplet. Czytamy tylko zadania, o których kompletności rozstrzyga czat (`needsChat`). Zamknięte,
+ * odłożone i z aktywnego sprintu pomijamy — kafelki ich nie liczą.
+ *
+ * `null` dopóki pierwszy przebieg dla tego projektu się nie skończy albo gdy czatów nie da się
+ * przeczytać (brak zakresu `im`): kafelki pokazują wtedy wielokropek, a nie „wszystko do wyceny".
+ */
+export function useChatFacts(
+  tasks: Task[],
+  opts: {
+    closed: ReadonlySet<string>;
+    sprintId: number | null;
+    groupId: number | null;
+    enabled: boolean;
+  },
+): ChatFacts | null {
+  const { closed, sprintId, groupId, enabled } = opts;
+  // `read` — zadania, których czat choć raz udało się przeczytać; tylko dla nich wolno
+  // przenieść stary wynik, gdy kolejny odczyt się nie uda.
+  const [state, setState] = useState<{
+    group: number | null;
+    facts: ChatFacts;
+    read: ReadonlySet<number>;
+  } | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((x) => x + 1), ANSWERS_REFRESH_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  const candidates = useMemo(
+    () =>
+      tasks.filter(
+        (t) =>
+          !closed.has(t.status) &&
+          t.status !== DEFERRED_STATUS &&
+          (sprintId === null || t.sprintId !== sprintId) &&
+          hasTag(t, TAG_DO_STARTU) &&
+          needsChat(t) &&
+          t.chatId !== null,
+      ),
+    [tasks, closed, sprintId],
+  );
+
+  const key = useMemo(
+    () =>
+      `${groupId}#${tick}#` +
+      candidates.map((t) => `${t.id}:${t.chatId}:${t.changedDate}:${t.newComments}`).join('|'),
+    [candidates, groupId, tick],
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+
+    (async () => {
+      const got = await Promise.allSettled(candidates.map((t) => fetchChatTail(t.chatId as number)));
+      if (cancelled) return;
+      // Nieudany odczyt to „nie wiem", a nie „pusty czat" — inaczej rozpoznanie albo STRATEGIA
+      // spadłyby do wyceny i ta zła liczba trafiłaby do historii. Zadanie czytane już wcześniej
+      // zachowuje stary wynik; zadanie nigdy nieprzeczytane trzyma cały wynik w „liczę"
+      // (to obejmuje też brak zakresu `im`, gdy odmawiają wszystkie czaty).
+      setState((prev) => {
+        const known = prev && prev.group === groupId ? prev : null;
+        const recon = new Set<number>();
+        const strategic = new Set<number>();
+        const read = new Set<number>();
+        for (const [i, r] of got.entries()) {
+          const t = candidates[i];
+          if (r.status === 'fulfilled') {
+            read.add(t.id);
+            if (hasReconMarker(r.value.messages)) recon.add(t.id);
+            if (hasTag(t, TAG_STRATEGIA) && hasValueMessage(r.value.messages)) strategic.add(t.id);
+            continue;
+          }
+          if (!known?.read.has(t.id)) return prev;
+          read.add(t.id);
+          if (known.facts.recon.has(t.id)) recon.add(t.id);
+          if (known.facts.strategic.has(t.id)) strategic.add(t.id);
+        }
+        return { group: groupId, facts: { recon, strategic }, read };
+      });
+    })().catch(() => {
+      /* Czat nieczytelny — kafelki zostają przy ostatnim wyniku. */
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // `candidates` i reszta są w kluczu — efekt ma ruszać tylko, gdy klucz się zmieni.
+  }, [key, enabled]);
+
+  return state && state.group === groupId ? state.facts : null;
+}
+
+/**
  * Dzienna historia licznikow w przegladarce (binear.counters.v1, osobno per projekt)
  * i punkt odniesienia dla strzalek — ostatni zapisany dzien przed dzisiejszym.
  *
@@ -184,7 +293,7 @@ const ICONS: Record<CounterKey, ReactNode> = {
   wycena: <HashIcon />,
   gotowe: <CheckIcon />,
   sprint: <CalendarIcon />,
-  bug: <BugIcon />,
+  wazne: <FlameIcon />,
   koncept: <BulbIcon />,
   foldery: <ParentIcon />,
   odlozone: <LayersIcon />,
@@ -265,8 +374,8 @@ export function CountersBar({
 
   /*
    * Trzy grupy z podpisami, zeby bylo widac, co sie z czym sumuje:
-   *  - ROZBICIE: „Poza sprintem" i stany, ktore sie na nie skladaja (`inSum`).
-   *    Podpis grupy przechodzi w linie siegajaca do konca tych kafelkow,
+   *  - ROZBICIE: stany, ktore skladaja sie na „Poza sprintem" (`inSum`); sama suma stoi w podpisie
+   *    grupy (`totalCap`). Podpis przechodzi w linie siegajaca do konca tych kafelkow,
    *  - SPRINT: kafelek sprintu, osobna miara,
    *  - POZA SUMA: odlozone (status 6 nie wchodzi do „Poza sprintem") i cechy
    *    (`separate`, np. bledy — bug jest tez w ktoryms ze stanow).
@@ -318,15 +427,41 @@ Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
     </span>
   );
 
+  /*
+   * „Poza sprintem" stoi W PODPISIE grupy, a nie jako osobny kafelek: to suma kafelkow pod nim, wiec
+   * podpis „Rozbicie „Poza sprintem” · 164" mowi to samo, a zwolnione miejsce mieszci kafelek
+   * folderow w jednym rzedzie. Klikniecie dziala jak na kafelku — filtruje liste.
+   */
+  const totalCap = (d: CounterDef) => {
+    const v = values[d.key];
+    const isPending = pending.has(d.key);
+    const on = active === d.key;
+    return (
+      <button
+        className={`counters-cap counters-cap-total${on ? ' counters-cap-on' : ''}`}
+        aria-pressed={on}
+        title={on ? `${d.hint}
+
+Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
+        onClick={() => onPick(on ? null : d.key)}
+      >
+        <span className="counters-cap-text">Rozbicie „{d.label}”</span>
+        <span className={`counters-cap-count${isPending ? ' counter-pending' : ''}`}>
+          {isPending ? '…' : v.count}
+        </span>
+        {!isPending && prev && (
+          <Delta now={v.count} before={prev.snap[d.key]} day={prev.day} riseIsBad={d.riseIsBad} />
+        )}
+      </button>
+    );
+  };
+
   return (
     <div className="counters" role="toolbar" aria-label="Liczniki zadań" ref={rowRef}>
       {(total || parts.length > 0) && (
-        <div className="counters-group counters-group-sum" style={nStyle((total ? 1 : 0) + parts.length)}>
-          {cap('Rozbicie „Poza sprintem”')}
-          <div className="counters-group-row">
-            {total && tile(total)}
-            {parts.map((d) => tile(d))}
-          </div>
+        <div className="counters-group counters-group-sum" style={nStyle(parts.length)}>
+          {total ? totalCap(total) : cap('Rozbicie „Poza sprintem”')}
+          <div className="counters-group-row">{parts.map((d) => tile(d))}</div>
         </div>
       )}
       {sprint.length > 0 && (
