@@ -149,3 +149,16 @@ export function summarizeSprint(
 /** Udzial stanu w sumie (0–1) — do szerokosci kawalka paska. */
 export const share = (totals: Totals, state: SummaryState): number =>
   totals.points > 0 ? totals.by[state] / totals.points : 0;
+
+/**
+ * Wydajnosc zespolu: ile punktow dowiozl na godzine mocy. `pct` to dowiezione SP przez moce (1 SP = 1 h
+ * mocy, wiec 100% = dokladnie tyle, ile pozwalaly moce), `hPerSp` to odwrotnosc — ile godzin mocy
+ * poszlo na jeden punkt. `null`, gdy nie ma mocy albo nic nie dowiezlismy (odwrotnosc by nie istniala).
+ */
+export function efficiency(
+  delivered: number,
+  capacity: number | null,
+): { pct: number; hPerSp: number | null } | null {
+  if (capacity === null || capacity <= 0) return null;
+  return { pct: (delivered / capacity) * 100, hPerSp: delivered > 0 ? capacity / delivered : null };
+}

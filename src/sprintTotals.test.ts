@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { share, summarizeSprint, summaryState } from './sprintTotals';
+import { efficiency, share, summarizeSprint, summaryState } from './sprintTotals';
 
 const WORK = new Set([4779]);
 const nazwa = (id: number | null) => (id === 1 ? 'Magazyn' : id === 2 ? 'Handlowy' : 'Bez epika');
@@ -28,6 +28,23 @@ describe('summaryState', () => {
     expect(summaryState({ status: '2', stageId: 4779 }, WORK)).toBe('wtoku');
     expect(summaryState({ status: '2', stageId: 4777 }, WORK)).toBe('czeka');
     expect(summaryState({ status: '2', stageId: null }, WORK)).toBe('czeka');
+  });
+});
+
+describe('efficiency', () => {
+  it('wydajnosc to dowiezione SP przez moce, a odwrotnosc to godziny mocy na punkt', () => {
+    expect(efficiency(100, 140)).toEqual({ pct: (100 / 140) * 100, hPerSp: 1.4 });
+    expect(efficiency(140, 140)?.pct).toBe(100);
+  });
+
+  it('ponad 100%, gdy dowiezlismy wiecej niz moce', () => {
+    expect(efficiency(150, 100)?.pct).toBe(150);
+  });
+
+  it('bez dowiezionych SP odwrotnosc nie istnieje; bez mocy nie ma wyniku', () => {
+    expect(efficiency(0, 100)).toEqual({ pct: 0, hPerSp: null });
+    expect(efficiency(10, null)).toBeNull();
+    expect(efficiency(10, 0)).toBeNull();
   });
 });
 

@@ -8739,3 +8739,128 @@ a.mention:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Wykres dzialow: pasek na dzial, dlugosc proporcjonalna do SP dzialu, kawalki wg statusu. */
+.sum-headline {
+  margin: 0;
+  font-size: var(--t-large);
+}
+
+.sum-headline b {
+  font-weight: var(--w-semibold);
+}
+
+.sum-headline-pct {
+  color: var(--accent-green);
+  font-weight: var(--w-semibold);
+}
+
+.sum-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sum-chart h3 {
+  margin: 0;
+  font-size: var(--t-small);
+}
+
+.sum-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+.sum-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.sum-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.sum-dot.is-wdrozone { background: var(--accent-green); }
+.sum-dot.is-pr { background: var(--accent); }
+.sum-dot.is-wtoku { background: var(--accent-amber); }
+.sum-dot.is-czeka { background: color-mix(in srgb, var(--fg) 30%, transparent); }
+.sum-dot.is-wstrzymane { background: var(--accent-orange); }
+
+.sum-chart-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 150px) minmax(0, 1fr) 110px;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.sum-chart-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-small);
+}
+
+.sum-chart-track {
+  display: block;
+  height: 22px;
+}
+
+.sum-chart-bar {
+  display: flex;
+  gap: 1px;
+  height: 100%;
+  min-width: 6px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.sum-chart-bar .sum-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-chart-bar .sum-seg.is-czeka {
+  color: var(--fg);
+}
+
+.sum-chart-done {
+  font-size: var(--t-mini);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-chart-done small {
+  color: var(--fg-muted);
+}
+
+.sum-plan {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--t-small);
+}
+
+.sum-plan b {
+  color: var(--fg);
+}
+
+.sum-eff {
+  margin: 0;
+  font-size: var(--t-small);
+}
