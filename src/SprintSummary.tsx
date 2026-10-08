@@ -4,6 +4,7 @@ import type { Sprint, Task } from './bitrix';
 import { sprintDeadline, workHoursBetween } from './sprintClock';
 import {
   SUMMARY_STATES,
+  efficiency,
   STATE_LABELS,
   summarizeSprint,
   type Dept,
@@ -76,6 +77,8 @@ export function SprintSummary({
   epicName,
   now,
   teamCapacity,
+  capacityTotal,
+  capacitySource,
   onOpen,
 }: {
   sprint: Sprint | null;
@@ -86,6 +89,10 @@ export function SprintSummary({
   now: Date;
   /** Moce z grafiku zespolu do konca sprintu; `null`, gdy zespol nie jest wpisany. */
   teamCapacity: number | null;
+  /** Moce zespolu na CALY sprint (h = SP); `null`, gdy nie da sie ich policzyc. */
+  capacityTotal: number | null;
+  /** Skad moce: grafik zespolu albo liczba programistow z konfiguracji. */
+  capacitySource: 'grafik' | 'konfiguracja' | null;
   onOpen: (id: number) => void;
 }) {
   const data = useMemo(
@@ -101,7 +108,10 @@ export function SprintSummary({
   const end = sprintDeadline(sprint.dateEnd);
   const hoursLeft = end ? workHoursBetween(now, end) : 0;
   const open = t.points - t.by.wdrozone;
+  const maxDept = Math.max(1, ...data.depts.map((d) => d.totals.points));
   const delivered = t.by.wdrozone + t.by.pr;
+  const effDeployed = efficiency(t.by.wdrozone, capacityTotal);
+  const effFinished = efficiency(delivered, capacityTotal);
 
   return (
     <div className="sum">
@@ -112,6 +122,37 @@ export function SprintSummary({
           {end && hoursLeft > 0 && <> · zostało {Math.round(hoursLeft)} h roboczych</>}
         </span>
       </header>
+
+      {/*
+        Procent liczymy od MOCY, nie od zaplanowanych SP: plan bywa kilkadziesiat procent ponad moce, wtedy
+        „39% planu" wyglada na porazke, a zespol dowiozl tyle, na ile pozwalaly godziny. Plan pokazujemy obok.
+      */}
+      <p className="sum-headline">
+        Zakończone w sprincie: <b>{delivered}</b> SP
+        {effFinished && capacityTotal !== null ? (
+          <span className="sum-headline-pct">
+            {' '}
+            · {Math.round(effFinished.pct)}% mocy zespołu ({Math.round(capacityTotal)} h)
+          </span>
+        ) : (
+          t.points > 0 && <span className="sum-headline-pct"> · {Math.round((delivered / t.points) * 100)}% planu</span>
+        )}
+      </p>
+      {capacityTotal !== null && capacityTotal > 0 && (
+        <p className="sum-plan">
+          Zaplanowane było <b>{t.points}</b> SP = {Math.round((t.points / capacityTotal) * 100)}% mocy
+          {t.points > capacityTotal && <> — o {Math.round(t.points - capacityTotal)} SP ponad moce</>}.
+        </p>
+      )}
+
+      {effDeployed && effFinished && capacityTotal !== null && (
+        <p className="sum-eff" title={`Moce: ${capacitySource === 'grafik' ? 'z grafiku zespołu' : 'liczba programistów z konfiguracji × godziny sprintu'}. Jedna godzina mocy to jeden punkt.`}>
+          Wydajność: wdrożone <b>{t.by.wdrozone}</b> SP na <b>{Math.round(capacityTotal)}</b> h mocy ={' '}
+          <b>{Math.round(effDeployed.pct)}%</b>
+          {effDeployed.hPerSp !== null && <> (odwrotnie: {effDeployed.hPerSp.toLocaleString('pl-PL', { maximumFractionDigits: 1 })} h mocy na 1 SP)</>}
+          . Razem z czekającymi na wdrożenie ({delivered} SP): <b>{Math.round(effFinished.pct)}%</b>.
+        </p>
+      )}
 
       <div className="sum-tiles">
         {SUMMARY_STATES.map((s: SummaryState) => (
@@ -127,7 +168,7 @@ export function SprintSummary({
 
       <StateBar totals={t} thick />
       <p className="sum-note">
-        Skończone (wdrożone albo czekające na wdrożenie): <b>{delivered}</b> z <b>{t.points}</b> SP
+        Skończone (wdrożone albo czekające na wdrożenie): <b>{delivered}</b> z <b>{t.points}</b> SP planu
         {t.points > 0 && <> ({Math.round((delivered / t.points) * 100)}%)</>}; do zrobienia lub dokończenia{' '}
         <b>{open}</b> SP.
         {t.unestimated > 0 && <> {plZad(t.unestimated)} bez SP nie wchodzi do sum.</>}
@@ -138,6 +179,50 @@ export function SprintSummary({
           </>
         )}
       </p>
+
+      {data.depts.length > 0 && (
+        <section className="sum-chart" aria-label="SP według działu i statusu">
+          <h3>Działy — SP według statusu</h3>
+          <div className="sum-legend">
+            {SUMMARY_STATES.map((s) => (
+              <span key={s} className="sum-legend-item">
+                <i className={`sum-dot is-${s}`} />
+                {STATE_LABELS[s]}
+              </span>
+            ))}
+          </div>
+          {data.depts.map((d) => {
+            const done = d.totals.by.wdrozone + d.totals.by.pr;
+            return (
+              <div key={d.epicId ?? 0} className="sum-chart-row">
+                <span className="sum-chart-name" title={d.name}>
+                  {d.name}
+                </span>
+                <span className="sum-chart-track">
+                  <span className="sum-chart-bar" style={{ width: `${(d.totals.points / maxDept) * 100}%` }}>
+                    {SUMMARY_STATES.map((s) =>
+                      d.totals.by[s] > 0 ? (
+                        <span
+                          key={s}
+                          className={`sum-seg is-${s}`}
+                          style={{ flexGrow: d.totals.by[s] }}
+                          title={`${STATE_LABELS[s]}: ${d.totals.by[s]} SP`}
+                        >
+                          {d.totals.by[s]}
+                        </span>
+                      ) : null,
+                    )}
+                  </span>
+                </span>
+                <span className="sum-chart-done">
+                  {done}/{d.totals.points} SP
+                  {d.totals.points > 0 && <small> · {Math.round((done / d.totals.points) * 100)}%</small>}
+                </span>
+              </div>
+            );
+          })}
+        </section>
+      )}
 
       <div className="sum-table-head">
         <span>Dział</span>

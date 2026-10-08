@@ -184,7 +184,7 @@ import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
-import { sprintCapacity } from './sprintClock';
+import { sprintCapacity, sprintDeadline, workHoursBetween } from './sprintClock';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
 import {
@@ -8919,6 +8919,15 @@ export default function App() {
     () => stages.filter((s) => sprintId !== null && s.sprintId === sprintId && s.type === 'NEW'),
     [stages, sprintId],
   );
+  /* Moce na CALY aktywny sprint (od startu do konca) — do wydajnosci w podsumowaniu. */
+  const summaryCapacity = useMemo(() => {
+    const end = sprintDeadline(activeSprint?.dateEnd ?? null);
+    const start = activeSprint?.dateStart ? new Date(activeSprint.dateStart) : null;
+    if (!end || !start || Number.isNaN(start.getTime())) return { total: null, source: null } as const;
+    const from = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 8);
+    const hours = workHoursBetween(from, end);
+    return hours > 0 ? ({ total: hours * (config?.capacityDevs ?? 4), source: 'konfiguracja' } as const) : ({ total: null, source: null } as const);
+  }, [activeSprint?.dateStart, activeSprint?.dateEnd, config?.capacityDevs]);
   /* Etapy „W toku" aktywnego sprintu — do podsumowania sprintu. */
   const workStageIds = useMemo(() => new Set(stages.filter((s) => s.type === 'WORK').map((s) => s.id)), [stages]);
   const waitingStageIds = useMemo(() => new Set(waitingStages.map((s) => s.id)), [waitingStages]);
@@ -11725,6 +11734,8 @@ export default function App() {
             epicName={(id) => (id === null ? 'Bez epika' : (epicNames.get(id)?.name ?? `#${id}`))}
             now={now}
             teamCapacity={null}
+            capacityTotal={summaryCapacity.total}
+            capacitySource={summaryCapacity.source}
             onOpen={setOpenId}
           />
         ) : viewMode === 'planning' ? (
