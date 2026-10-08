@@ -189,7 +189,7 @@ import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
-import { sprintCapacity, sprintDeadline, workHoursBetween } from './sprintClock';
+import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
 import { TeamModal } from './TeamModal';
 import { loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
@@ -8972,10 +8972,10 @@ export default function App() {
     if (!end || !start || Number.isNaN(start.getTime())) return { total: null, source: null } as const;
     const from = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 8);
     if (team.members.length > 0) {
-      const h = teamHoursBetween(team, from, end);
+      const h = teamHoursBetween(team, from, sprintWorkEnd(end));
       return h > 0 ? ({ total: h, source: 'grafik' } as const) : ({ total: null, source: null } as const);
     }
-    const hours = workHoursBetween(from, end);
+    const hours = workHoursBetween(from, sprintWorkEnd(end));
     return hours > 0 ? ({ total: hours * (config?.capacityDevs ?? 4), source: 'konfiguracja' } as const) : ({ total: null, source: null } as const);
   }, [activeSprint?.dateStart, activeSprint?.dateEnd, config?.capacityDevs, team]);
   const capacity = useMemo(
