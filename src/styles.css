@@ -1442,7 +1442,9 @@ input[type='search']::-webkit-search-decoration {
   --counter-min: 150px;
   display: flex;
   align-items: flex-end;
-  gap: var(--s4);
+  /* Odstep miedzy GRUPAMI. --s3, nie --s4: przy czterech grupach (z „Ważne" stojacym osobno) szerszy
+     wypychal ostatni kafelek o kilka pikseli poza okno 1600 px. */
+  gap: var(--s3);
   padding: var(--s2) var(--s4);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
@@ -1491,6 +1493,34 @@ input[type='search']::-webkit-search-decoration {
 
 .counters-cap-empty .counters-cap-text {
   visibility: hidden;
+}
+
+/* Podpis grupy rozbicia jest przyciskiem z suma „Poza sprintem" (patrz `totalCap` w CountersBar). */
+.counters-cap-total {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.counters-cap-count {
+  font-size: var(--t-mini);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.counters-cap-total .counter-delta {
+  flex: 0 0 auto;
+}
+
+.counters-cap-total:hover .counters-cap-text,
+.counters-cap-on .counters-cap-text,
+.counters-cap-on .counters-cap-count {
+  color: var(--accent);
 }
 
 .counters-cap-text {
@@ -1544,8 +1574,9 @@ input[type='search']::-webkit-search-decoration {
 
 .counter-poza { --c: var(--accent); }
 .counter-czeka { --c: #e879a6; }
-.counter-bug { --c: var(--danger); }
+.counter-wazne { --c: var(--danger); }
 .counter-koncept { --c: #58a6ff; }
+.counter-foldery { --c: #8b949e; }
 .counter-wywiad { --c: var(--accent-orange); }
 .counter-odpowiedzi { --c: var(--accent-amber); }
 .counter-wycena { --c: #a371f7; }
@@ -2196,6 +2227,38 @@ input[type='search']::-webkit-search-decoration {
      Podpowiedz dziala tak samo bez niej — `title` nie potrzebuje kursora. */
 }
 
+/*
+ * Odliczanie do konca sprintu przy etapie „Nowe / Oczekujace" (CapacityChip). Ksztalt
+ * jak `.head-sp`, ale WYPELNIONY kolorem poziomu: to jedyny zeton w naglowku, ktory
+ * ma sie rzucac w oczy, bo mowi „zdazymy / nie zdazymy". Kolor to nie ozdoba, tylko
+ * odpowiedz, wiec nie moze zginac w szarosci sasiednich zetonow.
+ */
+.head-cap {
+  flex: 0 0 auto;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  border: 1px solid currentColor;
+  border-radius: var(--s1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.head-cap-ok {
+  color: var(--accent-green);
+  background: color-mix(in srgb, var(--accent-green) 14%, transparent);
+}
+
+.head-cap-warn {
+  color: var(--accent-orange);
+  background: color-mix(in srgb, var(--accent-orange) 16%, transparent);
+}
+
+.head-cap-over {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
 .chev {
   flex: 0 0 12px;
   transition: transform 120ms ease;
@@ -2382,12 +2445,6 @@ input[type='search']::-webkit-search-decoration {
   box-shadow: inset 0 0 0 1px var(--border-strong);
   opacity: 0;
   transition: opacity 120ms ease, background 120ms ease;
-  /*
-   * Znosi odstep `gap` wiersza PO checkboxie, zeby ikona priorytetu stala tuz
-   * przy nim. Sam slot 16 px ZOSTAJE — gdyby znikal razem z widocznoscia, cala
-   * zawartosc wiersza przeskakiwalaby w bok przy kazdym najechaniu.
-   */
-  margin-right: calc(var(--s2) * -1);
 }
 
 .row:hover .row-check,
@@ -2499,6 +2556,89 @@ input[type='search']::-webkit-search-decoration {
  * rezerwuje mu kawalek, ktorego nic juz nie zabierze; wielokropek dziala jak
  * dotad, tylko na wezszym polu.
  */
+/*
+ * Znaki zadania waznego — czerwony plomien („Ważne" w Bitriksie) i czerwony robak (tag BUG). Ta sama
+ * czerwien, bo oba mowia „to jest wazne"; ksztalt mowi, skad sie wziely, i podpowiedz tez. Na karcie
+ * tablicy stoja przed tytulem, w jego tekscie; na liscie — w miejscu checkboxa (nizej).
+ */
+.important-mark {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-right: var(--s1);
+  color: var(--danger);
+  vertical-align: -2px;
+}
+
+/*
+ * Znaki zadania waznego w wierszu listy — na miejscu checkboxa (ujemny margines cofa je o szerokosc checkboxa
+ * i odstep), wiec nie zajmuja wlasnej kolumny i tytuly dalej zaczynaja sie rowno. Nie lapia klikniec
+ * (klik trafia w checkbox pod spodem); znikaja dopiero przy zaznaczonym wierszu, gdzie stoi ptaszek.
+ */
+.important-slot {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  margin-left: calc(-16px - var(--s2));
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.row-marked .important-slot {
+  opacity: 0;
+}
+
+/* Pod kursorem znak zostaje, tylko maleje — czerwony checkbox obrysowuje go, zamiast go chowac. */
+.important-slot svg {
+  transition: width 120ms ease, height 120ms ease;
+}
+
+.row:hover .important-slot svg {
+  width: 10px;
+  height: 10px;
+}
+
+.row:hover .important-slot .important-mark + .important-mark svg,
+.row:hover .important-slot .important-mark:has(+ .important-mark) svg {
+  width: 7px;
+  height: 7px;
+}
+
+@media (hover: none) {
+  .important-slot svg {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+.important-slot .important-mark {
+  margin-right: 0;
+}
+
+/* Checkbox, ktory obrysowuje znak zadania waznego pod kursorem, jest w tej samej czerwieni — znak nie znika bez sladu. */
+.row-important .row-check {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+.row-important .row-check:hover {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+
+.row-important .row-check-on {
+  background: var(--danger);
+  box-shadow: none;
+}
+
+/* Oba znaki naraz — mniejsze, jeden nad drugim, zeby zmiescily sie w miejscu checkboxa. */
+.important-slot .important-mark + .important-mark svg,
+.important-slot .important-mark:has(+ .important-mark) svg {
+  width: 11px;
+  height: 11px;
+}
+
 .row-title {
   flex: 1;
   min-width: 5rem;
@@ -3655,6 +3795,60 @@ body.resizing {
   display: flex;
   align-items: center;
   gap: var(--s1);
+}
+
+/*
+ * „pobrano 12 s temu" + odswiezenie tego jednego zadania. Cichy, jak reszta naglowka: ma
+ * odpowiadac na pytanie „czy to jest swieze", a nie rzucac sie w oczy. Przy bledzie odswiezenia
+ * dopisek robi sie bursztynowy — stara liczba nie moze udawac aktualnej.
+ */
+.detail-fresh {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 28px;
+  padding: 0 var(--s2);
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: 1; /* bez tego tekst niesie interlinie body i siedzi nizej niz ikona */
+  white-space: nowrap;
+  border-radius: var(--radius);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+/* Ikona i tekst jako flex, a nie inline — inaczej SVG staje na linii bazowej tekstu. */
+.detail-fresh > span {
+  display: inline-flex;
+}
+
+.detail-fresh:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.detail-fresh:disabled {
+  cursor: progress;
+}
+
+.detail-fresh-fail {
+  color: var(--accent-amber);
+}
+
+.detail-fresh .spin {
+  animation: detail-fresh-spin 900ms linear infinite;
+}
+
+@keyframes detail-fresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-fresh .spin {
+    animation: none;
+  }
 }
 
 .detail-body {
@@ -5907,6 +6101,11 @@ a.mention:hover {
 
 /* --- rozklad obciazenia --- */
 
+/* SP kierownika w naglowku panelu — przygaszone, bo nie wchodzi do limitu zespolu. */
+.plan-num-kierownik {
+  color: var(--fg-dim);
+}
+
 .plan-load {
   padding: 0 var(--s3) var(--s2);
 }
@@ -8144,12 +8343,6 @@ a.mention:hover {
  */
 .plan-pane .row-twisty-spacer {
   display: none;
-}
-
-/* Bez rozpornika ujemny margines checkboxa skleilby go z ikona priorytetu —
-   przywracamy zwykly odstep wiersza. */
-.plan-pane .row-check {
-  margin-right: 0;
 }
 
 /* Bardzo waski panel planowania: data ustepuje, zeby awatar i tytul zmiescily

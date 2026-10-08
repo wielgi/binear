@@ -3,6 +3,14 @@ import {
   answerState,
   countAll,
   COUNTERS,
+  foldersOf,
+  hasReconMarker,
+  hasValueMessage,
+  isCompleteByTags,
+  isReconByTitle,
+  needsChat,
+  paybackBand,
+  paybackRank,
   isSubstantiveAnswer,
   MIN_ANSWER_CHARS,
   plainBody,
@@ -18,6 +26,9 @@ const zadanie = (o: Partial<Parameters<typeof countAll>[0][number]> & { id: numb
   tags: [],
   storyPoints: null,
   epicId: 141,
+  priority: '1',
+  title: 'Zadanie',
+  deadline: null as string | null,
   ...o,
 });
 
@@ -25,6 +36,8 @@ const ctx = (o: Partial<CounterCtx> = {}): CounterCtx => ({
   sprintId: 70,
   closed: new Set(['5']),
   answered: new Set(),
+  folders: new Set<number>(),
+  chat: { recon: new Set<number>(), strategic: new Set<number>() } as CounterCtx['chat'],
   ...o,
 });
 
@@ -33,7 +46,7 @@ describe('countAll', () => {
     zadanie({ id: 1, sprintId: 70, storyPoints: 8 }),
     zadanie({ id: 2, sprintId: 70, storyPoints: 4, status: '5' }),
     zadanie({ id: 3, tags: ['DO-STARTU'] }),
-    zadanie({ id: 4, tags: ['do-startu'], storyPoints: 6 }),
+    zadanie({ id: 4, tags: ['do-startu', 'OSZCZEDNOSC', 'zwrot-3'], storyPoints: 6 }),
     zadanie({ id: 5, tags: ['DO-STARTU'], sprintId: 70 }),
     zadanie({ id: 6, tags: ['OCZEKUJE-NA-ODPOWIEDZ'] }),
     zadanie({ id: 7, tags: ['OCZEKUJE-NA-ODPOWIEDZ'] }),
@@ -96,11 +109,223 @@ describe('countAll', () => {
     expect([wynik.wycena.count, wynik.gotowe.count]).toEqual([1, 1]);
   });
 
+  describe('komplet do startu: wycena, kategoria i tag okresu zwrotu', () => {
+    const TERMIN = '2026-11-01T00:00:00+02:00';
+    const start = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
+      zadanie({ id: 100, tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-6'], storyPoints: 6, ...o });
+    const stan = (t: ReturnType<typeof zadanie>, o: Partial<CounterCtx> = {}) => {
+      const w = countAll([t], ctx(o));
+      return [w.wycena.count, w.gotowe.count];
+    };
+
+    it('wycena + kategoria + tag zwrotu → gotowe do startu', () => {
+      expect(stan(start())).toEqual([0, 1]);
+    });
+
+    it('bez story pointow → do wyceny', () => {
+      expect(stan(start({ storyPoints: null }))).toEqual([1, 0]);
+    });
+
+    it('bez kategorii → do wyceny, choc ma wycene i tag zwrotu', () => {
+      expect(stan(start({ tags: ['DO-STARTU', 'ZWROT-6'] }))).toEqual([1, 0]);
+    });
+
+    it('bez tagu zwrotu → do wyceny', () => {
+      expect(stan(start({ tags: ['DO-STARTU', 'OSZCZEDNOSC'] }))).toEqual([1, 0]);
+    });
+
+    it('kazdy z czterech tagow zwrotu wystarcza, takze bez wzgledu na wielkosc liter', () => {
+      for (const tag of ['ZWROT-3', 'zwrot-6', 'Zwrot-12', 'ZWROT-12+']) {
+        expect(stan(start({ tags: ['DO-STARTU', 'RYZYKO', tag] }))).toEqual([0, 1]);
+      }
+    });
+
+    it('tag zwrotu spoza listy (ZWROT-24) zwrotu nie daje', () => {
+      expect(stan(start({ tags: ['DO-STARTU', 'RYZYKO', 'ZWROT-24'] }))).toEqual([1, 0]);
+    });
+
+    it('WYMOG nie potrzebuje okresu zwrotu, ale MUSI miec termin', () => {
+      expect(stan(start({ tags: ['DO-STARTU', 'WYMOG'], deadline: TERMIN }))).toEqual([0, 1]);
+      expect(stan(start({ tags: ['DO-STARTU', 'WYMOG'], deadline: null }))).toEqual([1, 0]);
+    });
+
+    it('WYMOG z terminem, ale bez wyceny → do wyceny', () => {
+      expect(stan(start({ tags: ['DO-STARTU', 'WYMOG'], storyPoints: null, deadline: TERMIN }))).toEqual([1, 0]);
+    });
+
+    it('termin nie zastepuje tagu zwrotu zwyklego zadania', () => {
+      expect(stan(start({ tags: ['DO-STARTU', 'OSZCZEDNOSC'], deadline: TERMIN }))).toEqual([1, 0]);
+    });
+
+    it('kazda kategoria z listy liczy sie, takze BUG (bug tez ma okres zwrotu)', () => {
+      for (const kat of ['bug', 'Oszczednosc', 'PRZYCHOD', 'ryzyko', 'ANALITYKA', 'UTRZYMANIE']) {
+        expect(stan(start({ tags: ['DO-STARTU', kat, 'ZWROT-3'] }))).toEqual([0, 1]);
+      }
+    });
+
+    it('tag spoza listy kategorii (Wysoki) kategorii nie zastepuje', () => {
+      expect(stan(start({ tags: ['DO-STARTU', 'Wysoki', 'ZWROT-6'] }))).toEqual([1, 0]);
+    });
+
+    it('suma stanow dalej zgadza sie z „poza sprintem"', () => {
+      const lista = [
+        start({ id: 1 }),
+        start({ id: 2, storyPoints: null }),
+        start({ id: 3, tags: ['DO-STARTU'] }),
+        start({ id: 4, tags: ['DO-STARTU', 'WYMOG'], deadline: TERMIN }),
+      ];
+      const w = countAll(lista, ctx());
+      expect(w.wycena.count + w.gotowe.count).toBe(4);
+      expect([w.wycena.count, w.gotowe.count]).toEqual([2, 2]);
+    });
+  });
+
+  describe('rozpoznanie: gotowe do startu bez kategorii i zwrotu', () => {
+    const rozp = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
+      zadanie({ id: 200, tags: ['DO-STARTU'], storyPoints: 4, ...o });
+    const stan = (t: ReturnType<typeof zadanie>, recon: Set<number> | null) => {
+      const w = countAll([t], ctx({ chat: recon ? { recon, strategic: new Set() } : null }));
+      return [w.wycena.count, w.gotowe.count];
+    };
+
+    it('zadanie oznaczone jako rozpoznanie jest gotowe bez kategorii i zwrotu', () => {
+      expect(stan(rozp(), new Set([200]))).toEqual([0, 1]);
+    });
+
+    it('takze analiza bledu (BUG) bez tagu zwrotu, jesli oznaczona jako rozpoznanie', () => {
+      expect(stan(rozp({ tags: ['DO-STARTU', 'BUG'] }), new Set([200]))).toEqual([0, 1]);
+    });
+
+    it('bez oznaczenia to zwykle niekompletne zadanie → do wyceny', () => {
+      expect(stan(rozp(), new Set())).toEqual([1, 0]);
+    });
+
+    it('rozpoznanie wciaz potrzebuje wyceny', () => {
+      expect(stan(rozp({ storyPoints: null }), new Set([200]))).toEqual([1, 0]);
+    });
+
+    it('do 4 h — tylko takie zadania czyta sie z czatu, powyzej to nie rozpoznanie', () => {
+      expect(needsChat(rozp({ storyPoints: 4 }))).toBe(true);
+      expect(needsChat(rozp({ storyPoints: 6 }))).toBe(false);
+      expect(needsChat(rozp({ storyPoints: null }))).toBe(false);
+    });
+
+    it('zadanie z kompletem w tagach nie jest kandydatem — jego czatu nie czytamy', () => {
+      expect(needsChat(rozp({ tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(false);
+      expect(isCompleteByTags(rozp({ tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(true);
+    });
+
+    it('dopoki czaty sie czytaja (recon = null), zadanie z do 4 h nie jest jeszcze gotowe', () => {
+      expect(stan(rozp(), null)).toEqual([1, 0]);
+    });
+
+    it('kafelki zalezne od rozpoznan sa oznaczone, zeby ekran pokazal „liczę” zamiast zera', () => {
+      expect(COUNTERS.filter((d) => d.needsChatFacts).map((d) => d.key)).toEqual(['wycena', 'gotowe']);
+    });
+
+    it('rozpoznaje dopisek w wiadomosci WYCENA, takze z kursywa i roznymi myslnikami', () => {
+      const m = (text: string, authorId = 5): ChatMessage => ({ id: 1, authorId, text });
+      const wycena = '[B]WYCENA: 4 h[/B]\n\nOpis.\n\n[I]Rozpoznanie — bez okresu zwrotu.[/I]';
+      expect(hasReconMarker([m(wycena)])).toBe(true);
+      expect(hasReconMarker([m('WYCENA: 4 h. Rozpoznanie - bez okresu zwrotu')])).toBe(true);
+      expect(hasReconMarker([m('WYCENA: 4 h. rozpoznanie – bez okresu zwrotu')])).toBe(true);
+      expect(hasReconMarker([m('WYCENA: 4 h')])).toBe(false);
+      expect(hasReconMarker([m(wycena, 0)])).toBe(false);
+    });
+
+    it('rozpoznaje tez starsza postac: uzasadnienie zaczynajace sie od Rozpoznanie / Weryfikacja', () => {
+      const m = (text: string): ChatMessage => ({ id: 1, authorId: 5, text });
+      for (const slowo of ['Rozpoznanie', 'Weryfikacja', 'Przegląd kodu', 'Sprawdzenie']) {
+        expect(hasReconMarker([m(`[B]WYCENA: 3 h[/B]\n\n[B]Co obejmuje ta wycena[/B]\n${slowo} tematu.`)])).toBe(true);
+      }
+      expect(hasReconMarker([m('[B]Co obejmuje ta wycena[/B]\nNowy ekran listy.')])).toBe(false);
+    });
+
+    it('do 4 h z „rozpoznanie” albo „weryfikacja” w tytule to rozpoznanie bez czytania czatu', () => {
+      expect(isReconByTitle({ title: 'Rozpoznanie: sync stanów', storyPoints: 4 })).toBe(true);
+      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 3 })).toBe(true);
+      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 8 })).toBe(false);
+      expect(isReconByTitle({ title: 'Nowy ekran', storyPoints: 2 })).toBe(false);
+      expect(needsChat(rozp({ title: 'Rozpoznanie: sync stanów' }))).toBe(false);
+      expect(stan(rozp({ title: 'Rozpoznanie: sync stanów' }), new Set())).toEqual([0, 1]);
+    });
+  });
+
+  describe('STRATEGIA: bez okresu zwrotu, z uzasadnieniem w wiadomosci WARTOSC', () => {
+    const strat = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
+      zadanie({ id: 300, tags: ['DO-STARTU', 'STRATEGIA'], storyPoints: 16, ...o });
+    const stan = (t: ReturnType<typeof zadanie>, strategic: Set<number> | null) => {
+      const w = countAll([t], ctx({ chat: strategic ? { recon: new Set(), strategic } : null }));
+      return [w.wycena.count, w.gotowe.count];
+    };
+
+    it('kategoria + wiadomosc WARTOSC → gotowe, bez tagu ZWROT', () => {
+      expect(stan(strat(), new Set([300]))).toEqual([0, 1]);
+    });
+
+    it('sam tag STRATEGIA bez uzasadnienia to jeszcze nie komplet', () => {
+      expect(stan(strat(), new Set())).toEqual([1, 0]);
+      expect(isCompleteByTags(strat())).toBe(false);
+    });
+
+    it('bez wyceny → do wyceny, choc ma uzasadnienie', () => {
+      expect(stan(strat({ storyPoints: null }), new Set([300]))).toEqual([1, 0]);
+    });
+
+    it('tag ZWROT strategii nie potrzebny i niczego nie zmienia', () => {
+      expect(stan(strat({ tags: ['DO-STARTU', 'STRATEGIA', 'ZWROT-12'] }), new Set([300]))).toEqual([0, 1]);
+    });
+
+    it('czat strategii czytamy niezaleznie od wielkosci wyceny; dopoki sie czyta — „liczę”', () => {
+      expect(needsChat(strat({ storyPoints: 40 }))).toBe(true);
+      expect(stan(strat(), null)).toEqual([1, 0]);
+    });
+
+    it('czyta wiadomosc WARTOSC: z pogrubieniem, bez polskich znakow; nie myli z wyceną; system pomija', () => {
+      const m = (text: string, authorId = 5): ChatMessage => ({ id: 1, authorId, text });
+      expect(hasValueMessage([m('[B]WARTOŚĆ: strategia[/B]\n\nUzasadnienie: cel.')])).toBe(true);
+      expect(hasValueMessage([m('WARTOSC - strategia')])).toBe(true);
+      expect(hasValueMessage([m('WYCENA: 16 h'), m('Ta wartość jest niska')])).toBe(false);
+      expect(hasValueMessage([m('WARTOŚĆ: strategia', 0)])).toBe(false);
+    });
+  });
+
+  describe('okres zwrotu z tagow', () => {
+    const tags = (...t: string[]) => ({ tags: t });
+
+    it('czyta przedzial z tagu, bez wzgledu na wielkosc liter', () => {
+      expect(paybackBand(tags('ZWROT-3'))).toBe('do3');
+      expect(paybackBand(tags('zwrot-6'))).toBe('3-6');
+      expect(paybackBand(tags('Zwrot-12'))).toBe('6-12');
+      expect(paybackBand(tags('ZWROT-12+'))).toBe('ponad12');
+    });
+
+    it('brak tagu albo obcy tag → brak okresu zwrotu', () => {
+      expect(paybackBand(tags('OSZCZEDNOSC', 'Wysoki'))).toBeNull();
+      expect(paybackBand(tags('ZWROT-24', 'ZWROT'))).toBeNull();
+      expect(paybackBand(tags())).toBeNull();
+    });
+
+    it('dwa tagi zwrotu: liczy sie najgorszy', () => {
+      expect(paybackBand(tags('ZWROT-3', 'ZWROT-12'))).toBe('6-12');
+    });
+
+    it('wymog przed wszystkim, potem przedzialy, na koncu brak', () => {
+      expect(paybackRank(tags('WYMOG'))).toBe(0);
+      expect(paybackRank(tags('STRATEGIA'))).toBe(1);
+      expect(paybackRank(tags('OSZCZEDNOSC', 'ZWROT-3'))).toBe(2);
+      expect(paybackRank(tags('ZWROT-6'))).toBe(3);
+      expect(paybackRank(tags('ZWROT-12'))).toBe(4);
+      expect(paybackRank(tags('ZWROT-12+'))).toBe(5);
+      expect(paybackRank(tags('OSZCZEDNOSC'))).toBe(6);
+    });
+  });
+
   it('czeka i do analizy dziela OCZEKUJE wg tego, czy ktos odpisal', () => {
     expect([wynik.czeka.count, wynik.odpowiedzi.count]).toEqual([1, 1]);
   });
 
-  it('bug: otwarte z tagiem BUG w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+  it('wazne: otwarte z tagiem BUG w sprincie i poza nim, bez zamknietych i odlozonych', () => {
     const w = countAll(
       [
         zadanie({ id: 60, tags: ['BUG'] }),
@@ -111,43 +336,139 @@ describe('countAll', () => {
       ],
       ctx(),
     );
-    expect(w.bug.count).toBe(2);
+    expect(w.wazne.count).toBe(2);
   });
 
-  it('koncept: nowy tag KONCEPT i starszy KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+  it('wazne: plomien („Ważne" w Bitriksie) i tag BUG liczone razem, kazde zadanie raz', () => {
     const w = countAll(
       [
-        zadanie({ id: 70, tags: ['KONCEPT'] }),
-        zadanie({ id: 71, tags: ['KONCEPCJA'] }),
-        zadanie({ id: 72, tags: ['koncepcja'], sprintId: 70 }),
-        zadanie({ id: 73, tags: ['KONCEPT'], status: '5' }),
-        zadanie({ id: 74, tags: ['KONCEPT'], status: '6' }),
-        zadanie({ id: 75, tags: ['KONCEPTY'] }),
+        zadanie({ id: 80, priority: '2' }),
+        zadanie({ id: 81, tags: ['BUG'] }),
+        zadanie({ id: 82, priority: '2', tags: ['bug'] }), // oba zrodla, a liczy sie raz
+        zadanie({ id: 83, priority: '1', tags: ['Wysoki'] }),
+        zadanie({ id: 84, priority: '2', status: '5' }), // zamkniete
+        zadanie({ id: 85, priority: '2', status: '6' }), // odlozone
+        zadanie({ id: 86, priority: '2', sprintId: 70 }), // w sprincie tez
+      ],
+      ctx(),
+    );
+    expect(w.wazne.count).toBe(4);
+  });
+
+  it('koncept: tag KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 70, tags: ['KONCEPCJA'] }),
+        zadanie({ id: 71, tags: ['koncepcja'] }),
+        zadanie({ id: 72, tags: ['KONCEPCJA'], sprintId: 70 }),
+        zadanie({ id: 73, tags: ['KONCEPCJA'], status: '5' }),
+        zadanie({ id: 74, tags: ['KONCEPCJA'], status: '6' }),
+        zadanie({ id: 75, tags: ['KONCEPCJE'] }),
+        zadanie({ id: 76, tags: ['KONCEPT'] }), // takiego tagu nie ma — nie jest koncepcja
       ],
       ctx(),
     );
     expect(w.koncept.count).toBe(3);
   });
 
-  it('koncept to cecha: nie wchodzi do sumy, a zadanie zostaje w swoim stanie', () => {
-    const w = countAll([zadanie({ id: 80, tags: ['KONCEPCJA'] })], ctx());
-    expect(w.koncept.count).toBe(1);
-    expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
+  it('koncepcja jest poza rejestrem: nie liczy sie ani do „poza sprintem", ani do wywiadu', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 80, tags: ['KONCEPCJA'] }),
+        zadanie({ id: 81, tags: ['KONCEPCJA', 'DO-WYWIADU'] }),
+        zadanie({ id: 82, tags: ['koncepcja', 'OCZEKUJE-NA-ODPOWIEDZ'] }),
+        zadanie({ id: 83, tags: ['KONCEPCJA', 'DO-STARTU'], storyPoints: 4 }),
+        zadanie({ id: 84 }), // zwykle nowe zadanie — to ono jest w wywiadzie
+      ],
+      ctx(),
+    );
+    expect(w.koncept.count).toBe(4);
+    expect(w.poza.count).toBe(1);
     expect(w.wywiad.count).toBe(1);
+    expect([w.czeka.count, w.odpowiedzi.count, w.wycena.count, w.gotowe.count]).toEqual([0, 0, 0, 0]);
+    expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
   });
 
-  it('bledy stoja same (bez podpisu grupy): liczy zadania i ze sprintu, i spoza niego', () => {
-    expect(COUNTERS.filter((d) => d.standalone).map((d) => d.key)).toEqual(['bug']);
+  describe('foldery: zadanie z otwartym podzadaniem to kontener, nie praca', () => {
+    const wiersz = (id: number, parentId: number | null, o: Record<string, unknown> = {}) => ({
+      ...zadanie({ id }),
+      parentId,
+      ...o,
+    });
+    const rejestr = (lista: ReturnType<typeof wiersz>[]) =>
+      countAll(lista, ctx({ folders: foldersOf(lista, new Set(['5'])) }));
+
+    it('rodzic z otwartym dzieckiem nie liczy sie ani do poza sprintem, ani do wywiadu', () => {
+      const w = rejestr([wiersz(1, null), wiersz(2, 1), wiersz(3, 1), wiersz(4, null)]);
+      expect(w.poza.count).toBe(3); // dzieci 2, 3 i zwykle 4 — bez folderu 1
+      expect(w.wywiad.count).toBe(3);
+      expect(w.foldery.count).toBe(1);
+      expect(stany.reduce((s2, k) => s2 + w[k].count, 0)).toBe(w.poza.count);
+    });
+
+    it('folder, ktorego wszystkie podzadania sa zamkniete, wraca do zwyklego rejestru', () => {
+      const w = rejestr([wiersz(1, null), wiersz(2, 1, { status: '5' }), wiersz(3, 1, { status: '5' })]);
+      expect(w.foldery.count).toBe(0);
+      expect(w.poza.count).toBe(1); // sam rodzic, dzieci zamkniete
+    });
+
+    it('wystarczy jedno otwarte dziecko; odlozone dziecko tez jest otwarte', () => {
+      expect(rejestr([wiersz(1, null), wiersz(2, 1, { status: '5' }), wiersz(3, 1)]).foldery.count).toBe(1);
+      expect(rejestr([wiersz(1, null), wiersz(2, 1, { status: '6' })]).foldery.count).toBe(1);
+    });
+
+    it('dziecko moze lezec w innym sprincie niz rodzic — i tak robi z rodzica folder', () => {
+      const w = rejestr([wiersz(1, null), wiersz(2, 1, { sprintId: 70 })]);
+      expect(w.foldery.count).toBe(1);
+      expect(w.poza.count).toBe(0);
+    });
+
+    it('folder w aktywnym sprincie zostaje w W sprincie, a w kafelku Foldery go nie ma', () => {
+      const w = rejestr([wiersz(1, null, { sprintId: 70 }), wiersz(2, 1, { sprintId: 70 })]);
+      expect(w.sprint.count).toBe(2);
+      expect(w.foldery.count).toBe(0);
+    });
+
+    it('odlozony folder nie jest liczony w rejestrze, tylko w notce o odlozonych', () => {
+      const w = rejestr([wiersz(1, null, { status: '6' }), wiersz(2, 1)]);
+      expect(w.foldery.count).toBe(0);
+      expect(w.odlozone.count).toBe(1);
+    });
+
+    it('koncepcja-folder liczy sie tylko jako koncepcja', () => {
+      const w = rejestr([wiersz(1, null, { tags: ['KONCEPCJA'] }), wiersz(2, 1)]);
+      expect(w.koncept.count).toBe(1);
+      expect(w.foldery.count).toBe(0);
+    });
+
+    it('foldersOf: tylko rodzice otwartych dzieci', () => {
+      const lista = [wiersz(1, null), wiersz(2, 1), wiersz(3, 9, { status: '5' }), wiersz(4, null)];
+      expect([...foldersOf(lista, new Set(['5']))]).toEqual([1]);
+    });
+  });
+
+  it('koncepcja w aktywnym sprincie zostaje w „W sprincie" i w „Koncept"', () => {
+    const w = countAll([zadanie({ id: 85, tags: ['KONCEPCJA'], sprintId: 70, storyPoints: 3 })], ctx());
+    expect(w.sprint.count).toBe(1);
+    expect(w.koncept.count).toBe(1);
+    expect(w.poza.count).toBe(0);
+  });
+
+  it('wazne stoja same (bez podpisu grupy): liczy zadania i ze sprintu, i spoza niego', () => {
+    expect(COUNTERS.filter((d) => d.standalone).map((d) => d.key)).toEqual(['wazne']);
     const w = countAll(
       [zadanie({ id: 90, tags: ['BUG'], sprintId: 70 }), zadanie({ id: 91, tags: ['BUG'] })],
       ctx(),
     );
-    expect(w.bug.count).toBe(2); // jeden w sprincie, jeden poza nim
+    expect(w.wazne.count).toBe(2); // jeden w sprincie, jeden poza nim
   });
 
   it('bug to cecha: zadanie z BUG jest tez w swoim stanie, wiec suma stanow sie nie zmienia', () => {
-    const w = countAll([zadanie({ id: 70, tags: ['BUG', 'DO-STARTU'], storyPoints: 4 })], ctx());
-    expect([w.bug.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);
+    const w = countAll(
+      [zadanie({ id: 70, tags: ['BUG', 'DO-STARTU', 'ZWROT-6'], storyPoints: 4 })],
+      ctx(),
+    );
+    expect([w.wazne.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);
     expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
   });
 
