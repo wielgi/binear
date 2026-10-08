@@ -162,5 +162,41 @@ export function tagsForWidth(width: number): number {
 export function tagCounts(tasks: readonly { tags: string[] }[]): [string, number][] {
   const counts = new Map<string, number>();
   for (const t of tasks) for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pl', { sensitivity: 'base' }) || a[0].localeCompare(b[0]));
+  // `numeric`: liczby w nazwie po kolei (ZWROT-3, ZWROT-6, ZWROT-12), a nie znak po znaku (ZWROT-12 przed ZWROT-3).
+  return [...counts.entries()].sort(
+    (a, b) => a[0].localeCompare(b[0], 'pl', { sensitivity: 'base', numeric: true }) || a[0].localeCompare(b[0]),
+  );
+}
+
+/*
+ * Zadanie WAZNE ma na listach czerwone znaki (patrz `ImportantMarks`), po jednym na zrodlo:
+ *  - plomien — „Ważne" w Bitriksie (priorytet `2`, ikona plomienia),
+ *  - robak — tag BUG.
+ * Zadanie z obu na raz dostaje oba. Tag BUG nie jest wtedy pokazywany drugi raz jako etykieta (robak
+ * go zastepuje). Kafelek „Wazne" liczy plomienie i tagi BUG razem, kazde zadanie raz (patrz `counters.ts`).
+ */
+export const isFlame = (t: { priority: string }): boolean => t.priority === '2';
+
+export const hasBugTag = (t: { tags: string[] }): boolean => t.tags.some((g) => g.toUpperCase() === 'BUG');
+
+/** Zadanie jest wazne: plomien Bitriksa albo tag BUG. */
+export const isImportant = (t: { priority: string; tags: string[] }): boolean => isFlame(t) || hasBugTag(t);
+
+/** Tagi bez BUG — ten tag zastepuje robak przed tytulem, wiec drugi raz jako etykieta zbedny. */
+export const withoutBugTag = (tags: string[]): string[] => tags.filter((g) => g.toUpperCase() !== 'BUG');
+
+/**
+ * Wiek pobrania danych po polsku: „przed chwilą", „12 s temu", „3 min temu", „2 godz. temu",
+ * „1 d temu". Do napisu przy zadaniu — zeby bylo widac, czy patrzymy na swieze dane, czy na te
+ * z pamieci (cache).
+ */
+export function relativeAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 5) return 'przed chwilą';
+  if (s < 60) return `${s} s temu`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min temu`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} godz. temu`;
+  return `${Math.floor(h / 24)} d temu`;
 }
