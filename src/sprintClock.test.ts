@@ -114,6 +114,12 @@ describe('sprintCapacity', () => {
     expect(r?.capacity).toBe(87.5);
   });
 
+  it('moce z grafiku zastępują godziny × programiści, a „ile osób” to etaty efektywne', () => {
+    const r = sprintCapacity({ ...base, tasks: [], teamCapacity: 50 });
+    expect(r?.capacity).toBe(50);
+    expect(r?.devs).toBe(2); // 50 h przy 25 h do końca
+  });
+
   it('liczy tylko zadania czekające, z tego sprintu i z oszacowaniem', () => {
     const r = sprintCapacity({
       ...base,
