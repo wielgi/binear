@@ -41,7 +41,7 @@
  * Modul jest czysty (bez Reacta i bez zapytan), zeby dalo sie go przetestowac.
  */
 import type { Task } from './bitrix';
-import { isBug } from './taskView';
+import { isImportant } from './taskView';
 
 export type CounterKey =
   | 'poza'
@@ -51,7 +51,7 @@ export type CounterKey =
   | 'wycena'
   | 'gotowe'
   | 'sprint'
-  | 'bug'
+  | 'wazne'
   | 'koncept'
   | 'foldery'
   | 'odlozone';
@@ -143,6 +143,7 @@ export function foldersOf(
   for (const t of tasks) if (t.parentId !== null && !closed.has(t.status)) folders.add(t.parentId);
   return folders;
 }
+
 
 export interface CounterDef {
   key: CounterKey;
@@ -270,7 +271,7 @@ export const COUNTERS: CounterDef[] = [
     key: 'poza',
     label: 'Poza sprintem',
     hint:
-      'Otwarte zadania spoza aktywnego sprintu, bez odłożonych — cały rejestr, niezależnie ' +
+      'Otwarte zadania spoza aktywnego sprintu, bez odłożonych i bez KONCEPCJA — cały rejestr, niezależnie ' +
       'od widoku i filtrów. Kafelki obok rozbijają tę liczbę co do sztuki.',
     match: (t, ctx) => outside(t, ctx),
     riseIsBad: true,
@@ -341,14 +342,19 @@ export const COUNTERS: CounterDef[] = [
     riseIsBad: false,
   },
   {
-    key: 'bug',
-    label: 'Błędy',
+    /*
+     * Klucz `wazne`, nie dawny `bug`: kafelek liczy teraz tez plomienie, a historia dzienna jest
+     * zapisywana po kluczu. Pod starym kluczem wczorajsza liczba (same tagi BUG) porownana z dzisiejsza
+     * pokazalaby falszywy czerwony wzrost; pod nowym pierwszy dzien ma „—", a potem porownuje juz rowno.
+     */
+    key: 'wazne',
+    label: 'Ważne',
     hint:
       'Otwarte zadania z płomieniem (wysoki priorytet w Bitriksie) albo z tagiem BUG, bez ' +
       'odłożonych — w sprincie i poza nim, każde liczone raz. To cecha, a nie stan: takie zadanie ' +
-      'jest też w jednym ze stanów obok, więc kafelek nie wchodzi do sumy. Na listach mają czerwony ' +
-      'płomień i/albo robaka przed tytułem.',
-    match: (t, ctx) => inAudit(t, ctx) && isBug(t),
+      'jest też w jednym ze stanów obok (poza KONCEPCJA, której stany nie liczą), więc kafelek nie ' +
+      'wchodzi do sumy. Na listach mają czerwony płomień i/albo robaka w miejscu checkboxa.',
+    match: (t, ctx) => inAudit(t, ctx) && isImportant(t),
     separate: true,
     standalone: true,
     riseIsBad: true,
@@ -359,7 +365,7 @@ export const COUNTERS: CounterDef[] = [
     hint:
       'Otwarte zadania z tagiem KONCEPCJA, bez odłożonych — w sprincie i ' +
       'poza nim. To pomysły na zbyt wczesnym etapie, więc poza sprintem NIE wchodzą do „Poza ' +
-      'sprintem" ani do żadnego stanu (także „Do wywiadu") — liczy je tylko ten kafelek.',
+      'sprintem" ani do żadnego stanu (także „Do wywiadu") — ze stanów liczy je tylko ten kafelek.',
     match: (t, ctx) => inAudit(t, ctx) && isKoncept(t),
     separate: true,
     riseIsBad: false,

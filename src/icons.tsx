@@ -109,8 +109,8 @@ export function BulbIcon() {
 }
 
 /**
- * Plomien — znacznik BLEDU na listach i kafelek „Bledy". Jeden znak na dwa zrodla: priorytet
- * Bitriksa „wysoki" (plomien) i tag BUG. Ten sam kaligraficzny rys co reszta ikon.
+ * Plomien — znak zadania WAZNEGO na listach („Ważne" w Bitriksie, priorytet 2); drugi znak, robak,
+ * oznacza tag BUG. Ten sam kaligraficzny rys co reszta ikon.
  */
 export function FlameIcon() {
   return (

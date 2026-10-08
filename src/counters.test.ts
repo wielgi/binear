@@ -27,9 +27,9 @@ const zadanie = (o: Partial<Parameters<typeof countAll>[0][number]> & { id: numb
   tags: [],
   storyPoints: null,
   epicId: 141,
+  priority: '1',
   title: 'Zadanie',
   deadline: null as string | null,
-  priority: '1',
   ...o,
 });
 
@@ -375,7 +375,7 @@ describe('countAll', () => {
     expect([wynik.czeka.count, wynik.odpowiedzi.count]).toEqual([1, 1]);
   });
 
-  it('bug: otwarte z tagiem BUG w sprincie i poza nim, bez zamknietych i odlozonych', () => {
+  it('wazne: otwarte z tagiem BUG w sprincie i poza nim, bez zamknietych i odlozonych', () => {
     const w = countAll(
       [
         zadanie({ id: 60, tags: ['BUG'] }),
@@ -386,10 +386,10 @@ describe('countAll', () => {
       ],
       ctx(),
     );
-    expect(w.bug.count).toBe(2);
+    expect(w.wazne.count).toBe(2);
   });
 
-  it('bledy: plomien (priorytet wysoki) i tag BUG liczone razem, kazde zadanie raz', () => {
+  it('wazne: plomien („Ważne" w Bitriksie) i tag BUG liczone razem, kazde zadanie raz', () => {
     const w = countAll(
       [
         zadanie({ id: 80, priority: '2' }),
@@ -402,7 +402,7 @@ describe('countAll', () => {
       ],
       ctx(),
     );
-    expect(w.bug.count).toBe(4);
+    expect(w.wazne.count).toBe(4);
   });
 
   it('koncept: tag KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {
@@ -505,12 +505,12 @@ describe('countAll', () => {
   });
 
   it('bledy stoja same (bez podpisu grupy): liczy zadania i ze sprintu, i spoza niego', () => {
-    expect(COUNTERS.filter((d) => d.standalone).map((d) => d.key)).toEqual(['bug']);
+    expect(COUNTERS.filter((d) => d.standalone).map((d) => d.key)).toEqual(['wazne']);
     const w = countAll(
       [zadanie({ id: 90, tags: ['BUG'], sprintId: 70 }), zadanie({ id: 91, tags: ['BUG'] })],
       ctx(),
     );
-    expect(w.bug.count).toBe(2); // jeden w sprincie, jeden poza nim
+    expect(w.wazne.count).toBe(2); // jeden w sprincie, jeden poza nim
   });
 
   it('bug to cecha: zadanie z BUG jest tez w swoim stanie, wiec suma stanow sie nie zmienia', () => {
@@ -518,7 +518,7 @@ describe('countAll', () => {
       [zadanie({ id: 70, tags: ['BUG', 'DO-STARTU', 'DZIAL', 'ZWROT-6'], storyPoints: 4 })],
       ctx(),
     );
-    expect([w.bug.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);
+    expect([w.wazne.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);
     expect(stany.reduce((s, k) => s + w[k].count, 0)).toBe(w.poza.count);
   });
 

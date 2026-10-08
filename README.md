@@ -123,18 +123,21 @@ following the steps of the task audit. Left to right:
 | **To estimate** | outside the sprint, `DO-STARTU`, but **not complete**: no pool (`CIAGLOSC` / `RDZEN` / `DZIAL`), no story points, or — per pool — no category and payback period (`RDZEN`: no `WARTOŚĆ` message) |
 | **Ready to start** | outside the sprint, `DO-STARTU`, with a pool, story points and the value its pool asks for — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
-| **Bugs** *(stands alone, no group caption, between "Sprint" and "Out of the sums")* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
-| **Concept** *(apart, behind a divider)* | open tasks tagged `KONCEPCJA`, in the sprint or outside it — ideas too early to count, so outside the sprint they are in **no** other card |
+| **Ważne** (important) *(stands alone, no group caption, between "Sprint" and "Out of the sums")* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
+| **Concept** *(apart, behind a divider)* | open tasks tagged `KONCEPCJA`, in the sprint or outside it — ideas too early to count, so outside the sprint they are in **no** state card (an important one among them still shows under Ważne) |
 | **Folders** *(apart, behind a divider)* | tasks outside the sprint that have an **open subtask** — containers, the work sits in the subtasks, so (like in the audit queue) they are in **no** other card; a folder whose subtasks are all closed goes back to the register |
+| **Odłożone** (deferred) *(apart, behind a divider)* | deferred tasks (status 6) outside the active sprint — not part of the sum |
 
-**The five middle cards add up to "Outside sprint" exactly.** "Bugs" is an attribute,
-not a state (a bug is also in one of the states), so it stands apart behind a
+**The five middle cards add up to "Outside sprint" exactly.** "Ważne" is an attribute,
+not a state (an important task is also in one of the states, unless it's a `KONCEPCJA`, which no
+state counts), so it stands apart behind a
 vertical divider and is not part of the sum. A task outside the
 sprint is in exactly one of those states; "To interview" is the remainder, so the
 sum holds by construction, also for a task with two readiness tags (`DO-STARTU`
 wins over `OCZEKUJE-NA-ODPOWIEDZ`) or a tag outside the list. Deferred tasks
-(status 6) are left out of the sum and of every card; a greyed note under the
-row counts them (`Odłożone (poza sumą): 5`) and clicking it lists them.
+(status 6) are left out of the sum and of every state card; the **Odłożone** card next to
+"Ważne" and "Koncept" (under "Poza sumą") counts the deferred ones outside the sprint, and
+clicking it lists them.
 
 The numbers are **global**: the whole group, regardless of scope, `Only mine`,
 `Completed` and filters. The point is to see whether the register holds 200 or 220
@@ -288,6 +291,26 @@ also authored most tasks via the bulk import, their **Autor** field now says
 "Unassigned" too.) The id is configurable: `BX_UNASSIGNED_ID` in `.env`, served to the
 front end via `/api/config` (defaults to 251).
 
+## Important tasks on the lists
+
+An important task gets a red mark — in the list, on the board cards and in planning:
+
+- a **flame** for Bitrix's high priority ("Ważne"),
+- a **bug** for the `BUG` tag,
+- a task that has both shows both (smaller, one above the other, in the list).
+
+**Where it sits.** In the list (and planning) the mark takes the place of the row's checkbox, which is
+invisible until you hover the row anyway — so it needs no column of its own and every title still
+starts in the same place. On hover the checkbox appears around the mark in the same red; once the
+row is selected, the red tick replaces the mark. On the board cards the mark stands before the title.
+
+The `BUG` tag is then not repeated as a label further along the row (the bug mark replaces it).
+The **Ważne** (important) card counts flames and `BUG` tags together, each task once. Its day-to-day
+history is kept under a new key, so the first day after the change shows "—" instead of comparing
+against yesterday's `BUG`-only number. The row's old priority bars are gone — Bitrix only knows
+"important or not", which is what the flame says; the priority is still editable in the detail
+panel and filterable.
+
 ## Planning: who owns a task entering a sprint
 
 When tasks are moved **from the register into a sprint** in the planning view, a task whose
@@ -301,20 +324,10 @@ responsible person is **in IT**, they stay. A toast says how many tasks were han
 - **Only register → sprint.** Moving a task between sprints, or back to the register, changes nothing.
 - **Unknown stays put.** If the employee list hasn't loaded, or the person isn't in it, the task is
   left alone — a wrong guess in the other direction would take a task away from someone in IT.
+  The same goes for an empty `BX_IT_DEPARTMENTS`: without it nobody is handed over at all.
+- **Move first, owner second.** If the owner change fails, the task stays in the sprint with its old
+  owner and only the owner change is undone.
 - Only this planning path does it; the context menu and the board's drag-and-drop move tasks as before.
-
-## Bugs on the lists
-
-A bug gets red marks **before the title** — in the list, on the board cards and in planning:
-
-- a **flame** for Bitrix's high priority,
-- a **bug** for the `BUG` tag,
-- a task that has both shows both.
-
-The `BUG` tag is then not repeated as a label further along the row (the bug mark replaces it).
-The **Bugs** card counts flames and `BUG` tags together, each task once. The row's old priority
-bars are gone — the flame says the only thing about priority that mattered there; the priority
-is still editable in the detail panel and filterable.
 
 ## Status ≠ Stage
 

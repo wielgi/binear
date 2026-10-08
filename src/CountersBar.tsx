@@ -27,7 +27,7 @@ import {
   type DaySnapshot,
 } from './counters';
 import {
-  BugIcon,
+  FlameIcon,
   BulbIcon,
   CalendarIcon,
   CheckIcon,
@@ -293,7 +293,7 @@ const ICONS: Record<CounterKey, ReactNode> = {
   wycena: <HashIcon />,
   gotowe: <CheckIcon />,
   sprint: <CalendarIcon />,
-  bug: <BugIcon />,
+  wazne: <FlameIcon />,
   koncept: <BulbIcon />,
   foldery: <ParentIcon />,
   odlozone: <LayersIcon />,

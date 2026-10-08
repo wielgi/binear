@@ -64,6 +64,11 @@ describe('ownerOnEnteringSprint', () => {
     expect(ownerOnEnteringSprint(zadanie(5), null, 70, ctx({ departmentsOf: new Map() }))).toBeNull();
   });
 
+  it('bez dzialow IT nikogo nie przepinamy — programista spoza BX_IT_USERS nie moze stracic zadania', () => {
+    expect(ownerOnEnteringSprint(zadanie(4), null, 70, ctx({ itDepartments: [] }))).toBeNull();
+    expect(ownerOnEnteringSprint(zadanie(5), null, 70, ctx({ itDepartments: [] }))).toBeNull();
+  });
+
   it('tylko rejestr → sprint: przeniesienie miedzy sprintami i powrot do rejestru niczego nie zmieniaja', () => {
     expect(ownerOnEnteringSprint(zadanie(5), 69, 70, ctx())).toBeNull();
     expect(ownerOnEnteringSprint(zadanie(5), 70, null, ctx())).toBeNull();

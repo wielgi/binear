@@ -1544,7 +1544,7 @@ input[type='search']::-webkit-search-decoration {
 
 .counter-poza { --c: var(--accent); }
 .counter-czeka { --c: #e879a6; }
-.counter-bug { --c: var(--danger); }
+.counter-wazne { --c: var(--danger); }
 .counter-koncept { --c: #58a6ff; }
 .counter-foldery { --c: #8b949e; }
 .counter-wywiad { --c: var(--accent-orange); }
@@ -2415,12 +2415,6 @@ input[type='search']::-webkit-search-decoration {
   box-shadow: inset 0 0 0 1px var(--border-strong);
   opacity: 0;
   transition: opacity 120ms ease, background 120ms ease;
-  /*
-   * Znosi odstep `gap` wiersza PO checkboxie, zeby ikona priorytetu stala tuz
-   * przy nim. Sam slot 16 px ZOSTAJE — gdyby znikal razem z widocznoscia, cala
-   * zawartosc wiersza przeskakiwalaby w bok przy kazdym najechaniu.
-   */
-  margin-right: calc(var(--s2) * -1);
 }
 
 .row:hover .row-check,
@@ -2533,11 +2527,11 @@ input[type='search']::-webkit-search-decoration {
  * dotad, tylko na wezszym polu.
  */
 /*
- * Znaki bledu przed tytulem — czerwony plomien (wysoki priorytet) i czerwony robak (tag BUG). Ta sama
- * czerwien, bo oba mowia „to jest blad"; ksztalt mowi, skad sie wziely, i podpowiedz tez. Stoja PRZED
- * tytulem, w tej samej linii: na liscie sa flex-itemami obok tytulu, na karcie wchodza w jego tekst.
+ * Znaki zadania waznego — czerwony plomien („Ważne" w Bitriksie) i czerwony robak (tag BUG). Ta sama
+ * czerwien, bo oba mowia „to jest wazne"; ksztalt mowi, skad sie wziely, i podpowiedz tez. Na karcie
+ * tablicy stoja przed tytulem, w jego tekscie; na liscie — w miejscu checkboxa (nizej).
  */
-.bug-badge {
+.important-mark {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
@@ -2546,17 +2540,73 @@ input[type='search']::-webkit-search-decoration {
   vertical-align: -2px;
 }
 
-/* Klikalny znak: ten sam wyglad, tylko bez ramki przycisku; reka i lekkie podswietlenie. */
-.bug-badge-btn {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  cursor: pointer;
+/*
+ * Znaki zadania waznego w wierszu listy — na miejscu checkboxa (ujemny margines cofa je o szerokosc checkboxa
+ * i odstep), wiec nie zajmuja wlasnej kolumny i tytuly dalej zaczynaja sie rowno. Nie lapia klikniec
+ * (klik trafia w checkbox pod spodem); znikaja dopiero przy zaznaczonym wierszu, gdzie stoi ptaszek.
+ */
+.important-slot {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  margin-left: calc(-16px - var(--s2));
+  pointer-events: none;
+  transition: opacity 120ms ease;
 }
 
-.bug-badge-btn:hover {
-  filter: brightness(1.3);
+.row-marked .important-slot {
+  opacity: 0;
+}
+
+/* Pod kursorem znak zostaje, tylko maleje — czerwony checkbox obrysowuje go, zamiast go chowac. */
+.important-slot svg {
+  transition: width 120ms ease, height 120ms ease;
+}
+
+.row:hover .important-slot svg {
+  width: 10px;
+  height: 10px;
+}
+
+.row:hover .important-slot .important-mark + .important-mark svg,
+.row:hover .important-slot .important-mark:has(+ .important-mark) svg {
+  width: 7px;
+  height: 7px;
+}
+
+@media (hover: none) {
+  .important-slot svg {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+.important-slot .important-mark {
+  margin-right: 0;
+}
+
+/* Checkbox, ktory obrysowuje znak zadania waznego pod kursorem, jest w tej samej czerwieni — znak nie znika bez sladu. */
+.row-important .row-check {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+.row-important .row-check:hover {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+
+.row-important .row-check-on {
+  background: var(--danger);
+  box-shadow: none;
+}
+
+/* Oba znaki naraz — mniejsze, jeden nad drugim, zeby zmiescily sie w miejscu checkboxa. */
+.important-slot .important-mark + .important-mark svg,
+.important-slot .important-mark:has(+ .important-mark) svg {
+  width: 11px;
+  height: 11px;
 }
 
 .row-title {
@@ -8263,12 +8313,6 @@ a.mention:hover {
  */
 .plan-pane .row-twisty-spacer {
   display: none;
-}
-
-/* Bez rozpornika ujemny margines checkboxa skleilby go z ikona priorytetu —
-   przywracamy zwykly odstep wiersza. */
-.plan-pane .row-check {
-  margin-right: 0;
 }
 
 /* Bardzo waski panel planowania: data ustepuje, zeby awatar i tytul zmiescily

@@ -2,11 +2,11 @@ import { type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode 
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Epic, Stage, Task } from './bitrix';
 import { Avatar, CommentIcon, LinkIcon, ParentIcon, SubtaskIcon, tagHue } from './icons';
-import { shortDate, isBug, isUnassigned, podzielNaTrafienia, stageOf, sumPoints, withoutBugTag } from './taskView';
+import { shortDate, isImportant, isUnassigned, podzielNaTrafienia, stageOf, sumPoints, withoutBugTag } from './taskView';
 import { colDropId, dragId } from './dnd';
 import { HoverNote } from './HoverNote';
 import { TaskCode } from './TaskCode';
-import { BugBadge } from './BugBadge';
+import { ImportantMarks } from './ImportantMarks';
 
 /**
  * Tablica = kanban sprintu z Bitriksa, nie wlasny wymysl: kolumny to etapy
@@ -383,8 +383,8 @@ function BoardCard({
         </div>
       )}
       <div className="card-title">
-        {/* Blad: czerwony plomien (priorytet) i/albo robak (tag BUG) przed tytulem; tag BUG nie wraca nizej. */}
-        {isBug(t) && <BugBadge task={t} />}
+        {/* Wazne: czerwony plomien („Ważne" w Bitriksie) i/albo robak (tag BUG) przed tytulem; tag BUG nie wraca nizej. */}
+        {isImportant(t) && <ImportantMarks task={t} />}
         {podzielNaTrafienia(t.title || t.rawTitle, fraza).map((k, i) =>
           k.hit ? <mark key={i}>{k.text}</mark> : k.text,
         )}

@@ -149,7 +149,7 @@ import {
   tagsForWidth,
   withoutBugTag,
   shortDate,
-  isBug,
+  isImportant,
   isUnassigned,
   setUnassignedId,
   stageOf,
@@ -177,7 +177,7 @@ import {
   noteMine,
 } from './history';
 import { TaskCode } from './TaskCode';
-import { BugBadge } from './BugBadge';
+import { ImportantMarks } from './ImportantMarks';
 import { zapiszPrzeniesienie, type Dodane } from './planRecent';
 import { ParentBar, parentBarTitle } from './ParentBar';
 import { groupChildren, parentProgress, type ParentProgress } from './parentProgress';
@@ -966,10 +966,12 @@ interface Toast {
  * o same ID zmienionych zadan, wiec 30 s nie jest tu zadnym obciazeniem.
  */
 const POLL_MS = 30_000;
+/** Brak identyfikatorow — stala, zeby tablice w zaleznosciach nie zmienialy sie przy kazdym renderze. */
+const NO_IDS: readonly number[] = [];
+/** Brak osob poza limitem — stala, zeby memo w planowaniu nie liczylo sie od nowa przy kazdym renderze. */
+const NO_CAPACITY_EXCLUDED: readonly number[] = [];
 /** Co ile panel otwartego zadania sprawdza w Bitriksie, czy cos sie w nim nie zmienilo. */
 const PANEL_POLL_MS = 30_000;
-/** Pusta lista identyfikatorow — stala, zeby memo i zaleznosci nie liczyly sie od nowa przy kazdym renderze. */
-const NO_CAPACITY_EXCLUDED: readonly number[] = [];
 
 /* Ile czekamy przed ponowieniem po odmowie z limitu. Wiadro portalu leje sie
    2 zapytania na sekunde, wiec pare sekund wystarcza, zeby bylo z czego brac. */
@@ -1612,9 +1614,10 @@ function useBitrixData() {
   }, []);
 
   const mutate = useCallback(
-    async (id: number, patch: Partial<Task>, run: () => Promise<unknown>, what: string) => {
+    /* `true` tylko po udanym zapisie — wolajacy, ktory robi cos dalej, musi wiedziec, czy jest na czym. */
+    async (id: number, patch: Partial<Task>, run: () => Promise<unknown>, what: string): Promise<boolean> => {
       const before = tasksRef.current.find((t) => t.id === id);
-      if (!before) return;
+      if (!before) return false;
 
       /*
        * NIE PRZENOSIMY zadan, dopoki na ekranie stoi migawka.
@@ -1632,7 +1635,7 @@ function useBitrixData() {
        */
       if (!pobrano.current && ('stageId' in patch || 'sprintId' in patch)) {
         toast('Poczekaj chwilę — lista jeszcze się wczytuje, kolumny mogą być z poprzedniego sprintu.');
-        return;
+        return false;
       }
 
       const rollback = Object.fromEntries(
@@ -1676,6 +1679,7 @@ function useBitrixData() {
           const cur = pinsRef.current.get(id);
           pinsRef.current.set(id, { at: Date.now(), fields: { ...cur?.fields, ...extra } });
         }
+        return true;
       } catch (e) {
         patchTasks(id, rollback);
         /* Zapis sie nie udal — nie ma juz czego bronic przed serwerem. */
@@ -1685,6 +1689,7 @@ function useBitrixData() {
           if (!Object.keys(failed.fields).length) pinsRef.current.delete(id);
         }
         toast(`Nie udało się zapisać (${what}): ${e instanceof Error ? e.message : String(e)}`);
+        return false;
       } finally {
         setPending((p) => {
           const next = new Set(p);
@@ -3317,7 +3322,6 @@ function TaskRow({
   onSelect,
   onMenu,
   onTag,
-  onFlame,
 }: {
   task: Task;
   /** Szukana fraza — do podswietlenia trafienia w tytule. */
@@ -3358,8 +3362,6 @@ function TaskRow({
   onMark: (e: ReactMouseEvent) => void;
   onSelect: (e: ReactMouseEvent) => void;
   onMenu: (anchor: Anchor) => void;
-  /** Klik w plomien przy tytule — filtr po wysokim priorytecie. */
-  onFlame?: () => void;
   onTag: (name: string) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -3393,7 +3395,7 @@ function TaskRow({
       {...listeners}
       className={`row${active ? ' row-active' : ''}${selected ? ' row-selected' : ''}${
         marked ? ' row-marked' : ''
-      }${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
+      }${isImportant(task) ? ' row-important' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
       /* Shift+klik zaznaczylby tekst miedzy wierszami, Ctrl+klik potrafi zaczac
          zaznaczanie w niektorych przegladarkach. Blokujemy TYLKO z modyfikatorem,
          zeby zwykle zaznaczanie i kopiowanie tytulu dzialalo dalej.
@@ -3426,6 +3428,16 @@ function TaskRow({
       >
         {marked ? <CheckIcon /> : null}
       </button>
+      {/*
+        Wazne: czerwony plomien („Ważne" w Bitriksie) i/albo robak (tag BUG); tag BUG nie wraca nizej jako
+        etykieta. Stoi W MIEJSCU checkboxa, ktory i tak jest niewidoczny, dopoki nie najedzie sie na
+        wiersz — osobna kolumna bylaby pusta w wiekszosci wierszy. Pod kursorem znak ustepuje checkboxowi.
+      */}
+      {isImportant(task) && (
+        <span className="important-slot">
+          <ImportantMarks task={task} />
+        </span>
+      )}
 
       {/*
         Wciecie zaczyna sie DOPIERO tutaj, a nie na paddingu wiersza — dzieki temu
@@ -3475,9 +3487,6 @@ function TaskRow({
           {parentRef.label}
         </button>
       )}
-
-      {/* Blad: czerwony plomien (wysoki priorytet) i/albo robak (tag BUG); tag BUG nie wraca nizej jako etykieta. */}
-      {isBug(task) && <BugBadge task={task} onFlame={onFlame} onBug={() => onTag('BUG')} />}
 
       <span className="row-title">
         {podzielNaTrafienia(task.title || task.rawTitle, fraza).map((k, i) =>
@@ -8658,21 +8667,6 @@ export default function App() {
     [],
   );
 
-  /** Klik w plomien: filtr „Priorytet: wysoki"; ponowny klik go zdejmuje. */
-  const toggleFlame = useCallback(
-    () =>
-      setFilters((f) => {
-        const cond = f.find((c) => c.field === 'priority' && c.op !== 'isNot');
-        if (!cond) {
-          return [...f, { id: newCondId(), field: 'priority' as FilterField, op: 'anyOf' as FilterOp, values: ['2'] }];
-        }
-        const values = cond.values.includes('2') ? cond.values.filter((v) => v !== '2') : [...cond.values, '2'];
-        if (!values.length) return f.filter((c) => c !== cond);
-        return f.map((c) => (c === cond ? { ...c, values } : c));
-      }),
-    [],
-  );
-
   /** Czy tag jest gdziekolwiek dodatnio wybrany — do „✓" w palecie. */
   const tagActive = useCallback(
     (tag: string) => filters.some((c) => c.field === 'tag' && c.op !== 'noneOf' && c.values.includes(tag)),
@@ -10505,9 +10499,9 @@ export default function App() {
       const itCtx: ItContext | null = directory.length
         ? {
             me,
-            itUsers: config?.itUsers ?? NO_CAPACITY_EXCLUDED,
-            itDepartments: config?.itDepartments ?? NO_CAPACITY_EXCLUDED,
-            kierownicy: config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED,
+            itUsers: config?.itUsers ?? NO_IDS,
+            itDepartments: config?.itDepartments ?? NO_IDS,
+            kierownicy: config?.capacityExcludeIds ?? NO_IDS,
             unassignedId: UNASSIGNED_ID,
             departmentsOf: new Map(directory.map((e) => [e.id, e.departments])),
           }
@@ -10518,35 +10512,34 @@ export default function App() {
       const zapis = zapiszPrzeniesienie(planDodane, list, sprintId !== null, planDodaneNext.current);
       planDodaneNext.current = zapis.nastepny;
       setPlanDodane(zapis.dodane);
+      /*
+       * Najpierw sprint, potem osoba — dwa osobne zapisy. Gdy zmiana osoby sie nie uda, zadanie
+       * JEST juz w sprincie, wiec cofamy tylko osobe, a nie cale przeniesienie. Licznik w komunikacie
+       * liczy tylko udane zmiany osoby.
+       */
       return Promise.all(
-        list.map((id) => {
+        list.map(async (id) => {
           const t = tasks.find((x) => x.id === id);
           const nowy = itCtx && t ? ownerOnEnteringSprint(t, t.sprintId, sprintId, itCtx) : null;
-          if (nowy === null) {
-            return mutate(
-              id,
-              { sprintId, stageId: stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null },
-              /* Do sprintu — przez kolumne wejsciowa (karta + numer IT-NNN); do rejestru — sama przynaleznosc. */
-              () => (sprintId === null ? moveToSprint(id, backlogId ?? 0) : moveToSprintViaEntry(id, sprintId)),
-              'sprint',
-            );
-          }
-          przepiete += 1;
-          return mutate(
+          const wSprincie = await mutate(
+            id,
+            { sprintId, stageId: stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null },
+            /* Do sprintu — przez kolumne wejsciowa (karta + numer IT-NNN); do rejestru — sama przynaleznosc. */
+            () => (sprintId === null ? moveToSprint(id, backlogId ?? 0) : moveToSprintViaEntry(id, sprintId)),
+            'sprint',
+          );
+          if (!wSprincie || nowy === null) return;
+          const zmieniony = await mutate(
             id,
             {
-              sprintId,
-              stageId: stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null,
               responsibleId: nowy,
               responsibleName: zaslepka?.name ?? UNASSIGNED_LABEL,
-              responsiblePhoto: null,
+              responsiblePhoto: zaslepka?.photo ?? null,
             },
-            async () => {
-              await (sprintId === null ? moveToSprint(id, backlogId ?? 0) : moveToSprintViaEntry(id, sprintId));
-              await updateTask(id, { RESPONSIBLE_ID: nowy });
-            },
-            'sprint i osobę',
+            () => updateTask(id, { RESPONSIBLE_ID: nowy }),
+            'osobę',
           );
+          if (zmieniony) przepiete += 1;
         }),
       ).then(() => {
         if (przepiete > 0) {
@@ -11849,7 +11842,6 @@ export default function App() {
                 onSelect={(e) => clickRow(e, t.id)}
                 onMenu={(anchor) => setMenu({ taskId: t.id, targets: targetsFor(t.id), anchor })}
                 onTag={(name) => toggleTag(name)}
-                onFlame={toggleFlame}
               />
             )}
           />
@@ -12033,8 +12025,7 @@ export default function App() {
                         setMenu({ taskId: t.id, targets: targetsFor(t.id), anchor });
                       }}
                       onTag={(name) => toggleTag(name)}
-                      onFlame={toggleFlame}
-                    />
+                          />
                           ))}
                       </DropZone>
                     );
