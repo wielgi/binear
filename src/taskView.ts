@@ -153,6 +153,21 @@ export function tagsForWidth(width: number): number {
   return 0;
 }
 
+/**
+ * Tagi wystepujace w zadaniach, z liczba uzyc, ALFABETYCZNIE (po polsku, bez wzgledu na wielkosc
+ * liter). Do filtra po tagach, palety komend i okna edycji tagow — tam szuka sie nazwy, wiec
+ * ustawienie wedlug liczby uzyc (najpopularniejsze na gorze) kazalo czytac cala liste. Liczba
+ * zostaje przy kazdym tagu jako podpowiedz.
+ */
+export function tagCounts(tasks: readonly { tags: string[] }[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const t of tasks) for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  // `numeric`: liczby w nazwie po kolei (ZWROT-3, ZWROT-6, ZWROT-12), a nie znak po znaku (ZWROT-12 przed ZWROT-3).
+  return [...counts.entries()].sort(
+    (a, b) => a[0].localeCompare(b[0], 'pl', { sensitivity: 'base', numeric: true }) || a[0].localeCompare(b[0]),
+  );
+}
+
 /*
  * Zadanie WAZNE ma na listach czerwone znaki (patrz `ImportantMarks`), po jednym na zrodlo:
  *  - plomien — „Ważne" w Bitriksie (priorytet `2`, ikona plomienia),
