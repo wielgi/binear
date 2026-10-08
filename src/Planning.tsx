@@ -30,7 +30,7 @@ import { CLOSED_STATUSES, REVIEW_STATUSES, type Sprint, type Task } from './bitr
 import { planDropId } from './dnd';
 import { podzielNaZespolIKierownika, pozaLimitem, sumaDoLimitu, sumaKierownika } from './planCapacity';
 import { PLAN_SORT_DOMYSLNY } from './planSort';
-import { sprintDeadline } from './sprintClock';
+import { sprintDeadline, sprintWorkEnd } from './sprintClock';
 import { teamHoursBetween, type TeamConfig } from './team';
 import { BarsIcon, CheckIcon, ChevronIcon, GripIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
@@ -860,7 +860,7 @@ export function Planning({
     if (!cel || !end || team.members.length === 0) return null;
     const startMs = cel.dateStart ? Date.parse(cel.dateStart) : NaN;
     const from = new Date(Math.max(Date.now(), Number.isNaN(startMs) ? 0 : startMs));
-    const h = teamHoursBetween(team, from, end);
+    const h = teamHoursBetween(team, from, sprintWorkEnd(end));
     return h > 0 ? Math.round(h) : null;
   }, [team, nextSprint, activeSprint]);
   const limit = moce ?? teamLimit ?? lastDone?.points ?? 0;

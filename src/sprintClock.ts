@@ -41,6 +41,16 @@ export function sprintDeadline(dateEnd: string | null): Date | null {
   return new Date(nearest.getFullYear(), nearest.getMonth(), nearest.getDate(), SPRINT_END_HOUR, 0, 0, 0);
 }
 
+/**
+ * Koniec pracy SPRINTU do liczenia jego mocy: poczatek poniedzialku, w ktorym sprint sie zamyka.
+ * `sprintDeadline` wypada o 9:00 tego poniedzialku, wiec `teamHoursBetween` doliczalby jeszcze
+ * godzine 8–9 (etaty × 1 h) — dobre dla odliczania „ile zostalo", ale nie dla mocy calego tygodnia
+ * (5 dni × 8 h): tydzien 3,5 etatu to 140 h, a nie 143,5 h.
+ */
+export function sprintWorkEnd(deadline: Date): Date {
+  return new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
+}
+
 /** Godziny robocze (pn–pt, 8–16) w przedziale od–do; ułamek, gdy „teraz" wypada w środku godziny. */
 export function workHoursBetween(from: Date, to: Date): number {
   if (to.getTime() <= from.getTime()) return 0;
