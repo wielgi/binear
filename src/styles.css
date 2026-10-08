@@ -8414,103 +8414,6 @@ a.mention:hover {
 }
 
 .parent-bar-seg {
-
-/* Podsumowanie sprintu: kafelki stanow, pasek calosci i dzialy z tematami. */
-.sum {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-  padding: var(--s4);
-  max-width: 1100px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.sum-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s3);
-}
-
-.sum-head h2 {
-  margin: 0;
-}
-
-.sum-dates,
-.sum-note,
-.sum-foot,
-.sum-empty {
-  color: var(--fg-muted);
-  font-size: var(--t-small);
-}
-
-.sum-note,
-.sum-foot {
-  margin: 0;
-}
-
-.sum-note b {
-  color: var(--fg);
-}
-
-.sum-empty {
-  padding: var(--s4);
-}
-
-.sum-tiles {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--s2);
-}
-
-.sum-tile {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-  padding: var(--s3);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--c, var(--border-strong));
-  border-radius: var(--radius);
-}
-
-.sum-tile-n {
-  font-size: var(--t-large);
-  font-weight: var(--w-semibold);
-  font-variant-numeric: tabular-nums;
-}
-
-.sum-tile-l {
-  font-size: var(--t-mini);
-  color: var(--fg-muted);
-}
-
-.sum-tile-l small {
-  display: block;
-}
-
-.sum-tile.is-wdrozone { --c: var(--accent-green); }
-.sum-tile.is-pr { --c: var(--accent); }
-.sum-tile.is-wtoku { --c: var(--accent-amber); }
-.sum-tile.is-czeka { --c: color-mix(in srgb, var(--fg) 40%, transparent); }
-.sum-tile.is-wstrzymane { --c: var(--accent-orange); }
-
-.sum-bar {
-  display: flex;
-  gap: 1px;
-  height: 8px;
-  min-width: 80px;
-  overflow: hidden;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-}
-
-.sum-bar-thick {
-  height: 14px;
-  border-radius: 6px;
-}
-
-.sum-seg {
   flex-basis: 0;
   min-width: 2px;
 }
@@ -8642,6 +8545,107 @@ a.mention:hover {
   margin: 0;
   color: var(--fg-muted);
   font-size: var(--t-mini);
+}
+
+/* Podsumowanie sprintu: kafelki stanow, pasek calosci i dzialy z tematami. */
+.sum {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.sum-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+}
+
+.sum-head h2 {
+  margin: 0;
+}
+
+.sum-dates,
+.sum-note,
+.sum-foot,
+.sum-empty {
+  color: var(--fg-muted);
+  font-size: var(--t-small);
+}
+
+.sum-note,
+.sum-foot {
+  margin: 0;
+}
+
+.sum-note b {
+  color: var(--fg);
+}
+
+.sum-empty {
+  padding: var(--s4);
+}
+
+.sum-tiles {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--s2);
+}
+
+.sum-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--c, var(--border-strong));
+  border-radius: var(--radius);
+}
+
+.sum-tile-n {
+  font-size: var(--t-large);
+  font-weight: var(--w-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-tile-l {
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+.sum-tile-l small {
+  display: block;
+}
+
+.sum-tile.is-wdrozone { --c: var(--accent-green); }
+.sum-tile.is-pr { --c: var(--accent); }
+.sum-tile.is-wtoku { --c: var(--accent-amber); }
+.sum-tile.is-czeka { --c: color-mix(in srgb, var(--fg) 40%, transparent); }
+.sum-tile.is-wstrzymane { --c: var(--accent-orange); }
+
+.sum-bar {
+  display: flex;
+  gap: 1px;
+  height: 8px;
+  min-width: 80px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.sum-bar-thick {
+  height: 14px;
+  border-radius: 6px;
+}
+
+.sum-seg {
+  flex-basis: 0;
+  min-width: 2px;
+}
 
 .sum-seg.is-wdrozone { background: var(--accent-green); }
 .sum-seg.is-pr { background: var(--accent); }
