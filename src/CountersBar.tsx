@@ -35,6 +35,7 @@ import {
   HashIcon,
   HistoryIcon,
   LayersIcon,
+  ParentIcon,
   ListIcon,
   PenIcon,
 } from './icons';
@@ -294,6 +295,7 @@ const ICONS: Record<CounterKey, ReactNode> = {
   sprint: <CalendarIcon />,
   wazne: <FlameIcon />,
   koncept: <BulbIcon />,
+  foldery: <ParentIcon />,
   odlozone: <LayersIcon />,
 };
 
@@ -372,8 +374,8 @@ export function CountersBar({
 
   /*
    * Trzy grupy z podpisami, zeby bylo widac, co sie z czym sumuje:
-   *  - ROZBICIE: „Poza sprintem" i stany, ktore sie na nie skladaja (`inSum`).
-   *    Podpis grupy przechodzi w linie siegajaca do konca tych kafelkow,
+   *  - ROZBICIE: stany, ktore skladaja sie na „Poza sprintem" (`inSum`); sama suma stoi w podpisie
+   *    grupy (`totalCap`). Podpis przechodzi w linie siegajaca do konca tych kafelkow,
    *  - SPRINT: kafelek sprintu, osobna miara,
    *  - POZA SUMA: odlozone (status 6 nie wchodzi do „Poza sprintem") i cechy
    *    (`separate`, np. bledy — bug jest tez w ktoryms ze stanow).
@@ -425,15 +427,41 @@ Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
     </span>
   );
 
+  /*
+   * „Poza sprintem" stoi W PODPISIE grupy, a nie jako osobny kafelek: to suma kafelkow pod nim, wiec
+   * podpis „Rozbicie „Poza sprintem” · 164" mowi to samo, a zwolnione miejsce mieszci kafelek
+   * folderow w jednym rzedzie. Klikniecie dziala jak na kafelku — filtruje liste.
+   */
+  const totalCap = (d: CounterDef) => {
+    const v = values[d.key];
+    const isPending = pending.has(d.key);
+    const on = active === d.key;
+    return (
+      <button
+        className={`counters-cap counters-cap-total${on ? ' counters-cap-on' : ''}`}
+        aria-pressed={on}
+        title={on ? `${d.hint}
+
+Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
+        onClick={() => onPick(on ? null : d.key)}
+      >
+        <span className="counters-cap-text">Rozbicie „{d.label}”</span>
+        <span className={`counters-cap-count${isPending ? ' counter-pending' : ''}`}>
+          {isPending ? '…' : v.count}
+        </span>
+        {!isPending && prev && (
+          <Delta now={v.count} before={prev.snap[d.key]} day={prev.day} riseIsBad={d.riseIsBad} />
+        )}
+      </button>
+    );
+  };
+
   return (
     <div className="counters" role="toolbar" aria-label="Liczniki zadań" ref={rowRef}>
       {(total || parts.length > 0) && (
-        <div className="counters-group counters-group-sum" style={nStyle((total ? 1 : 0) + parts.length)}>
-          {cap('Rozbicie „Poza sprintem”')}
-          <div className="counters-group-row">
-            {total && tile(total)}
-            {parts.map((d) => tile(d))}
-          </div>
+        <div className="counters-group counters-group-sum" style={nStyle(parts.length)}>
+          {total ? totalCap(total) : cap('Rozbicie „Poza sprintem”')}
+          <div className="counters-group-row">{parts.map((d) => tile(d))}</div>
         </div>
       )}
       {sprint.length > 0 && (

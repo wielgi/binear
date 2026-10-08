@@ -190,6 +190,7 @@ import {
   COUNTERS,
   counterDef,
   countAll,
+  foldersOf,
   paybackRank,
   type CounterCtx,
   type CounterKey,
@@ -8949,6 +8950,8 @@ export default function App() {
     groupId,
     enabled: metaReady,
   });
+  /* Foldery liczymy z CALEJ listy — dziecko moze lezec w innym sprincie niz rodzic. */
+  const folders = useMemo(() => foldersOf(tasks, CLOSED_STATUSES), [tasks]);
   /* Fakty z czatow: rozpoznania i uzasadnienia STRATEGII — nie widac ich w tagach. */
   const chatFacts = useChatFacts(tasks, {
     closed: CLOSED_STATUSES,
@@ -8957,8 +8960,8 @@ export default function App() {
     enabled: metaReady,
   });
   const counterCtx = useMemo<CounterCtx>(
-    () => ({ sprintId, closed: CLOSED_STATUSES, answered, chat: chatFacts }),
-    [sprintId, answered, chatFacts],
+    () => ({ sprintId, closed: CLOSED_STATUSES, answered, chat: chatFacts, folders }),
+    [sprintId, answered, chatFacts, folders],
   );
   const counterDefs = useMemo(
     () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),

@@ -1484,6 +1484,34 @@ input[type='search']::-webkit-search-decoration {
   background: var(--border-strong);
 }
 
+/* Podpis grupy rozbicia jest przyciskiem z suma „Poza sprintem" (patrz `totalCap` w CountersBar). */
+.counters-cap-total {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.counters-cap-count {
+  font-size: var(--t-mini);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.counters-cap-total .counter-delta {
+  flex: 0 0 auto;
+}
+
+.counters-cap-total:hover .counters-cap-text,
+.counters-cap-on .counters-cap-text,
+.counters-cap-on .counters-cap-count {
+  color: var(--accent);
+}
+
 .counters-cap-text {
   font-size: var(--t-micro);
   font-weight: var(--w-medium);
@@ -1537,6 +1565,7 @@ input[type='search']::-webkit-search-decoration {
 .counter-czeka { --c: #e879a6; }
 .counter-wazne { --c: var(--danger); }
 .counter-koncept { --c: #58a6ff; }
+.counter-foldery { --c: #8b949e; }
 .counter-wywiad { --c: var(--accent-orange); }
 .counter-odpowiedzi { --c: var(--accent-amber); }
 .counter-wycena { --c: #a371f7; }
