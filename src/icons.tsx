@@ -577,6 +577,17 @@ export function CalendarIcon() {
 }
 
 /** Strzalka odpowiedzi — zawijajaca w lewo, jak w poczcie. */
+/** Usmiech — dodanie reakcji pod komentarzem. */
+export function SmileIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M5.8 9.4a2.8 2.8 0 0 0 4.4 0" />
+      <path d="M6.2 6.4h.01M9.8 6.4h.01" />
+    </svg>
+  );
+}
+
 export function ReplyIcon() {
   return (
     <svg {...GLYPH} aria-hidden>

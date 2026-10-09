@@ -27,6 +27,7 @@ import {
   editComment,
   fetchComments,
   fetchOlderComments,
+  setReaction,
   fetchActiveSprint,
   fetchSprints,
   fetchBacklogId,
@@ -134,6 +135,7 @@ import {
   CloseIcon,
   CommentIcon,
   ReplyIcon,
+  SmileIcon,
   ExternalIcon,
   ElsewhereIcon,
   TrashIcon,
@@ -182,6 +184,7 @@ import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
+import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity } from './sprintClock';
@@ -4551,6 +4554,89 @@ function Comments({
    * i z podgladem tresci, zeby bylo widac, KTORY komentarz znika (w watku stoi
    * ich kilkanascie, a ikony sa male i blisko siebie).
    */
+  /*
+   * REAKCJA: od razu na ekranie, w tle do Bitriksa. Nieudany zapis cofamy tym samym przelacznikiem
+   * (na AKTUALNYM stanie, nie na zapamietanym — w miedzyczasie mogla dojsc odswiezona lista).
+   * `localSeq` jak przy edycji: ciche odswiezenie zaczete przed kliknieciem nie moze go cofnac.
+   */
+  const [otwarta, setReakcjaDla] = useState<{ key: string; corner: string; all: boolean } | null>(null);
+  /* Ile razy wybrano ktora reakcje — na tym komputerze; z tego rzadek „najczesciej uzywanych". */
+  const [uzycia, setUzycia] = useState<Record<string, number>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(REACTIONS_USED_KEY) ?? '{}') ?? {};
+    } catch {
+      return {};
+    }
+  });
+  const przelaczReakcje = (c: Comment, code: string) => {
+    if (me === null || c.source !== 'chat') return;
+    const on = !(c.reactions ?? []).some((r) => r.code === code && r.users.includes(me));
+    const zmien = () => {
+      localSeq.current++;
+      setComments((prev) => {
+        if (!prev) return prev;
+        const next = prev.map((x) =>
+          x.source === c.source && x.id === c.id
+            ? { ...x, reactions: toggleReaction(x.reactions ?? [], code, me) }
+            : x,
+        );
+        setCachedComments(taskId, next);
+        return next;
+      });
+    };
+    zmien();
+    if (on) {
+      setUzycia((u) => {
+        const next = { ...u, [code]: (u[code] ?? 0) + 1 };
+        try {
+          localStorage.setItem(REACTIONS_USED_KEY, JSON.stringify(next));
+        } catch {
+          /* bez pamieci przegladarki rzadek po prostu zostaje domyslny */
+        }
+        return next;
+      });
+    }
+    setReaction(c.id, code, on, taskId).catch((e) => {
+      zmien();
+      onError(`Nie udało się zapisać reakcji: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  };
+  /*
+   * Rzadek reakcji otwiera sie juz po NAJECHANIU na usmiech; zamyka chwile po zjechaniu z usmiechu
+   * i z rzadka — zwloka przeprowadza kursor przez szczeline miedzy nimi. Klik dziala dalej (dotyk).
+   */
+  const zamknijReakcje = useRef<number | undefined>(undefined);
+  const najedzReakcje = (key: string, el: HTMLElement) => {
+    window.clearTimeout(zamknijReakcje.current);
+    const corner = (el.closest('.comment') as HTMLElement | null)?.dataset.near ?? 'br';
+    setReakcjaDla((o) => (o?.key === key ? o : { key, corner, all: false }));
+  };
+  const zjedzReakcje = () => {
+    window.clearTimeout(zamknijReakcje.current);
+    zamknijReakcje.current = window.setTimeout(() => setReakcjaDla(null), 250);
+  };
+  useEffect(() => () => window.clearTimeout(zamknijReakcje.current), []);
+  /* Okienko wyboru reakcji zamyka klik obok i Escape. */
+  useEffect(() => {
+    if (otwarta === null) return;
+    const zamknij = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
+      if (e instanceof MouseEvent && (e.target as Element | null)?.closest('.reaction-corner')) return;
+      setReakcjaDla(null);
+    };
+    document.addEventListener('mousedown', zamknij);
+    document.addEventListener('keydown', zamknij);
+    return () => {
+      document.removeEventListener('mousedown', zamknij);
+      document.removeEventListener('keydown', zamknij);
+    };
+  }, [otwarta]);
+  /* Imiona do dymku nad reakcja — z osob w filtrze i z autorow tego watku. */
+  const imie = (id: number): string =>
+    people.find((p) => p.id === id)?.name ??
+    comments?.find((x) => x.authorId === id)?.authorName ??
+    `#${id}`;
+
   const removeComment = (c: Comment) => {
     const podglad = plainText(splitQuote(c.text).rest || c.text).slice(0, 80);
     onConfirm({
@@ -4804,6 +4890,18 @@ function Comments({
         <article
           className={`comment${flash === c.id ? ' comment-flash' : ''}`}
           data-comment={c.id}
+          /*
+           * Usmiech reakcji stoi w tym ROGU, ktory jest najblizej kursora. Atrybut zamiast stanu:
+           * ruch myszy nie ma przerysowywac watku, wystarczy, ze arkusz przestawi usmiech.
+           * Otwarte okienko zostaje w rogu, w ktorym je otwarto (`data-corner`).
+           */
+          onMouseMove={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const rog = `${e.clientY - r.top < r.bottom - e.clientY ? 't' : 'b'}${
+              e.clientX - r.left < r.right - e.clientX ? 'l' : 'r'
+            }`;
+            if (e.currentTarget.dataset.near !== rog) e.currentTarget.dataset.near = rog;
+          }}
         >
           {/*
             Cytat NAD naglowkiem i w JEDNEJ linii — tak pokazuja odpowiedzi
@@ -5042,6 +5140,85 @@ function Comments({
                     {f.name}
                   </a>
                 ),
+              )}
+            </div>
+          )}
+          {/*
+            REAKCJE pod komentarzem: emoji z liczba, dymek mowi kto. Wlasna jest podswietlona, a klik
+            ja daje albo zdejmuje — tak jak w Bitriksie. Rzad jest tylko wtedy, gdy reakcje sa.
+          */}
+          {(c.reactions ?? []).length > 0 && (
+            <div className="comment-reactions">
+              {(c.reactions ?? []).map((r) => {
+                const moja = me !== null && r.users.includes(me);
+                return (
+                  <button
+                    key={r.code}
+                    className={`reaction${moja ? ' reaction-mine' : ''}`}
+                    title={r.users.map(imie).join(', ')}
+                    aria-pressed={moja}
+                    disabled={me === null}
+                    onClick={() => przelaczReakcje(c, r.code)}
+                  >
+                    <span className="reaction-emoji">{emojiOf(r.code)}</span>
+                    <span className="reaction-count">{r.users.length}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {/*
+            DODANIE REAKCJI: maly usmiech w tym rogu komentarza, ktory jest najblizej kursora
+            (`data-near` na <article>). Najechanie na niego pokazuje rzadek najczesciej uzywanych
+            emoji i „+", ktory dopiero rozwija wszystkie. Tylko czat — forum reakcji nie zna.
+          */}
+          {c.source === 'chat' && me !== null && (
+            <div
+              className="reaction-corner"
+              data-corner={otwarta?.key === key ? otwarta.corner : undefined}
+              onMouseEnter={(e) => najedzReakcje(key, e.currentTarget)}
+              onMouseLeave={zjedzReakcje}
+            >
+              <button
+                className={`reaction-open${otwarta?.key === key ? ' reaction-open-on' : ''}`}
+                aria-label="Dodaj reakcję do tego komentarza"
+                aria-expanded={otwarta?.key === key}
+                /* Klik tylko OTWIERA — przy myszy rzadek i tak juz stoi po najechaniu, a zamykanie
+                   kliknieciem gasiloby go pod kursorem. Zamyka zjechanie, klik obok i Escape. */
+                onClick={(e) => najedzReakcje(key, e.currentTarget)}
+              >
+                <SmileIcon />
+              </button>
+              {otwarta?.key === key && (
+                <div className="reaction-picker" role="menu" aria-label="Wybierz reakcję">
+                  {(otwarta.all ? REACTIONS : najczesciej(uzycia)).map((r) => (
+                    <button
+                      key={r.code}
+                      role="menuitem"
+                      className={
+                        (c.reactions ?? []).some((x) => x.code === r.code && x.users.includes(me))
+                          ? 'reaction-pick-mine'
+                          : undefined
+                      }
+                      onClick={() => {
+                        przelaczReakcje(c, r.code);
+                        setReakcjaDla(null);
+                      }}
+                    >
+                      {r.emoji}
+                    </button>
+                  ))}
+                  {!otwarta.all && (
+                    <button
+                      className="reaction-more"
+                      aria-label="Wszystkie reakcje"
+                      title="Wszystkie reakcje"
+                      onClick={() => setReakcjaDla({ ...otwarta, all: true })}
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}

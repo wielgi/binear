@@ -56,6 +56,15 @@ const ALLOWED = new Set([
   'task.commentitem.delete',
   'im.v2.Chat.Message.delete',
   /*
+   * Reakcje na komentarze. `im.dialog.messages.get` zna tylko „lajki" bez rodzaju, wiec rodzaj
+   * czytamy z v2 (`list` — najnowsza strona, `tail` — starsze), a dajemy/zdejmujemy przez
+   * `Reaction.add` / `Reaction.delete`. Patrz `setReaction` w src/bitrix.ts.
+   */
+  'im.v2.Chat.Message.list',
+  'im.v2.Chat.Message.tail',
+  'im.v2.Chat.Message.Reaction.add',
+  'im.v2.Chat.Message.Reaction.delete',
+  /*
    * Zalacznik komentarza (wklejony zrzut ekranu). Trzy kroki, bo Bitrix nie ma
    * na to jednego wywolania — patrz `addCommentWithFiles` w src/bitrix.ts.
    */
