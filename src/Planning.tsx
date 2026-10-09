@@ -29,6 +29,8 @@ import { useDroppable } from '@dnd-kit/core';
 
 import { CLOSED_STATUSES, REVIEW_STATUSES, type Sprint, type Task } from './bitrix';
 import { planDropId } from './dnd';
+import { podzielNaZespolIKierownika, pozaLimitem, sumaDoLimitu, sumaKierownika } from './planCapacity';
+import { PLAN_SORT_DOMYSLNY } from './planSort';
 import { BarsIcon, CheckIcon, ChevronIcon, GripIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { tagsForWidth } from './taskView';
@@ -286,21 +288,20 @@ function Pasek({
   );
 }
 
-/** Kolejnosc waznosci: priorytet Bitriksa, tag „Wysoki", story pointy malejaco. */
+/** Kolejnosc waznosci: STRATEGIA, priorytet Bitriksa, tag „Wysoki", okres zwrotu, story pointy malejaco. */
 /** Kursor blizej gory kolumny niz tyle = na naglowku sprintu aktywnego, czyli zwin go. */
 const FOLD_PX = 56;
 /** Tyle trzeba przesunac mysz, zeby wcisniecie uchwytu stalo sie przeciaganiem. */
 const DRAG_PX = 4;
 
-export const SORT_DOMYSLNY: { by: string; dir: 'asc' | 'desc' }[] = [
-  { by: 'priority', dir: 'asc' },
-  { by: 'wysoki', dir: 'asc' },
-  { by: 'sp', dir: 'desc' },
-];
+export const SORT_DOMYSLNY: { by: string; dir: 'asc' | 'desc' }[] = PLAN_SORT_DOMYSLNY;
 
 const jestDomyslne = (sort: { by: string; dir: string }[]) =>
   sort.length === SORT_DOMYSLNY.length &&
   sort.every((l, i) => l.by === SORT_DOMYSLNY[i].by && l.dir === SORT_DOMYSLNY[i].dir);
+
+/** Stala, nie nowa tablica przy kazdym renderze — inaczej memo zalezne od niej liczyloby sie od nowa. */
+const BEZ_KIEROWNIKOW: readonly number[] = [];
 
 /** Panel: naglowek z liczbami, pasek osob i lista wierszy. Jest celem upuszczania. */
 function Pane({
@@ -311,10 +312,12 @@ function Pane({
   people,
   renderRow,
   ponad,
+  nowe,
   collapsible = false,
   compare,
   carry,
   wMoce,
+  kierownicy = BEZ_KIEROWNIKOW,
   grow,
   zwiniety = false,
   onZwin,
@@ -338,6 +341,11 @@ function Pane({
    * w sprintach pytanie nie ma sensu, bo one sa juz policzone.
    */
   ponad?: (t: Task) => boolean;
+  /**
+   * Czy zadanie zostalo przeciagniete do tego sprintu w tej sesji. Takie leza na gorze panelu
+   * (`ostatnioDodaneNaGorze`), wiec pod nimi stoi kreska — nizej dziala juz wybrane sortowanie.
+   */
+  nowe?: (t: Task) => boolean;
   collapsible?: boolean;
   /** Odniesienie: ile SP zespol NAPRAWDE dowiozl ostatnio. */
   compare?: { label: string; points: number; wlasne?: boolean };
@@ -364,6 +372,12 @@ function Pane({
    * podnosilo obciazenie sprintu, choc nic sie w nim nie zmienilo.
    */
   wMoce?: (t: Task) => boolean;
+  /**
+   * Osoby spoza limitu zespolu (kierownik) — ich zadania NIE zajmuja mocy: nie wchodza do
+   * pasków „zaplanowane" i „z przeniesieniem" ani do licznika „ponad moce". Pokazujemy je osobno,
+   * pod paskami zespolu, i w naglowku jako „SP kierownika".
+   */
+  kierownicy?: readonly number[];
   /** Udzial w wysokosci kolumny (0-1). Brak = panel dzieli sie po rowno. */
   /** Ulamek miejsca. Tekst (`var(--plan-cols)`) pozwala ciagnac uchwyt bez renderu. */
   grow?: number | string;
@@ -381,17 +395,50 @@ function Pane({
    */
   /* Zadania liczone do mocy — to z nich ida oba paski, a nie z tego, co widac. */
   const doMocy = useMemo(() => (wMoce ? tasks.filter(wMoce) : tasks), [tasks, wMoce]);
+  /*
+   * ZESPOL I KIEROWNIK osobno. Do mocy zespolu (paski, „ponad moce") liczy sie tylko zespol —
+   * zadania kierownika nie zjadaja limitu, wiec nie mozna ich wrzucac do tych samych sum. Kierownik
+   * ma wlasny pasek bez odniesienia i wlasna liczbe w naglowku.
+   */
+  const maKierownika = kierownicy.length > 0;
+  const { zespol: doMocyZespolu, kierownik: doMocyKierownika } = useMemo(
+    () => podzielNaZespolIKierownika(doMocy, kierownicy),
+    [doMocy, kierownicy],
+  );
+  const { zespol: przeniesioneZespolu, kierownik: przeniesioneKierownika } = useMemo(
+    () => podzielNaZespolIKierownika(carry?.tasks ?? [], kierownicy),
+    [carry, kierownicy],
+  );
   const statsMoc = useMemo(
-    () => (wMoce ? statsOf(doMocy, people) : stats),
-    [wMoce, doMocy, people, stats],
+    () => (wMoce || maKierownika ? statsOf(doMocyZespolu, people) : stats),
+    [wMoce, maKierownika, doMocyZespolu, people, stats],
   );
   const carryStats = useMemo(
     () =>
-      carry && carry.tasks.length > 0
-        ? statsOf([...doMocy, ...carry.tasks], people, new Set(carry.tasks.map((t) => t.id)))
+      przeniesioneZespolu.length > 0
+        ? statsOf(
+            [...doMocyZespolu, ...przeniesioneZespolu],
+            people,
+            new Set(przeniesioneZespolu.map((t) => t.id)),
+          )
         : null,
-    [carry, doMocy, people],
+    [przeniesioneZespolu, doMocyZespolu, people],
   );
+  /* Kierownik: wybrane teraz + jego przeniesienie (kreskowane) — bez odniesienia do limitu. */
+  const kierownikStats = useMemo(
+    () =>
+      doMocyKierownika.length + przeniesioneKierownika.length > 0
+        ? statsOf(
+            [...doMocyKierownika, ...przeniesioneKierownika],
+            people,
+            new Set(przeniesioneKierownika.map((t) => t.id)),
+          )
+        : null,
+    [doMocyKierownika, przeniesioneKierownika, people],
+  );
+  /* Naglowek opisuje to, co panel POKAZUJE, wiec dzieli wszystkie wyswietlane zadania. */
+  const spZespolu = sumaDoLimitu(tasks, kierownicy);
+  const spKierownika = sumaKierownika(tasks, kierownicy);
   const { setNodeRef, isOver, active } = useDroppable({ id: planDropId(sprintId) });
 
   /* Szerokosc TEGO panelu — zmienia sie przy ciagnieciu uchwytu i przy otwarciu
@@ -481,9 +528,20 @@ function Pane({
               </span>
             )}
           </span>
-          <span className="plan-num">
-            <b>{stats.points}</b> SP
-          </span>
+          {maKierownika && spKierownika > 0 ? (
+            <>
+              <span className="plan-num" title="Zadania zespołu — to one zajmują moce">
+                <b>{spZespolu}</b> SP zespołu
+              </span>
+              <span className="plan-num plan-num-kierownik" title="Zadania kierownika — poza limitem zespołu">
+                <b>{spKierownika}</b> SP kierownika
+              </span>
+            </>
+          ) : (
+            <span className="plan-num">
+              <b>{stats.points}</b> SP
+            </span>
+          )}
           {compare && compare.points > 0 && statsMoc.points > compare.points && (
             <span className="plan-num plan-over" title={`${compare.label}: ${compare.points} SP`}>
               +{statsMoc.points - compare.points} SP ponad {compare.wlasne ? 'moce' : 'ostatni sprint'}
@@ -500,23 +558,46 @@ function Pane({
       {open && (
         <div className="plan-liczniki">
           <div className="plan-wariant">
-            {carryStats && <span className="plan-wariant-podpis">Zaplanowane</span>}
+            {(carryStats || maKierownika) && (
+              <span className="plan-wariant-podpis">
+                {maKierownika ? (carryStats ? 'Zespół · zaplanowane' : 'Zespół') : 'Zaplanowane'}
+              </span>
+            )}
             <Pasek
               stats={statsMoc}
               limit={compare?.points ?? 0}
-              zawsze={Boolean(carryStats) || (compare?.points ?? 0) > 0}
+              zawsze={Boolean(carryStats) || maKierownika || (compare?.points ?? 0) > 0}
               note={compare && compare.points > 0 ? opisMocy(statsMoc.points, compare) : undefined}
             />
           </div>
 
           {carryStats && (
             <div className="plan-wariant">
-              <span className="plan-wariant-podpis">Z przeniesieniem</span>
+              <span className="plan-wariant-podpis">
+                {maKierownika ? 'Zespół · z przeniesieniem' : 'Z przeniesieniem'}
+              </span>
               <Pasek
                 stats={carryStats}
                 limit={compare?.points ?? 0}
                 note={compare && compare.points > 0 ? opisMocy(carryStats.points, compare) : undefined}
-                dopisek={`${carry!.tasks.length} ${plural(carry!.tasks.length)} bez zakończenia w ${carry!.label} — ${carryStats.points - statsMoc.points} SP`}
+                dopisek={`${przeniesioneZespolu.length} ${plural(przeniesioneZespolu.length)} bez zakończenia w ${carry!.label} — ${carryStats.points - statsMoc.points} SP`}
+              />
+            </div>
+          )}
+
+          {/* Kierownik: osobny pasek, BEZ limitu — jego zadania nie zajmuja mocy zespolu. */}
+          {kierownikStats && (
+            <div className="plan-wariant">
+              <span className="plan-wariant-podpis">Kierownik · poza limitem</span>
+              <Pasek
+                stats={kierownikStats}
+                zawsze
+                note={`${kierownikStats.points} SP — nie wlicza się do limitu zespołu`}
+                dopisek={
+                  przeniesioneKierownika.length > 0
+                    ? `w tym ${przeniesioneKierownika.reduce((n, t) => n + (t.storyPoints ?? 0), 0)} SP z przeniesienia`
+                    : undefined
+                }
               />
             </div>
           )}
@@ -537,8 +618,15 @@ function Pane({
                  kazdego wiersza. Lista jest posortowana tak, ze przekraczajace
                  leza na koncu, wiec granica jest dokladnie jedna. */
               const granica = za && !(i > 0 && (ponad?.(tasks[i - 1]) ?? false));
+              /* Koniec bloku „dodane w tej sesji": pierwsze zadanie spoza niego, gdy blok cos ma. */
+              const poNowych = i > 0 && nowe !== undefined && nowe(tasks[i - 1]) && !nowe(t);
               return (
                 <Fragment key={t.id}>
+                  {poNowych && (
+                    <div className="plan-nowe" role="separator">
+                      <span>↑ dodane w tej sesji</span>
+                    </div>
+                  )}
                   {granica && (
                     <div className="plan-granica" role="separator">
                       <span>nie mieści się w pozostałych punktach</span>
@@ -592,7 +680,13 @@ export function Planning({
   sortFields,
   dodane,
   onSort,
+  kierownicy = BEZ_KIEROWNIKOW,
 }: {
+  /**
+   * Osoby spoza limitu zespolu (BX_CAPACITY_EXCLUDE_IDS) — ich zadania nie zajmuja mocy sprintu:
+   * ani przy pasku „z przeniesieniem", ani przy liczeniu, ile punktow rejestr moze jeszcze wziac.
+   */
+  kierownicy?: readonly number[];
   /**
    * Zadania do SPRINTOW — wszystkie, bez filtrow i bez szukania.
    *
@@ -681,7 +775,10 @@ export function Planning({
    */
   sort: { by: string; dir: 'asc' | 'desc' }[];
   sortFields: { key: string; label: string }[];
-  /** Kolejnosc wejscia do sprintu w tej sesji — ostatnio przeciagniete ma byc na gorze. */
+  /**
+   * Kolejnosc wejscia do sprintu w tej sesji — ostatnio przeciagniete ma byc na gorze, ale tylko w
+   * KOLEJNYM sprincie: to jego sie teraz wypelnia. Trwajacy sprint zostaje w wybranym sortowaniu.
+   */
   dodane: Dodane;
   onSort: (next: { by: string; dir: 'asc' | 'desc' }[]) => void;
 }) {
@@ -724,15 +821,12 @@ export function Planning({
     );
   }, [rejestrTasks, plannable, teraz, tylkoDoStartu]);
 
+  const jestNowe = useCallback((t: Task) => dodane[t.id] !== undefined, [dodane]);
+
   const inActive = useMemo(
     () =>
-      activeSprint
-        ? ostatnioDodaneNaGorze(
-            tasks.filter((t) => t.sprintId === activeSprint.id && inSprintView(t)),
-            dodane,
-          )
-        : [],
-    [tasks, activeSprint, inSprintView, dodane],
+      activeSprint ? tasks.filter((t) => t.sprintId === activeSprint.id && inSprintView(t)) : [],
+    [tasks, activeSprint, inSprintView],
   );
   const inNext = useMemo(
     () =>
@@ -794,14 +888,16 @@ export function Planning({
    * widoku, a moce sprintu nie zaleza od tego, co ktos wlasnie ma na ekranie.
    * Zakonczone i oddane do akceptacji nie zajmuja juz mocy (`plannable`).
    */
+  /* Tylko zespol: zadania kierownika nie zajmuja mocy, wiec nie odejmuja sie od tego, co zostalo. */
   const sumaNext = nextSprint
-    ? tasks
-        .filter((t) => t.sprintId === nextSprint.id && plannable(t))
-        .reduce((n, t) => n + (t.storyPoints ?? 0), 0)
+    ? sumaDoLimitu(
+        tasks.filter((t) => t.sprintId === nextSprint.id && plannable(t)),
+        kierownicy,
+      )
     : 0;
   /* Wlaczone przeniesienie zajmuje moce tak samo jak wybrane recznie — inaczej
      rejestr obiecywalby punkty, ktore i tak zjedza zaleglosci. */
-  const sumaCarry = carry ? carry.tasks.reduce((n, t) => n + (t.storyPoints ?? 0), 0) : 0;
+  const sumaCarry = carry ? sumaDoLimitu(carry.tasks, kierownicy) : 0;
   const zostalo = Math.max(0, limit - sumaNext - sumaCarry);
 
   const backlogUlozony = useMemo(() => {
@@ -812,9 +908,10 @@ export function Planning({
      * stabilny, wiec w obu czesciach wybrana kolejnosc zostaje nietknieta.
      */
     if (zostalo <= 0) return backlog;
-    const ponad = (t: Task) => ((t.storyPoints ?? 0) > zostalo ? 1 : 0);
+    /* Zadanie kierownika nie zajmie mocy, wiec nigdy „nie miesci sie w pozostalych punktach". */
+    const ponad = (t: Task) => (!pozaLimitem(t, kierownicy) && (t.storyPoints ?? 0) > zostalo ? 1 : 0);
     return [...backlog].sort((a, b) => ponad(a) - ponad(b));
-  }, [backlog, zostalo]);
+  }, [backlog, zostalo, kierownicy]);
 
   const compare =
     limit > 0
@@ -1351,7 +1448,7 @@ export function Planning({
         title="Rejestr"
         sprintId={null}
         tasks={backlogUlozony}
-        ponad={(t) => zostalo > 0 && (t.storyPoints ?? 0) > zostalo}
+        ponad={(t) => zostalo > 0 && !pozaLimitem(t, kierownicy) && (t.storyPoints ?? 0) > zostalo}
         people={people}
         renderRow={renderRow}
         grow="var(--plan-cols)"
@@ -1388,6 +1485,7 @@ export function Planning({
             collapsible
             zwiniety={zwiniete.includes(activeSprint.id)}
             onZwin={() => onZwin(activeSprint.id)}
+            kierownicy={kierownicy}
             /* Bez licznika mocy: w trwajacym sprincie nie ma juz czego planowac. */
           />
         )}
@@ -1425,6 +1523,7 @@ export function Planning({
             grow="calc(1 - var(--plan-split))"
             sprintId={nextSprint.id}
             tasks={inNext}
+            nowe={jestNowe}
             people={people}
             renderRow={renderRow}
             collapsible
@@ -1433,6 +1532,7 @@ export function Planning({
             compare={compare}
             carry={carry}
             wMoce={plannable}
+            kierownicy={kierownicy}
           />
         ) : (
           /* Bez kolejnego sprintu planowac nie ma dokad — mowimy to wprost,

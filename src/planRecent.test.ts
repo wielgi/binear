@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ostatnioDodaneNaGorze, zapiszPrzeniesienie } from './planRecent';
+import { NA_GORZE, ostatnioDodaneNaGorze, tylkoOstatnie, zapiszPrzeniesienie } from './planRecent';
 
 const t = (id: number) => ({ id });
 
@@ -25,5 +25,20 @@ describe('ostatnio dodane na gorze', () => {
     const st = zapiszPrzeniesienie({}, [5], true, 1);
     const cofniete = zapiszPrzeniesienie(st.dodane, [5], false, st.nastepny);
     expect(cofniete.dodane[5]).toBeUndefined();
+  });
+});
+
+describe('tylko ostatnie', () => {
+  it('na gorze zostaje NA_GORZE najnowszych, starsze wracaja do zwyklego sortowania', () => {
+    let st = zapiszPrzeniesienie({}, [1], true, 1);
+    for (const id of [2, 3, 4, 5, 6, 7]) st = zapiszPrzeniesienie(st.dodane, [id], true, st.nastepny);
+    const zostaje = tylkoOstatnie(st.dodane);
+    expect(Object.keys(zostaje).map(Number).sort((a, b) => a - b)).toEqual([3, 4, 5, 6, 7]);
+    expect(Object.keys(zostaje)).toHaveLength(NA_GORZE);
+  });
+
+  it('gdy znacznikow jest malo, nic nie obcina', () => {
+    const st = zapiszPrzeniesienie({}, [1, 2], true, 1);
+    expect(tylkoOstatnie(st.dodane)).toBe(st.dodane);
   });
 });
