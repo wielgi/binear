@@ -85,6 +85,38 @@ describe('tagsForWidth', () => {
   });
 });
 
+describe('tagCounts', () => {
+  it('tagi alfabetycznie po polsku, bez względu na wielkość liter, z liczbą użyć', () => {
+    const tasks = [
+      { tags: ['ZWROT-3', 'bug', 'Wysoki'] },
+      { tags: ['bug', 'Źródło', 'DO-STARTU'] },
+      { tags: ['bug', 'Ćwiczenie'] },
+    ];
+    expect(tagCounts(tasks)).toEqual([
+      ['bug', 3],
+      ['Ćwiczenie', 1],
+      ['DO-STARTU', 1],
+      ['Wysoki', 1],
+      ['ZWROT-3', 1],
+      ['Źródło', 1], // w polskim alfabecie ź stoi PO z
+    ]);
+  });
+
+  it('najczęstszy tag nie wędruje na górę — liczy się nazwa', () => {
+    const tasks = [{ tags: ['Zebra'] }, { tags: ['Zebra'] }, { tags: ['Zebra', 'Alfa'] }];
+    expect(tagCounts(tasks).map(([t]) => t)).toEqual(['Alfa', 'Zebra']);
+  });
+
+  it('liczby w nazwie po kolei, nie znak po znaku — ZWROT-3 przed ZWROT-12', () => {
+    const tasks = [{ tags: ['ZWROT-12+', 'ZWROT-12', 'ZWROT-3', 'ZWROT-6'] }];
+    expect(tagCounts(tasks).map(([t]) => t)).toEqual(['ZWROT-3', 'ZWROT-6', 'ZWROT-12', 'ZWROT-12+']);
+  });
+
+  it('bez tagów — pusta lista', () => {
+    expect(tagCounts([{ tags: [] }])).toEqual([]);
+  });
+});
+
 describe('zadania ważne: płomień i BUG', () => {
   const t = (priority: string, tags: string[] = []) => ({ priority, tags });
 
@@ -130,32 +162,5 @@ describe('relativeAge', () => {
 
   it('ujemny wiek (zegar cofnięty) nie wychodzi poniżej zera', () => {
     expect(relativeAge(-30_000)).toBe('przed chwilą');
-  });
-});
-
-describe('tagCounts', () => {
-  it('tagi alfabetycznie po polsku, bez względu na wielkość liter, z liczbą użyć', () => {
-    const tasks = [
-      { tags: ['ZWROT-3', 'bug', 'Wysoki'] },
-      { tags: ['bug', 'Źródło', 'DO-STARTU'] },
-      { tags: ['bug', 'Ćwiczenie'] },
-    ];
-    expect(tagCounts(tasks)).toEqual([
-      ['bug', 3],
-      ['Ćwiczenie', 1],
-      ['DO-STARTU', 1],
-      ['Wysoki', 1],
-      ['ZWROT-3', 1],
-      ['Źródło', 1], // w polskim alfabecie ź stoi PO z
-    ]);
-  });
-
-  it('najczęstszy tag nie wędruje na górę — liczy się nazwa', () => {
-    const tasks = [{ tags: ['Zebra'] }, { tags: ['Zebra'] }, { tags: ['Zebra', 'Alfa'] }];
-    expect(tagCounts(tasks).map(([t]) => t)).toEqual(['Alfa', 'Zebra']);
-  });
-
-  it('bez tagów — pusta lista', () => {
-    expect(tagCounts([{ tags: [] }])).toEqual([]);
   });
 });

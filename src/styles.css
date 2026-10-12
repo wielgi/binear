@@ -1442,7 +1442,9 @@ input[type='search']::-webkit-search-decoration {
   --counter-min: 150px;
   display: flex;
   align-items: flex-end;
-  gap: var(--s4);
+  /* Odstep miedzy GRUPAMI. --s3, nie --s4: przy czterech grupach (z „Ważne" stojacym osobno) szerszy
+     wypychal ostatni kafelek o kilka pikseli poza okno 1600 px. */
+  gap: var(--s3);
   padding: var(--s2) var(--s4);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
@@ -1491,6 +1493,34 @@ input[type='search']::-webkit-search-decoration {
 
 .counters-cap-empty .counters-cap-text {
   visibility: hidden;
+}
+
+/* Podpis grupy rozbicia jest przyciskiem z suma „Poza sprintem" (patrz `totalCap` w CountersBar). */
+.counters-cap-total {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.counters-cap-count {
+  font-size: var(--t-mini);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.counters-cap-total .counter-delta {
+  flex: 0 0 auto;
+}
+
+.counters-cap-total:hover .counters-cap-text,
+.counters-cap-on .counters-cap-text,
+.counters-cap-on .counters-cap-count {
+  color: var(--accent);
 }
 
 .counters-cap-text {
@@ -4480,6 +4510,8 @@ a.mention:hover {
   margin-bottom: var(--s3);
   padding: var(--s2);
   border-radius: var(--s2);
+  /* Kotwica dla usmiechu reakcji w rogu (`.reaction-corner`). */
+  position: relative;
 }
 
 .comment:nth-of-type(even) {
@@ -8109,6 +8141,30 @@ a.mention:hover {
   flex: 0 0 var(--s3);
 }
 
+/* Koniec bloku „dodane w tej sesji" w panelu sprintu — ta sama kreska co granica wyzej, ale
+   neutralna: to nie ostrzezenie, tylko informacja, ze nizej obowiazuje wybrane sortowanie. */
+.plan-nowe {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s2) 0 var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.plan-nowe::before,
+.plan-nowe::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.plan-nowe::before {
+  flex: 0 0 var(--s3);
+}
+
 /* Warstwa nad wygaszonym paskiem — patrz komentarz w App.tsx. `pointer-events`
    wracaja do `auto`, bo rodzic je odcina i dymek by sie nie pokazal. */
 .scopebar-veil {
@@ -8870,4 +8926,208 @@ a.mention:hover {
 .sum-eff {
   margin: 0;
   font-size: var(--t-small);
+}
+
+/*
+ * Reakcje pod komentarzem (Comments w App.tsx). Pigulki jak w Bitriksie: emoji i liczba, wlasna
+ * reakcja w kolorze akcentu. Okienko wyboru otwiera sie w tym samym rzedzie, pod pigulkami.
+ */
+.comment-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1);
+  margin-top: var(--s2);
+}
+
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--t-mini);
+  cursor: pointer;
+}
+
+.reaction:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.reaction-mine {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.reaction-emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.reaction-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.reaction-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 236px;
+  padding: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+}
+
+.reaction-picker button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--s1);
+  background: none;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reaction-picker button:hover {
+  background: var(--bg-hover);
+}
+
+.reaction-picker .reaction-pick-mine {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/*
+ * Usmiech reakcji w ROGU komentarza najblizszym kursorowi (`data-near` na .comment, ustawia ruch
+ * myszy). Wisi na krawedzi, polowa poza komentarzem — nie zaslania tresci ani pigulek reakcji.
+ * Otwarte okienko zostaje w rogu, w ktorym je otwarto (`data-corner`).
+ */
+.reaction-corner {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  transform: translate(35%, 35%);
+}
+
+.comment[data-near='tl'] .reaction-corner:not([data-corner]),
+.reaction-corner[data-corner='tl'] {
+  top: 0;
+  right: auto;
+  bottom: auto;
+  left: 0;
+  transform: translate(-35%, -35%);
+}
+
+.comment[data-near='tr'] .reaction-corner:not([data-corner]),
+.reaction-corner[data-corner='tr'] {
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: auto;
+  transform: translate(35%, -35%);
+}
+
+.comment[data-near='bl'] .reaction-corner:not([data-corner]),
+.reaction-corner[data-corner='bl'] {
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: 0;
+  transform: translate(-35%, 35%);
+}
+
+.reaction-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.comment:hover .reaction-open,
+.reaction-open:focus-visible,
+.reaction-open-on {
+  opacity: 1;
+}
+
+.reaction-open:hover,
+.reaction-open-on {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+@media (hover: none) {
+  .reaction-open {
+    opacity: 1;
+  }
+}
+
+/* Okienko wyboru od rogu do srodka komentarza: z gornych rogow w dol, z dolnych w gore. */
+.reaction-corner .reaction-picker {
+  position: absolute;
+  width: max-content;
+}
+
+/* Most nad szczelina miedzy usmiechem a rzadkiem — kursor przechodzi przez niego, nie wychodzac
+   z `.reaction-corner`, wiec rzadek nie gasnie po drodze. */
+.reaction-corner .reaction-picker::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+}
+
+.reaction-corner[data-corner='br'] .reaction-picker::before,
+.reaction-corner[data-corner='bl'] .reaction-picker::before {
+  top: 100%;
+}
+
+.reaction-corner[data-corner='tr'] .reaction-picker::before,
+.reaction-corner[data-corner='tl'] .reaction-picker::before {
+  bottom: 100%;
+}
+
+.reaction-corner[data-corner='br'] .reaction-picker,
+.reaction-corner[data-corner='bl'] .reaction-picker {
+  bottom: 26px;
+}
+
+.reaction-corner[data-corner='tr'] .reaction-picker,
+.reaction-corner[data-corner='tl'] .reaction-picker {
+  top: 26px;
+}
+
+.reaction-corner[data-corner='br'] .reaction-picker,
+.reaction-corner[data-corner='tr'] .reaction-picker {
+  right: 0;
+}
+
+.reaction-corner[data-corner='bl'] .reaction-picker,
+.reaction-corner[data-corner='tl'] .reaction-picker {
+  left: 0;
+}
+
+.reaction-picker .reaction-more {
+  color: var(--fg-muted);
+  font-size: 16px;
 }

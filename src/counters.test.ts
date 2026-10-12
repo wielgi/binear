@@ -504,7 +504,7 @@ describe('countAll', () => {
     expect(w.poza.count).toBe(0);
   });
 
-  it('bledy stoja same (bez podpisu grupy): liczy zadania i ze sprintu, i spoza niego', () => {
+  it('wazne stoja same (bez podpisu grupy): liczy zadania i ze sprintu, i spoza niego', () => {
     expect(COUNTERS.filter((d) => d.standalone).map((d) => d.key)).toEqual(['wazne']);
     const w = countAll(
       [zadanie({ id: 90, tags: ['BUG'], sprintId: 70 }), zadanie({ id: 91, tags: ['BUG'] })],

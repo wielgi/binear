@@ -271,7 +271,7 @@ export const COUNTERS: CounterDef[] = [
     key: 'poza',
     label: 'Poza sprintem',
     hint:
-      'Otwarte zadania spoza aktywnego sprintu, bez odłożonych i bez KONCEPCJA — cały rejestr, niezależnie ' +
+      'Otwarte zadania spoza aktywnego sprintu, bez odłożonych, KONCEPCJA i folderów — cały rejestr, niezależnie ' +
       'od widoku i filtrów. Kafelki obok rozbijają tę liczbę co do sztuki.',
     match: (t, ctx) => outside(t, ctx),
     riseIsBad: true,
@@ -352,7 +352,7 @@ export const COUNTERS: CounterDef[] = [
     hint:
       'Otwarte zadania z płomieniem (wysoki priorytet w Bitriksie) albo z tagiem BUG, bez ' +
       'odłożonych — w sprincie i poza nim, każde liczone raz. To cecha, a nie stan: takie zadanie ' +
-      'jest też w jednym ze stanów obok (poza KONCEPCJA, której stany nie liczą), więc kafelek nie ' +
+      'jest też w jednym ze stanów obok (poza KONCEPCJA i folderami, których stany nie liczą), więc kafelek nie ' +
       'wchodzi do sumy. Na listach mają czerwony płomień i/albo robaka w miejscu checkboxa.',
     match: (t, ctx) => inAudit(t, ctx) && isImportant(t),
     separate: true,

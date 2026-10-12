@@ -19,6 +19,8 @@
  * i kiedy" zawsze dotyczy ostatnich dni, a nie setnego wpisu wstecz. Przy limicie
  * liczonym w sztukach jeden pracowity dzien wymiatal caly poprzedni tydzien.
  */
+import { emojiOf } from './reactions';
+
 export const HISTORY_DAYS = 7;
 
 /**
@@ -488,6 +490,8 @@ export const WRITE_METHODS = new Set([
   'im.v2.Chat.Message.update',
   'task.commentitem.delete',
   'im.v2.Chat.Message.delete',
+  'im.v2.Chat.Message.Reaction.add',
+  'im.v2.Chat.Message.Reaction.delete',
   /* Zalaczniki komentarza — patrz `addCommentWithFiles`. Musza byc TUTAJ, a nie
      tylko na allregule proxy: `call` kieruje wszystko spoza tej listy do
      laczenia odczytow, wiec zapis zostalby potraktowany jak zapytanie. */
@@ -703,6 +707,10 @@ export function describe(
     case 'task.commentitem.delete':
     case 'im.v2.Chat.Message.delete':
       return mark('delete', '', 'komentarz usunięty');
+    case 'im.v2.Chat.Message.Reaction.add':
+      return mark('comment', '', `reakcja ${emojiOf(String(params.reaction))} pod komentarzem`);
+    case 'im.v2.Chat.Message.Reaction.delete':
+      return mark('comment', '', `reakcja ${emojiOf(String(params.reaction))} zdjęta`);
     /* Wgranie pliku to KROK, nie czynnosc — dla czytajacego dziennik liczy sie
        dopiero komentarz, ktory z niego powstal. */
     case 'disk.folder.uploadfile':

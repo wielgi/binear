@@ -27,6 +27,7 @@ import {
   editComment,
   fetchComments,
   fetchOlderComments,
+  setReaction,
   fetchActiveSprint,
   fetchSprints,
   fetchBacklogId,
@@ -136,6 +137,7 @@ import {
   CloseIcon,
   CommentIcon,
   ReplyIcon,
+  SmileIcon,
   ExternalIcon,
   ElsewhereIcon,
   TrashIcon,
@@ -145,8 +147,8 @@ import {
 import {
   MONTHS,
   podzielNaTrafienia,
-  relativeAge,
   tagCounts,
+  relativeAge,
   tagsForWidth,
   withoutBugTag,
   shortDate,
@@ -178,8 +180,8 @@ import {
   noteMine,
 } from './history';
 import { TaskCode } from './TaskCode';
+import { tylkoOstatnie, zapiszPrzeniesienie, type Dodane } from './planRecent';
 import { ImportantMarks } from './ImportantMarks';
-import { zapiszPrzeniesienie, type Dodane } from './planRecent';
 import { ParentBar, parentBarTitle } from './ParentBar';
 import { groupChildren, parentProgress, type ParentProgress } from './parentProgress';
 import { Board } from './Board';
@@ -187,6 +189,7 @@ import { Dashboard } from './Dashboard';
 import { SprintSummary } from './SprintSummary';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
+import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
@@ -198,8 +201,8 @@ import {
   COUNTERS,
   counterDef,
   countAll,
-  paybackRank,
   foldersOf,
+  paybackRank,
   type CounterCtx,
   type CounterKey,
   type DaySnapshot,
@@ -4571,6 +4574,89 @@ function Comments({
    * i z podgladem tresci, zeby bylo widac, KTORY komentarz znika (w watku stoi
    * ich kilkanascie, a ikony sa male i blisko siebie).
    */
+  /*
+   * REAKCJA: od razu na ekranie, w tle do Bitriksa. Nieudany zapis cofamy tym samym przelacznikiem
+   * (na AKTUALNYM stanie, nie na zapamietanym — w miedzyczasie mogla dojsc odswiezona lista).
+   * `localSeq` jak przy edycji: ciche odswiezenie zaczete przed kliknieciem nie moze go cofnac.
+   */
+  const [otwarta, setReakcjaDla] = useState<{ key: string; corner: string; all: boolean } | null>(null);
+  /* Ile razy wybrano ktora reakcje — na tym komputerze; z tego rzadek „najczesciej uzywanych". */
+  const [uzycia, setUzycia] = useState<Record<string, number>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(REACTIONS_USED_KEY) ?? '{}') ?? {};
+    } catch {
+      return {};
+    }
+  });
+  const przelaczReakcje = (c: Comment, code: string) => {
+    if (me === null || c.source !== 'chat') return;
+    const on = !(c.reactions ?? []).some((r) => r.code === code && r.users.includes(me));
+    const zmien = () => {
+      localSeq.current++;
+      setComments((prev) => {
+        if (!prev) return prev;
+        const next = prev.map((x) =>
+          x.source === c.source && x.id === c.id
+            ? { ...x, reactions: toggleReaction(x.reactions ?? [], code, me) }
+            : x,
+        );
+        setCachedComments(taskId, next);
+        return next;
+      });
+    };
+    zmien();
+    if (on) {
+      setUzycia((u) => {
+        const next = { ...u, [code]: (u[code] ?? 0) + 1 };
+        try {
+          localStorage.setItem(REACTIONS_USED_KEY, JSON.stringify(next));
+        } catch {
+          /* bez pamieci przegladarki rzadek po prostu zostaje domyslny */
+        }
+        return next;
+      });
+    }
+    setReaction(c.id, code, on, taskId).catch((e) => {
+      zmien();
+      onError(`Nie udało się zapisać reakcji: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  };
+  /*
+   * Rzadek reakcji otwiera sie juz po NAJECHANIU na usmiech; zamyka chwile po zjechaniu z usmiechu
+   * i z rzadka — zwloka przeprowadza kursor przez szczeline miedzy nimi. Klik dziala dalej (dotyk).
+   */
+  const zamknijReakcje = useRef<number | undefined>(undefined);
+  const najedzReakcje = (key: string, el: HTMLElement) => {
+    window.clearTimeout(zamknijReakcje.current);
+    const corner = (el.closest('.comment') as HTMLElement | null)?.dataset.near ?? 'br';
+    setReakcjaDla((o) => (o?.key === key ? o : { key, corner, all: false }));
+  };
+  const zjedzReakcje = () => {
+    window.clearTimeout(zamknijReakcje.current);
+    zamknijReakcje.current = window.setTimeout(() => setReakcjaDla(null), 250);
+  };
+  useEffect(() => () => window.clearTimeout(zamknijReakcje.current), []);
+  /* Okienko wyboru reakcji zamyka klik obok i Escape. */
+  useEffect(() => {
+    if (otwarta === null) return;
+    const zamknij = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
+      if (e instanceof MouseEvent && (e.target as Element | null)?.closest('.reaction-corner')) return;
+      setReakcjaDla(null);
+    };
+    document.addEventListener('mousedown', zamknij);
+    document.addEventListener('keydown', zamknij);
+    return () => {
+      document.removeEventListener('mousedown', zamknij);
+      document.removeEventListener('keydown', zamknij);
+    };
+  }, [otwarta]);
+  /* Imiona do dymku nad reakcja — z osob w filtrze i z autorow tego watku. */
+  const imie = (id: number): string =>
+    people.find((p) => p.id === id)?.name ??
+    comments?.find((x) => x.authorId === id)?.authorName ??
+    `#${id}`;
+
   const removeComment = (c: Comment) => {
     const podglad = plainText(splitQuote(c.text).rest || c.text).slice(0, 80);
     onConfirm({
@@ -4824,6 +4910,18 @@ function Comments({
         <article
           className={`comment${flash === c.id ? ' comment-flash' : ''}`}
           data-comment={c.id}
+          /*
+           * Usmiech reakcji stoi w tym ROGU, ktory jest najblizej kursora. Atrybut zamiast stanu:
+           * ruch myszy nie ma przerysowywac watku, wystarczy, ze arkusz przestawi usmiech.
+           * Otwarte okienko zostaje w rogu, w ktorym je otwarto (`data-corner`).
+           */
+          onMouseMove={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const rog = `${e.clientY - r.top < r.bottom - e.clientY ? 't' : 'b'}${
+              e.clientX - r.left < r.right - e.clientX ? 'l' : 'r'
+            }`;
+            if (e.currentTarget.dataset.near !== rog) e.currentTarget.dataset.near = rog;
+          }}
         >
           {/*
             Cytat NAD naglowkiem i w JEDNEJ linii — tak pokazuja odpowiedzi
@@ -5062,6 +5160,85 @@ function Comments({
                     {f.name}
                   </a>
                 ),
+              )}
+            </div>
+          )}
+          {/*
+            REAKCJE pod komentarzem: emoji z liczba, dymek mowi kto. Wlasna jest podswietlona, a klik
+            ja daje albo zdejmuje — tak jak w Bitriksie. Rzad jest tylko wtedy, gdy reakcje sa.
+          */}
+          {(c.reactions ?? []).length > 0 && (
+            <div className="comment-reactions">
+              {(c.reactions ?? []).map((r) => {
+                const moja = me !== null && r.users.includes(me);
+                return (
+                  <button
+                    key={r.code}
+                    className={`reaction${moja ? ' reaction-mine' : ''}`}
+                    title={r.users.map(imie).join(', ')}
+                    aria-pressed={moja}
+                    disabled={me === null}
+                    onClick={() => przelaczReakcje(c, r.code)}
+                  >
+                    <span className="reaction-emoji">{emojiOf(r.code)}</span>
+                    <span className="reaction-count">{r.users.length}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {/*
+            DODANIE REAKCJI: maly usmiech w tym rogu komentarza, ktory jest najblizej kursora
+            (`data-near` na <article>). Najechanie na niego pokazuje rzadek najczesciej uzywanych
+            emoji i „+", ktory dopiero rozwija wszystkie. Tylko czat — forum reakcji nie zna.
+          */}
+          {c.source === 'chat' && me !== null && (
+            <div
+              className="reaction-corner"
+              data-corner={otwarta?.key === key ? otwarta.corner : undefined}
+              onMouseEnter={(e) => najedzReakcje(key, e.currentTarget)}
+              onMouseLeave={zjedzReakcje}
+            >
+              <button
+                className={`reaction-open${otwarta?.key === key ? ' reaction-open-on' : ''}`}
+                aria-label="Dodaj reakcję do tego komentarza"
+                aria-expanded={otwarta?.key === key}
+                /* Klik tylko OTWIERA — przy myszy rzadek i tak juz stoi po najechaniu, a zamykanie
+                   kliknieciem gasiloby go pod kursorem. Zamyka zjechanie, klik obok i Escape. */
+                onClick={(e) => najedzReakcje(key, e.currentTarget)}
+              >
+                <SmileIcon />
+              </button>
+              {otwarta?.key === key && (
+                <div className="reaction-picker" role="menu" aria-label="Wybierz reakcję">
+                  {(otwarta.all ? REACTIONS : najczesciej(uzycia)).map((r) => (
+                    <button
+                      key={r.code}
+                      role="menuitem"
+                      className={
+                        (c.reactions ?? []).some((x) => x.code === r.code && x.users.includes(me))
+                          ? 'reaction-pick-mine'
+                          : undefined
+                      }
+                      onClick={() => {
+                        przelaczReakcje(c, r.code);
+                        setReakcjaDla(null);
+                      }}
+                    >
+                      {r.emoji}
+                    </button>
+                  ))}
+                  {!otwarta.all && (
+                    <button
+                      className="reaction-more"
+                      aria-label="Wszystkie reakcje"
+                      title="Wszystkie reakcje"
+                      onClick={() => setReakcjaDla({ ...otwarta, all: true })}
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -9010,6 +9187,8 @@ export default function App() {
     groupId,
     enabled: metaReady,
   });
+  /* Foldery liczymy z CALEJ listy — dziecko moze lezec w innym sprincie niz rodzic. */
+  const folders = useMemo(() => foldersOf(tasks, CLOSED_STATUSES), [tasks]);
   /* Fakty z czatow: rozpoznania i uzasadnienia STRATEGII — nie widac ich w tagach. */
   const chatFacts = useChatFacts(tasks, {
     closed: CLOSED_STATUSES,
@@ -9017,8 +9196,6 @@ export default function App() {
     groupId,
     enabled: metaReady,
   });
-  /* Foldery liczymy z CALEJ listy — dziecko moze lezec w innym sprincie niz rodzic. */
-  const folders = useMemo(() => foldersOf(tasks, CLOSED_STATUSES), [tasks]);
   const counterCtx = useMemo<CounterCtx>(
     () => ({ sprintId, closed: CLOSED_STATUSES, answered, chat: chatFacts, folders }),
     [sprintId, answered, chatFacts, folders],
@@ -10524,6 +10701,19 @@ export default function App() {
         setPlanTura((t) => t + list.length);
       }
       /*
+       * Numery „dodane w tej sesji" rezerwujemy dla calej paczki od razu (kolejnosc), ale znacznik
+       * zakladamy dopiero po UDANYM przeniesieniu — nieudane nie ma czego wyrozniac.
+       */
+      const zapis = zapiszPrzeniesienie({}, list, sprintId !== null, planDodaneNext.current);
+      planDodaneNext.current = zapis.nastepny;
+      const oznacz = (id: number) =>
+        setPlanDodane((d) => {
+          const x = { ...d };
+          if (sprintId === null) delete x[id];
+          else x[id] = zapis.dodane[id];
+          return tylkoOstatnie(x);
+        });
+      /*
        * ODPOWIEDZIALNY PRZY WEJSCIU DO SPRINTU. Zadanie spoza IT, ktore ktos bierze z rejestru do
        * sprintu, przechodzi na konto-zaslepke IT; jesli odpowiedzialny jest z IT, zostaje (patrz
        * `planAssign.ts`). Dotyczy tylko tej drogi — rejestr → sprint — a gdy spis pracownikow nie
@@ -10542,9 +10732,6 @@ export default function App() {
       const zaslepka = directory.find((e) => e.id === UNASSIGNED_ID);
       let przepiete = 0;
 
-      const zapis = zapiszPrzeniesienie(planDodane, list, sprintId !== null, planDodaneNext.current);
-      planDodaneNext.current = zapis.nastepny;
-      setPlanDodane(zapis.dodane);
       /*
        * Najpierw sprint, potem osoba — dwa osobne zapisy. Gdy zmiana osoby sie nie uda, zadanie
        * JEST juz w sprincie, wiec cofamy tylko osobe, a nie cale przeniesienie. Licznik w komunikacie
@@ -10561,6 +10748,7 @@ export default function App() {
             () => (sprintId === null ? moveToSprint(id, backlogId ?? 0) : moveToSprintViaEntry(id, sprintId)),
             'sprint',
           );
+          if (wSprincie) oznacz(id);
           if (!wSprincie || nowy === null) return;
           const zmieniony = await mutate(
             id,
@@ -10585,7 +10773,7 @@ export default function App() {
         return reload(true);
       });
     },
-    [nextSprint, activeSprint, mutate, backlogId, reload, directory, me, config, toast, tasks, planDodane, stages],
+    [nextSprint, activeSprint, mutate, backlogId, reload, directory, me, config, toast, tasks, stages],
   );
 
   /**
@@ -11853,8 +12041,8 @@ export default function App() {
             onPrzeniesienie={() => setPlanPrzeniesienie((v) => !v)}
             onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
             sort={planSort}
-            kierownicy={kierownicy}
             dodane={planDodane}
+            kierownicy={kierownicy}
             sortFields={PLAN_SORTS}
             onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}
             /*

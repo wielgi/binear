@@ -374,10 +374,10 @@ export function CountersBar({
 
   /*
    * Trzy grupy z podpisami, zeby bylo widac, co sie z czym sumuje:
-   *  - ROZBICIE: „Poza sprintem" i stany, ktore sie na nie skladaja (`inSum`).
-   *    Podpis grupy przechodzi w linie siegajaca do konca tych kafelkow,
+   *  - ROZBICIE: stany, ktore skladaja sie na „Poza sprintem" (`inSum`); sama suma stoi w podpisie
+   *    grupy (`totalCap`). Podpis przechodzi w linie siegajaca do konca tych kafelkow,
    *  - SPRINT: kafelek sprintu, osobna miara,
-   *  - BEZ PODPISU: cechy, ktore licza zadania i ze sprintu, i spoza niego (`standalone`, bledy) —
+   *  - BEZ PODPISU: cechy, ktore licza zadania i ze sprintu, i spoza niego (`standalone`, wazne) —
    *    nie pasuja ani do „Sprint", ani do „Poza sumą", wiec stoja same miedzy nimi,
    *  - POZA SUMA: odlozone (status 6 nie wchodzi do „Poza sprintem") i cechy
    *    (`separate`, np. koncepcja, foldery — kazde jest tez w ktoryms ze stanow albo poza nimi).
@@ -385,8 +385,9 @@ export function CountersBar({
    * pod nim jako szara notka — nic nie mowilo, co sie sumuje, a co nie.
    */
   const total = tiles.find((d) => d.key === 'poza');
-  const parts = tiles.filter((d) => d.inSum);
-  const sprint = tiles.filter((d) => d.key !== 'poza' && !d.inSum && !d.separate);
+  /* `standalone` wyklucza kazda inna grupe — inaczej taki kafelek bez `separate` rysowalby sie dwa razy. */
+  const parts = tiles.filter((d) => d.inSum && !d.standalone);
+  const sprint = tiles.filter((d) => d.key !== 'poza' && !d.inSum && !d.separate && !d.standalone);
   const standalone = tiles.filter((d) => d.standalone);
   const outside = [...(note ? [note] : []), ...tiles.filter((d) => d.separate && !d.standalone)];
 
@@ -436,15 +437,41 @@ Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
     </span>
   );
 
+  /*
+   * „Poza sprintem" stoi W PODPISIE grupy, a nie jako osobny kafelek: to suma kafelkow pod nim, wiec
+   * podpis „Rozbicie „Poza sprintem” · 164" mowi to samo, a zwolnione miejsce mieszci kafelek
+   * folderow w jednym rzedzie. Klikniecie dziala jak na kafelku — filtruje liste.
+   */
+  const totalCap = (d: CounterDef) => {
+    const v = values[d.key];
+    const isPending = pending.has(d.key);
+    const on = active === d.key;
+    return (
+      <button
+        className={`counters-cap counters-cap-total${on ? ' counters-cap-on' : ''}`}
+        aria-pressed={on}
+        title={on ? `${d.hint}
+
+Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
+        onClick={() => onPick(on ? null : d.key)}
+      >
+        <span className="counters-cap-text">Rozbicie „{d.label}”</span>
+        <span className={`counters-cap-count${isPending ? ' counter-pending' : ''}`}>
+          {isPending ? '…' : v.count}
+        </span>
+        {!isPending && prev && (
+          <Delta now={v.count} before={prev.snap[d.key]} day={prev.day} riseIsBad={d.riseIsBad} />
+        )}
+      </button>
+    );
+  };
+
   return (
     <div className="counters" role="toolbar" aria-label="Liczniki zadań" ref={rowRef}>
       {(total || parts.length > 0) && (
-        <div className="counters-group counters-group-sum" style={nStyle((total ? 1 : 0) + parts.length)}>
-          {cap('Rozbicie „Poza sprintem”')}
-          <div className="counters-group-row">
-            {total && tile(total)}
-            {parts.map((d) => tile(d))}
-          </div>
+        <div className="counters-group counters-group-sum" style={nStyle(parts.length)}>
+          {total ? totalCap(total) : cap('Rozbicie „Poza sprintem”')}
+          <div className="counters-group-row">{parts.map((d) => tile(d))}</div>
         </div>
       )}
       {sprint.length > 0 && (

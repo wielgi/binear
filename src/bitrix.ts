@@ -1,6 +1,7 @@
 /** Klient REST Bitrix — leci przez lokalne proxy, token nigdy nie trafia do przegladarki. */
 
 import { QUESTION, type ChatMessage } from './counters';
+import { reactionsByMessage, type CommentReaction } from './reactions';
 import { describe, logAction, slimParams, taskIdOf, WRITE_METHODS } from './history';
 
 export class BxError extends Error {
@@ -1475,6 +1476,8 @@ export interface Comment {
   /** Numery z obu zrodel moga sie powtorzyc, wiec klucz Reacta sklada sie z obu pol. */
   source: 'forum' | 'chat';
   files: CommentFile[];
+  /** Reakcje (👍, ❤️…) — tylko komentarze z czatu; forum ich nie ma. Patrz reactions.ts. */
+  reactions: CommentReaction[];
 }
 
 const stamp = (iso: string | null): number => {
@@ -1500,6 +1503,7 @@ async function fetchForumComments(taskId: number): Promise<Comment[]> {
     // Forum trzyma zalaczniki w `ATTACHED_OBJECTS` (identyfikatory doczepienia, nie
     // plikow) — inna sciezka niz czat, wiec na razie zostaje pusto.
     files: [],
+    reactions: [],
   }));
 }
 
@@ -1530,13 +1534,39 @@ async function fetchPhotos(ids: number[]): Promise<Map<number, string | null>> {
  */
 const CHAT_LIMIT = 100;
 
+/**
+ * Reakcje na wiadomosci TEJ SAMEJ strony czatu, co `im.dialog.messages.get`. Ta metoda zna tylko
+ * „lajki" bez rodzaju (`params.LIKE` — smiech i serce wygladaja tam tak samo), wiec rodzaj bierzemy
+ * z metod v2: najnowsza strona to `Message.list`, starsze — `Message.tail` z `lastId` (sama
+ * `list` filtr `lastId` ignoruje i zawsze oddaje koniec czatu; sprawdzone na portalu).
+ *
+ * Blad tutaj nie moze zabrac komentarzy — wtedy sa po prostu bez reakcji.
+ */
+async function fetchChatReactions(chatId: number, beforeId?: number): Promise<Map<number, CommentReaction[]>> {
+  try {
+    const res = beforeId
+      ? await call<any>('im.v2.Chat.Message.tail', {
+          chatId,
+          limit: CHAT_LIMIT,
+          filter: { lastId: beforeId, direction: 'UP' },
+        })
+      : await call<any>('im.v2.Chat.Message.list', { chatId, limit: CHAT_LIMIT });
+    return reactionsByMessage(res?.reactions);
+  } catch {
+    return new Map();
+  }
+}
+
 async function fetchChatComments(chatId: number, beforeId?: number): Promise<Comment[]> {
-  const res = await call<any>('im.dialog.messages.get', {
-    DIALOG_ID: `chat${chatId}`,
-    LIMIT: CHAT_LIMIT,
-    /* `LAST_ID` stronicuje WSTECZ — oddaje wiadomosci starsze od podanej. */
-    ...(beforeId ? { LAST_ID: beforeId } : {}),
-  });
+  const [res, reakcje] = await Promise.all([
+    call<any>('im.dialog.messages.get', {
+      DIALOG_ID: `chat${chatId}`,
+      LIMIT: CHAT_LIMIT,
+      /* `LAST_ID` stronicuje WSTECZ — oddaje wiadomosci starsze od podanej. */
+      ...(beforeId ? { LAST_ID: beforeId } : {}),
+    }),
+    fetchChatReactions(chatId, beforeId),
+  ]);
 
   /*
    * Nazwiska i zdjecia przychodza w tej samej odpowiedzi (pole `users`) — zero
@@ -1590,6 +1620,7 @@ async function fetchChatComments(chatId: number, beforeId?: number): Promise<Com
         files: ((m.params?.FILE_ID ?? []) as unknown[])
           .map((id) => byFile.get(Number(id)))
           .filter((f): f is CommentFile => Boolean(f)),
+        reactions: reakcje.get(Number(m.id)) ?? [],
       };
     })
     /*
@@ -1828,6 +1859,27 @@ export async function deleteComment(
     return;
   }
   await call('im.v2.Chat.Message.delete', { messageIds: [comment.id], taskId });
+}
+
+/**
+ * Wlasna reakcja na komentarz z czatu — dodanie albo zdjecie. Tak jak przy edycji, `taskId` nie
+ * jest parametrem metody, jedzie tylko do dziennika (`taskIdOf`); sprawdzone, ze nie przeszkadza.
+ *
+ * „Juz jest" przy dodaniu i „nie ma" przy zdjeciu to stan, ktorego chcielismy — np. reakcja
+ * dana chwile wczesniej w Bitriksie — wiec nie sa bledem.
+ */
+export async function setReaction(messageId: number, code: string, on: boolean, taskId: number): Promise<void> {
+  try {
+    await call(on ? 'im.v2.Chat.Message.Reaction.add' : 'im.v2.Chat.Message.Reaction.delete', {
+      messageId,
+      reaction: code,
+      taskId,
+    });
+  } catch (e) {
+    const juz = on ? 'REACTION_ALREADY_SET' : 'REACTION_NOT_FOUND';
+    if (e instanceof BxError && e.message === juz) return;
+    throw e;
+  }
 }
 
 // ─── Historia / czas w toku ──────────────────────────────────────────────────
