@@ -9547,3 +9547,21 @@ a.mention:hover {
   margin-left: auto;
   order: 3;
 }
+
+/* Stan kreski pozostalej mocy: ostrzezenie (w toku), nie zdazy (nowe). */
+.person-bar-cap-warn,
+.person-row-cap-warn {
+  background: var(--accent-amber, #f59e0b);
+  color: var(--accent-amber, #f59e0b);
+}
+
+.person-bar-cap-late,
+.person-row-cap-late {
+  background: var(--danger, #f85149);
+  color: var(--danger, #f85149);
+}
+
+.person-row-cap-warn,
+.person-row-cap-late {
+  background: none;
+}

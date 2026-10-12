@@ -15,7 +15,7 @@ import { BurndownChart, Legend, ScopeBar, StageStrip, type Series } from './Char
 import { Avatar, CheckIcon, ChevronIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { isUnassigned, tasksWord, UNASSIGNED_LABEL } from './taskView';
-import { sprintDeadline, sprintWorkEnd } from './sprintClock';
+import { capacityState, weekWindow } from './capacityMarker';
 import { memberHoursBetween, type TeamConfig } from './team';
 
 /*
@@ -187,12 +187,15 @@ export function Dashboard({
     else byPerson.set(t.responsibleId, [t]);
   }
 
-  /* Przedzial sprintu jak w podsumowaniu: od 8:00 pierwszego dnia do konca pracy ostatniego. */
+  /*
+   * POZOSTALA moc do konca tygodnia pracy: od teraz (a przed startem od poniedzialku 8:00) do piatku 16:00.
+   * Na poczatku to pelna moc — pilnuje, zeby nikogo nie zawalic robota; z uplywem tygodnia kurczy sie
+   * i pokazuje, czy osoba jeszcze zdazy z tym, co jej zostalo.
+   */
   const sprintSpan = (() => {
     const start = base.sprint.dateStart ? new Date(base.sprint.dateStart) : null;
-    const end = sprintDeadline(base.sprint.dateEnd ?? null);
-    if (!start || Number.isNaN(start.getTime()) || !end) return null;
-    return { from: new Date(start.getFullYear(), start.getMonth(), start.getDate(), 8), to: sprintWorkEnd(end) };
+    if (!start || Number.isNaN(start.getTime())) return null;
+    return weekWindow(start, new Date());
   })();
 
   const people = [...byPerson.entries()]
@@ -239,7 +242,12 @@ export function Dashboard({
     .map((p) => {
       const m = team.members.find((x) => x.id === p.id);
       const cap = m && sprintSpan ? memberHoursBetween(team, p.id, sprintSpan.from, sprintSpan.to) : 0;
-      return { ...p, role: m?.role ?? '', cap: Math.round(cap * 10) / 10 };
+      return {
+        ...p,
+        role: m?.role ?? '',
+        cap: Math.round(cap * 10) / 10,
+        capState: m && p.sp > 0 ? capacityState(p.segments, cap) : ('ok' as const),
+      };
     })
     // Sortujemy po CALOSCI, nie po reszcie: inaczej lista przeskakiwalaby przy
     // kazdym przelaczeniu, a szuka sie w niej po nazwisku, nie po liczbie.
@@ -520,15 +528,24 @@ export function Dashboard({
                   </span>
                   {p.cap > 0 && (
                     <span
-                      className="person-bar-cap"
+                      className={`person-bar-cap person-bar-cap-${p.capState}`}
                       style={{ left: `${(p.cap / barScale) * 100}%` }}
-                      title={`Moc w tym sprincie: ${p.cap} h`}
+                      title={`Pozostała moc do końca tygodnia: ${p.cap} h`}
                     />
                   )}
                 </span>
 
-                <span className={`person-row-cap${p.cap > 0 && p.sp > p.cap ? ' person-row-over' : ''}`}>
-                  {p.cap > 0 ? `moc ${p.cap}` : ''}
+                <span
+                  className={`person-row-cap person-row-cap-${p.capState}`}
+                  title={
+                    p.capState === 'late'
+                      ? 'Nie zdąży: pozostała moc nie pokrywa nawet zadań, które jeszcze nie ruszyły'
+                      : p.capState === 'warn'
+                        ? 'Uwaga: pozostała moc nie pokrywa zadań w toku'
+                        : 'Pozostała moc do końca tygodnia (godziny = SP)'
+                  }
+                >
+                  {p.cap > 0 || p.capState !== 'ok' ? `moc ${p.cap}${p.capState === 'late' ? ' · nie zdąży' : ''}` : ''}
                 </span>
 
                 <span className="person-row-count">
