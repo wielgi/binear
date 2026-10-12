@@ -184,6 +184,7 @@ import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { TilesBar } from './TilesBar';
 import { TilesModal } from './TilesModal';
+import { groupedKeys, matchGrouped, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
 import {
   groupedTiles,
   groupTotals,
@@ -324,6 +325,8 @@ interface Condition {
   field: FilterField;
   op: FilterOp;
   values: string[];
+  /** Grupa LUB (nawias): warunki z tym samym `or` wystarczy spelnic jeden z nich. */
+  or?: string;
 }
 
 /** Lista warunkow — miedzy warunkami ORAZ, wewnatrz warunku decyduje operator. */
@@ -479,6 +482,7 @@ function rangeLabel(field: FilterField, values: string[]): string {
 // Stabilne id warunku — wystarczy monotoniczny licznik na czas zycia karty.
 let condSeq = 0;
 const newCondId = (): string => `c${++condSeq}`;
+const newGroupId = (): string => `g${++condSeq}`;
 
 /** Ile ikon pokazac w nachodzacym stosie na chipie, zanim przejdziemy na „+N". */
 const CHIP_STACK_MAX = 5;
@@ -754,7 +758,7 @@ function loadViews(): SavedView[] {
 /** Porownywalny odcisk widoku — bez `id`/`name`, z filtrami bez ulotnych id warunkow. */
 function viewFingerprint(v: Omit<SavedView, 'id' | 'name'>): string {
   return JSON.stringify({
-    filters: v.filters.map((c) => ({ field: c.field, op: c.op, values: c.values })),
+    filters: groupedKeys(v.filters, (c) => JSON.stringify([c.field, c.op, c.values])),
     query: v.query,
     groupBy: v.groupBy,
     subGroupBy: v.subGroupBy,
@@ -2106,7 +2110,7 @@ function matchFilters(
   stageNames: Map<number, string>,
   ctx: FilterCtx = NO_FILTER_CTX,
 ): boolean {
-  return conditions.every((c) => matchCondition(t, c, stageNames, ctx));
+  return matchGrouped(conditions, (c) => matchCondition(t, c, stageNames, ctx));
 }
 
 function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>, ctx: FilterCtx): boolean {
@@ -8841,7 +8845,13 @@ export default function App() {
 
   /** Usun jeden warunek (krzyzyk na chipie albo porzucony, pusty popover). */
   const removeCondition = useCallback(
-    (condId: string) => setFilters((f) => f.filter((c) => c.id !== condId)),
+    (condId: string) => setFilters((f) => normalizeGroups(f.filter((c) => c.id !== condId))),
+    [],
+  );
+
+  /** Lacznik miedzy chipem a jego poprzednikiem: ORAZ <-> LUB. */
+  const toggleJoinCond = useCallback(
+    (condId: string) => setFilters((f) => toggleJoin(f, condId, newGroupId)),
     [],
   );
 
@@ -9248,7 +9258,8 @@ export default function App() {
   }, []);
   const [tilesOpen, setTilesOpen] = useState<null | 'new' | 'manage'>(null);
   /* Warunki paska <-> zapisywalne (bez id). */
-  const toTileFilters = (f: Filters) => f.map((c) => ({ field: c.field, op: c.op, values: c.values }));
+  const toTileFilters = (f: Filters) =>
+    f.map((c) => ({ field: c.field, op: c.op, values: c.values, ...(c.or ? { or: c.or } : {}) }));
   const filterCtx = useMemo<FilterCtx>(() => ({ answered, folders }), [answered, folders]);
   const tileValues = useMemo(() => {
     const m = new Map<string, TileNumbers>();
@@ -9292,7 +9303,7 @@ export default function App() {
       tilesCfg.tiles.find((t) =>
         sameView(t, {
           scope: scopePref,
-          filters: filters.map((c) => ({ field: c.field, op: c.op, values: c.values })),
+          filters: toTileFilters(filters),
           onlyMine,
           showDone,
         }),
@@ -9308,7 +9319,7 @@ export default function App() {
     setScope(tile.scope);
     setShowDone(tile.showDone);
     setOnlyMine(tile.onlyMine);
-    setFilters(tile.filters.map((c) => ({ ...c, id: newCondId() })) as Filters);
+    setFilters(refreshGroups(tile.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })) as Filters);
     setQuery('');
     searchRef.current?.setValue('');
     setEditingViewId(null);
@@ -10057,7 +10068,7 @@ export default function App() {
     // Od teraz edytujemy TEN widok — takze gdy zastosowano go z klawiatury (v + 1-9).
     setEditingViewId(v.id);
     // Swieze id warunkow, zeby nie kolidowaly z licznikiem `condSeq` biezacej sesji.
-    setFilters(v.filters.map((c) => ({ ...c, id: newCondId() })));
+    setFilters(refreshGroups(v.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })));
     // Wyszukiwanie: od razu do stanu i do widocznego pola (SearchBox ma wlasny draft).
     // Widoki zapisane przed dodaniem pola `query` nie maja go wcale — bez `?? ''`
     // setQuery(undefined) wywala matchQuery (query.trim) i cala aplikacja gasnie.
@@ -11947,8 +11958,22 @@ export default function App() {
             <ScrollX onSpare={onChipsSpare}>
               {filters
                 .filter((c) => c.values.length)
-              .map((c) => (
-                <div className="filter-chip" key={c.id}>
+              .map((c, i, vis) => (
+                <Fragment key={c.id}>
+                {i > 0 && (
+                  <button
+                    className={`filter-join${c.or && c.or === vis[i - 1].or ? ' filter-join-or' : ''}`}
+                    title={
+                      c.or && c.or === vis[i - 1].or
+                        ? 'LUB — wystarczy jeden z tych warunków. Kliknij, żeby rozdzielić (ORAZ).'
+                        : 'ORAZ — oba warunki naraz. Kliknij, żeby zamienić na LUB.'
+                    }
+                    onClick={() => toggleJoinCond(c.id)}
+                  >
+                    {c.or && c.or === vis[i - 1].or ? 'LUB' : 'ORAZ'}
+                  </button>
+                )}
+                <div className={`filter-chip${c.or ? ' filter-chip-in-or' : ''}`}>
                   <button
                     className="filter-chip-main filter-chip-opbtn"
                     title="Zmień operator"
@@ -12006,6 +12031,7 @@ export default function App() {
                     <CloseIcon />
                   </button>
                 </div>
+                </Fragment>
               ))}
             </ScrollX>
           )}

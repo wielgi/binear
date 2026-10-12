@@ -6,6 +6,8 @@
  * Sama logika i zapis w przegladarce, bez Reacta (patrz customTiles.test.ts).
  */
 
+import { groupedKeys } from './filterLogic';
+
 export type TileScope = 'sprint' | 'outside' | 'all';
 
 /** Warunek filtra w postaci zapisywalnej (bez `id` — ten powstaje dopiero przy zastosowaniu na pasku). */
@@ -13,6 +15,8 @@ export interface TileCondition {
   field: string;
   op: string;
   values: string[];
+  /** Id grupy LUB: warunki z tym samym `or` wystarczy spelnic jeden z nich (patrz filterLogic.ts). */
+  or?: string;
 }
 
 /** Co kafelek pokazuje jako liczbe: liczbe zadan albo sume story pointow. */
@@ -173,7 +177,12 @@ export function normalizeConfig(raw: unknown, fallbackItPack: boolean): TilesCon
     if (tiles.some((x) => x.id === t.id)) continue;
     const filters: TileCondition[] = (Array.isArray(t.filters) ? t.filters : [])
       .filter((c) => c && typeof c.field === 'string' && typeof c.op === 'string' && Array.isArray(c.values))
-      .map((c) => ({ field: c.field, op: c.op, values: c.values.map(String) }));
+      .map((c) => ({
+        field: c.field,
+        op: c.op,
+        values: c.values.map(String),
+        ...(typeof c.or === 'string' && c.or ? { or: c.or } : {}),
+      }));
     // Kafelek bez istniejacej grupy trafia do pierwszej (albo do nowej domyslnej) — nic nie znika po cichu.
     let group = typeof t.group === 'string' && groups.some((g) => g.id === t.group) ? t.group : '';
     if (!group) {
@@ -274,8 +283,8 @@ export function sameView(
   state: { scope: TileScope; filters: readonly TileCondition[]; onlyMine: boolean; showDone: boolean },
 ): boolean {
   const key = (c: TileCondition) => `${c.field}|${c.op}|${[...c.values].sort().join(',')}`;
-  const a = tile.filters.filter((c) => c.values.length).map(key).sort();
-  const b = state.filters.filter((c) => c.values.length).map(key).sort();
+  const a = groupedKeys(tile.filters.filter((c) => c.values.length), key);
+  const b = groupedKeys(state.filters.filter((c) => c.values.length), key);
   return (
     tile.scope === state.scope &&
     tile.onlyMine === state.onlyMine &&
