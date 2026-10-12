@@ -330,7 +330,11 @@ export function TilesModal({
   const strip = (
     <div className="counters tiles-strip" role="toolbar" aria-label="Kafelki do edycji">
       {cfg.groups.map((g) => (
-        <div key={g.id} className="counters-group">
+        <div
+          key={g.id}
+          className="counters-group"
+          style={{ ['--n' as string]: Math.max(1, cfg.tiles.filter((t) => t.group === g.id).length) } as CSSProperties}
+        >
           <button
             className={`counters-cap counters-cap-total tiles-strip-cap${selGroup?.id === g.id ? ' tiles-strip-on' : ''}`}
             onClick={() => setSel({ k: 'group', id: g.id })}

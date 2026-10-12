@@ -8676,7 +8676,7 @@ a.mention:hover {
 }
 
 .tiles-modal {
-  width: min(760px, calc(100vw - 32px));
+  width: min(1180px, calc(100vw - 32px));
 }
 
 .tiles-pack {
