@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { TILE_ICON_NODES } from './tileIcons';
 import {
   addGroup,
   addTile,
+  colorCss,
   emptyConfig,
   exportConfig,
   groupedTiles,
+  groupTotals,
   importConfig,
   moveGroup,
   moveTile,
@@ -14,8 +17,10 @@ import {
   removeTile,
   renameGroup,
   sameView,
+  shownValue,
   tileValue,
   updateTile,
+  TILE_ICON_KEYS,
   type CustomTile,
 } from './customTiles';
 
@@ -164,5 +169,38 @@ describe('eksport i import', () => {
     expect(importConfig('nie json', cur)).toBeNull();
     expect(importConfig('{"a":1}', cur)).toBeNull();
     expect(importConfig(JSON.stringify({ binearTiles: 1, tiles: [] }), cur)).toBeNull();
+  });
+});
+
+describe('kolor, ikony i sumy grupy', () => {
+  it('kolor moze byc kluczem palety albo #rrggbb; inny wraca do domyslnego', () => {
+    const t = (color: unknown) =>
+      normalizeConfig({ groups: [{ id: 'g', name: 'G' }], tiles: [{ id: 't', name: 'A', group: 'g', color }] }, true).tiles[0].color;
+    expect(t('green')).toBe('green');
+    expect(t('#a1B2c3')).toBe('#a1B2c3');
+    expect(t('#abc')).toBe('blue');
+    expect(t('nie-kolor')).toBe('blue');
+    expect(colorCss('#a1b2c3')).toBe('#a1b2c3');
+    expect(colorCss('zzz')).toBe(colorCss('blue'));
+  });
+
+  it('ikon jest kilkadziesiat, a klucze sie nie powtarzaja', () => {
+    expect(TILE_ICON_KEYS.length).toBeGreaterThanOrEqual(40);
+    expect(new Set(TILE_ICON_KEYS).size).toBe(TILE_ICON_KEYS.length);
+  });
+
+  it('kazdy klucz ikony ma rysunek i odwrotnie (lista w customTiles zgadza sie z tileIcons)', () => {
+    expect(Object.keys(TILE_ICON_NODES).sort()).toEqual([...TILE_ICON_KEYS].sort());
+  });
+
+  it('suma grupy: zadania i SP wszystkich kafelkow; kafelek pokazuje to, co mierzy', () => {
+    const values = new Map([
+      ['a', { count: 4, points: 10 }],
+      ['b', { count: 2, points: 3 }],
+    ]);
+    expect(groupTotals([{ id: 'a' }, { id: 'b' }, { id: 'brak' }], values)).toEqual({ count: 6, points: 13 });
+    expect(groupTotals([], values)).toEqual({ count: 0, points: 0 });
+    expect(shownValue({ measure: 'count' }, values.get('a')!)).toBe(4);
+    expect(shownValue({ measure: 'points' }, values.get('a')!)).toBe(10);
   });
 });

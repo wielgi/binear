@@ -78,7 +78,73 @@ export const TILE_ICON_KEYS = [
   'tag',
   'person',
   'eye',
+  'star',
+  'heart',
+  'bell',
+  'flag',
+  'zap',
+  'target',
+  'alert',
+  'clock',
+  'users',
+  'lock',
+  'shield',
+  'box',
+  'truck',
+  'warehouse',
+  'cart',
+  'gift',
+  'dollar',
+  'mail',
+  'phone',
+  'wrench',
+  'cpu',
+  'globe',
+  'camera',
+  'board',
+  'plan',
+  'chart',
+  'columns',
+  'bars',
+  'subtask',
+  'link',
+  'pin',
+  'clip',
+  'search',
+  'refresh',
+  'smile',
+  'plusCircle',
 ] as const;
+
+/** Kolor kafelka: klucz z palety albo dowolny kolor w zapisie #rrggbb (wybrany z pickera). */
+export const isHexColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
+export const validColor = (v: unknown): v is string => isHexColor(v) || (typeof v === 'string' && v in TILE_COLORS);
+/** CSS koloru kafelka; nieznany klucz → domyslny. */
+export const colorCss = (key: string): string => (isHexColor(key) ? key : (TILE_COLORS[key]?.css ?? TILE_COLORS.blue.css));
+
+/** Liczba zadan i suma SP kafelka (oba liczymy zawsze — kafelek pokazuje jedno z nich, grupa sumuje oba). */
+export interface TileNumbers {
+  count: number;
+  points: number;
+}
+
+/** To, co kafelek pokazuje jako swoja liczbe. */
+export const shownValue = (tile: Pick<CustomTile, 'measure'>, v: TileNumbers): number =>
+  tile.measure === 'points' ? v.points : v.count;
+
+/**
+ * Suma kafelkow grupy (zadania i SP) — do podpisu grupy. Kafelki to osobne widoki i moga sie
+ * nakladac, wiec to SUMA KAFELKOW, a nie liczba roznych zadan.
+ */
+export function groupTotals(tiles: readonly Pick<CustomTile, 'id'>[], values: ReadonlyMap<string, TileNumbers>): TileNumbers {
+  return tiles.reduce(
+    (n, t) => {
+      const v = values.get(t.id);
+      return v ? { count: n.count + v.count, points: n.points + v.points } : n;
+    },
+    { count: 0, points: 0 },
+  );
+}
 
 export const DEFAULT_COLOR = 'blue';
 export const DEFAULT_ICON = 'list';
@@ -122,7 +188,7 @@ export function normalizeConfig(raw: unknown, fallbackItPack: boolean): TilesCon
       onlyMine: t.onlyMine === true,
       showDone: t.showDone === true,
       measure: t.measure === 'points' ? 'points' : 'count',
-      color: typeof t.color === 'string' && TILE_COLORS[t.color] ? t.color : DEFAULT_COLOR,
+      color: validColor(t.color) ? t.color : DEFAULT_COLOR,
       icon: typeof t.icon === 'string' && (TILE_ICON_KEYS as readonly string[]).includes(t.icon) ? t.icon : DEFAULT_ICON,
       group,
     });

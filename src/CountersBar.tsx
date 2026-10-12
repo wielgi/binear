@@ -307,7 +307,7 @@ function dayLabel(day: string, today: Date): string {
   return `${d}.${m}`;
 }
 
-function Delta({
+export function Delta({
   now,
   before,
   day,

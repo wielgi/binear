@@ -120,13 +120,21 @@ and the *only mine* / *show completed* switches, plus how it looks:
 - click a tile to apply its view, click it again to clear the filters; a tile is highlighted while the list
   shows exactly its view.
 
-Create one with **＋ Kafelek** (it saves the *current* view) and manage them with **Kafelki…** (rename, recolour,
-regroup, reorder, replace a tile's filters with the current view, delete). The built-in IT counters are a
-**preset** ("proces IT") that is **off by default for a fresh install** and on for anyone who already used
-binear; toggle it in the same dialog.
+Create one with the **+** button (it saves the *current* view) and manage them with the **pencil** (rename, recolour,
+regroup, reorder, replace a tile's filters with the current view, delete). Colours: 8 swatches or any colour from the
+colour picker; 50 icons. Each group caption shows the **sum of its tiles** (tasks and SP) and the **change against the
+previous day**, like the built-in set; every tile shows its own change too (history is kept per browser).
+Tiles are separate views and may overlap, so a group sum is the sum of its tiles, not the number of distinct tasks.
 
 The configuration lives in this browser (`localStorage`, key `binear.tiles.v1`). **Export / import** a JSON file
 to move a department's set to another browser; an import *adds* tiles and groups (new ids), it never overwrites.
+
+## Filters added for tiles
+
+Two new filter dimensions (also usable on the filter bar): **Odpowiedź w czacie** (yes — someone answered after our
+questions / no; read from the task chats, so it is empty until they load) and **Rodzaj zadania** (parent with an open
+subtask / subtask / plain). Together with the existing *no estimate*, *no epic*, *no tags*, *no deadline* and
+*unassigned* values they cover "missing X" tiles.
 
 ## Counters
 

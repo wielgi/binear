@@ -8,6 +8,7 @@ import {
   DEFAULT_ICON,
   exportConfig,
   importConfig,
+  isHexColor,
   moveGroup,
   moveTile,
   moveToGroup,
@@ -63,6 +64,15 @@ function Swatches({ value, onPick }: { value: string; onPick: (k: string) => voi
           onClick={() => onPick(k)}
         />
       ))}
+      {/* Dowolny kolor: pelny picker przegladarki; wybrany kolor zapisuje sie jako #rrggbb. */}
+      <label className={`tile-swatch tile-swatch-custom${isHexColor(value) ? ' tile-swatch-on' : ''}`} title="Własny kolor">
+        <input
+          type="color"
+          value={isHexColor(value) ? value : '#58a6ff'}
+          aria-label="Własny kolor"
+          onChange={(e) => onPick(e.target.value)}
+        />
+      </label>
     </span>
   );
 }

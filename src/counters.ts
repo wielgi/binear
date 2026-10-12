@@ -548,7 +548,9 @@ export function answerState(messages: ChatMessage[], isIt: (authorId: number) =>
 // ─── Historia dzien po dniu ──────────────────────────────────────────────────
 
 /** Stan licznikow jednego dnia. Klucz `sprintPoints` = suma SP sprintu. */
-export type DaySnapshot = Partial<Record<CounterKey | 'sprintPoints', number>>;
+export type DaySnapshot = Partial<
+  Record<CounterKey | 'sprintPoints' | `t:${string}` | `g:${string}` | `gs:${string}`, number>
+>;
 /** Dzien (RRRR-MM-DD, czas lokalny) → stan. */
 export type CounterHistory = Record<string, DaySnapshot>;
 
