@@ -9542,3 +9542,8 @@ a.mention:hover {
 .manage-error {
   color: var(--danger, #f85149);
 }
+
+.sum-pdf {
+  margin-left: auto;
+  order: 3;
+}

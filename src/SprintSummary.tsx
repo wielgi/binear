@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import type { Sprint, Task } from "./bitrix";
+import { printSnapshot } from "./printSnapshot";
 import { sprintDeadline, workHoursBetween } from "./sprintClock";
 import {
   SUMMARY_STATES,
@@ -131,6 +132,7 @@ export function SprintSummary({
   capacitySource: "grafik" | "konfiguracja" | null;
   onOpen: (id: number) => void;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const data = useMemo(
     () =>
       sprint ? summarizeSprint(tasks, sprint.id, workStageIds, epicName) : null,
@@ -158,9 +160,17 @@ export function SprintSummary({
 
   return (
     <div className="sum-scroll">
-      <div className="sum">
+      <div className="sum" ref={rootRef}>
         <header className="sum-head">
           <h2>{sprint.name}</h2>
+          <button
+            className="btn sum-pdf"
+            data-no-print
+            title="Zrzut tego widoku z rozwiniętymi sekcjami — w oknie druku wybierz „Zapisz jako PDF”"
+            onClick={() => rootRef.current && printSnapshot(rootRef.current, `Podsumowanie ${sprint.name} ${new Date().toLocaleDateString("pl-PL")}`)}
+          >
+            Zapisz PDF
+          </button>
           <span className="sum-dates">
             {dm(sprint.dateStart)} – {dm(sprint.dateEnd)}
             {end && hoursLeft > 0 && (
