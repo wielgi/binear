@@ -184,7 +184,7 @@ import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { TilesBar } from './TilesBar';
 import { TilesModal } from './TilesModal';
-import { groupedKeys, matchGrouped, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
+import { groupedKeys, matchGrouped, moveCondition, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
 import {
   groupedTiles,
   groupTotals,
@@ -2862,6 +2862,30 @@ function ScopePicker({
  * tak samo we wszystkich przegladarkach. Pasek pojawia sie tylko przy najechaniu
  * i tylko gdy tresc naprawde wystaje.
  */
+/**
+ * Chip filtra, ktory da sie przeciagnac na miejsce innego (kolejnosc decyduje o tym, ktore chipy mozna
+ * polaczyc LUB). Jeden element jest naraz zrodlem i celem; klik w przyciski wewnatrz dziala, bo
+ * czujnik rusza dopiero po przesunieciu o kilka pikseli.
+ */
+function DraggableChip({ id, className, children }: { id: string; className: string; children: ReactNode }) {
+  const drag = useDraggable({ id: `chip:${id}` });
+  const drop = useDroppable({ id: `chip:${id}` });
+  return (
+    <div
+      ref={(el) => {
+        drag.setNodeRef(el);
+        drop.setNodeRef(el);
+      }}
+      className={`${className}${drag.isDragging ? ' filter-chip-dragging' : ''}${drop.isOver && !drag.isDragging ? ' filter-chip-over' : ''}`}
+      style={drag.transform ? { transform: `translate3d(${drag.transform.x}px, 0, 0)` } : undefined}
+      {...drag.listeners}
+      {...drag.attributes}
+    >
+      {children}
+    </div>
+  );
+}
+
 function ScrollX({
   children,
   onSpare,
@@ -10607,6 +10631,13 @@ export default function App() {
     useSensor(KeyboardSensor),
   );
 
+  /** Przeciagniecie chipa filtra na inny zmienia kolejnosc warunkow. */
+  const onChipDragEnd = useCallback((e: DragEndEvent) => {
+    const from = String(e.active.id).replace(/^chip:/, '');
+    const to = e.over ? String(e.over.id).replace(/^chip:/, '') : '';
+    if (to && from !== to) setFilters((f) => moveCondition(f, from, to));
+  }, []);
+
   const onDragStart = useCallback((e: DragStartEvent) => setDraggingId(parseDrag(e.active.id)), []);
 
   /*
@@ -11955,6 +11986,7 @@ export default function App() {
           {/* Chipy filtrow (przewijane POZIOMO), a TUZ ZA NIMI „+ Filtr" — dodawanie
               dopisuje kolejny chip na koncu, wiec przycisk stoi tam, gdzie pojawi sie efekt. */}
           {anyFilter(filters) && (
+            <DndContext sensors={sensors} onDragEnd={onChipDragEnd}>
             <ScrollX onSpare={onChipsSpare}>
               {filters
                 .filter((c) => c.values.length)
@@ -11973,7 +12005,7 @@ export default function App() {
                     {c.or && c.or === vis[i - 1].or ? 'LUB' : 'ORAZ'}
                   </button>
                 )}
-                <div className={`filter-chip${c.or ? ' filter-chip-in-or' : ''}`}>
+                <DraggableChip id={c.id} className={`filter-chip${c.or ? ' filter-chip-in-or' : ''}`}>
                   <button
                     className="filter-chip-main filter-chip-opbtn"
                     title="Zmień operator"
@@ -12030,10 +12062,11 @@ export default function App() {
                   >
                     <CloseIcon />
                   </button>
-                </div>
+                </DraggableChip>
                 </Fragment>
               ))}
             </ScrollX>
+            </DndContext>
           )}
 
           <button

@@ -74,3 +74,21 @@ export function refreshGroups<T extends Groupable>(conds: readonly T[], newGroup
     return { ...c, or: map.get(c.or) };
   });
 }
+
+/**
+ * Przenosi warunek `fromId` na miejsce warunku `toId` (przeciaganie chipow). Przenoszony chip wychodzi
+ * ze swojej grupy LUB — o tym, kto z kim sasiaduje, decyduje potem lacznik, a nie pozostalosc po starym miejscu.
+ */
+export function moveCondition<T extends Groupable & { id: string }>(
+  conds: readonly T[],
+  fromId: string,
+  toId: string,
+): T[] {
+  const from = conds.findIndex((c) => c.id === fromId);
+  const to = conds.findIndex((c) => c.id === toId);
+  if (from < 0 || to < 0 || from === to) return [...conds];
+  const rest = conds.filter((c) => c.id !== fromId);
+  const { or: _or, ...moved } = conds[from];
+  rest.splice(to, 0, moved as unknown as T);
+  return normalizeGroups(rest);
+}
