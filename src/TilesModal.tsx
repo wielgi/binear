@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
 import {
@@ -23,10 +23,12 @@ import {
   updateTile,
   type CustomTile,
   type TileCondition,
+  type TileGroup,
   type TileMeasure,
   type TileScope,
   type TilesConfig,
 } from './customTiles';
+import { PlusIcon } from './tileIcons';
 import { TILE_ICON_NODES, tileColorCss } from './TilesBar';
 
 /** Widok z listy (zakres, filtry, przelaczniki) — to, co zapisuje sie w kafelku. */
@@ -105,6 +107,9 @@ function Icons({ value, onPick }: { value: string; onPick: (k: string) => void }
  */
 const LOOSE = '__loose';
 
+/** Co jest zaznaczone w pasku kafelkow: kafelek, grupa albo formularz nowego kafelka. */
+type Sel = { k: 'tile'; id: string } | { k: 'group'; id: string } | { k: 'new' } | null;
+
 export function TilesModal({
   cfg,
   current,
@@ -120,7 +125,7 @@ export function TilesModal({
   onChange: (next: TilesConfig) => void;
   onClose: () => void;
 }) {
-  const [creating, setCreating] = useState(startNew);
+  const [sel, setSel] = useState<Sel>(startNew ? { k: 'new' } : null);
   const [name, setName] = useState('');
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [icon, setIcon] = useState(DEFAULT_ICON);
@@ -142,11 +147,12 @@ export function TilesModal({
       next = addGroup(next, newGroup.trim() || 'Moje kafelki');
       g = next.groups[next.groups.length - 1].id;
     }
-    next = addTile(next, { id: newId('t'), name: name.trim().slice(0, 40), ...current, measure, color, icon, group: g });
+    const id = newId('t');
+    next = addTile(next, { id, name: name.trim().slice(0, 40), ...current, measure, color, icon, group: g });
     onChange(next);
     setName('');
     setNewGroup('');
-    setCreating(false);
+    setSel({ k: 'tile', id });
   };
 
   const download = () => {
@@ -166,79 +172,11 @@ export function TilesModal({
     setImportMsg(`Zaimportowano ${merged.tiles.length - cfg.tiles.length} kafelków.`);
   };
 
-  const tileRow = (t: CustomTile) => (
-    <div key={t.id} className="tile-row">
-      <span className="tile-row-icon" style={{ color: tileColorCss(t.color) }}>
-        {TILE_ICON_NODES[t.icon]}
-      </span>
-      <input
-        className="tile-row-name"
-        value={t.name}
-        maxLength={40}
-        aria-label="Nazwa kafelka"
-        onChange={(e) => onChange(updateTile(cfg, t.id, { name: e.target.value }))}
-        onBlur={(e) => !e.target.value.trim() && onChange(updateTile(cfg, t.id, { name: 'Kafelek' }))}
-      />
-      <select
-        value={t.measure}
-        aria-label="Co liczyć"
-        onChange={(e) => onChange(updateTile(cfg, t.id, { measure: e.target.value as TileMeasure }))}
-      >
-        <option value="count">zadania</option>
-        <option value="points">suma SP</option>
-      </select>
-      <select value={t.group} aria-label="Grupa" onChange={(e) => onChange(moveToGroup(cfg, t.id, e.target.value))}>
-        {cfg.groups.map((g) => (
-          <option key={g.id} value={g.id}>
-            {g.name}
-          </option>
-        ))}
-      </select>
-      <button className="btn" onClick={() => onChange(moveTile(cfg, t.id, -1))} title="W górę" aria-label="W górę">
-        ↑
-      </button>
-      <button className="btn" onClick={() => onChange(moveTile(cfg, t.id, 1))} title="W dół" aria-label="W dół">
-        ↓
-      </button>
-      <button
-        className="btn"
-        onClick={() => onChange(updateTile(cfg, t.id, { ...current }))}
-        title={`Zastąp filtry kafelka bieżącym widokiem (${describeView(current)})`}
-      >
-        Użyj bieżącego widoku
-      </button>
-      <button className="btn" onClick={() => onChange(removeTile(cfg, t.id))} title="Usuń kafelek" aria-label="Usuń kafelek">
-        ×
-      </button>
-      <div className="tile-row-style">
-        <Swatches value={t.color} onPick={(k) => onChange(updateTile(cfg, t.id, { color: k }))} />
-        <Icons value={t.icon} onPick={(k) => onChange(updateTile(cfg, t.id, { icon: k }))} />
-        <span className="tile-row-view">{describeView(t)}</span>
-      </div>
-    </div>
-  );
+  const selTile = sel?.k === 'tile' ? cfg.tiles.find((t) => t.id === sel.id) : undefined;
+  const selGroup = sel?.k === 'group' ? cfg.groups.find((g) => g.id === sel.id) : undefined;
 
-  return createPortal(
-    <>
-      <div className="picker-backdrop" onClick={onClose} />
-      <div className="team-modal tiles-modal" role="dialog" aria-label="Kafelki">
-        <header className="team-head">
-          <h2>Kafelki</h2>
-          <button className="btn" onClick={onClose}>
-            Zamknij
-          </button>
-        </header>
-
-        <label className="tiles-pack">
-          <input type="checkbox" checked={cfg.itPack} onChange={(e) => onChange({ ...cfg, itPack: e.target.checked })} />
-          <span>
-            Zestaw „proces IT” (Do wyceny, Gotowe do startu, Czeka na odpowiedź…)
-            <small>Wbudowane kafelki procesu zadań IT; inne działy zwykle ich nie potrzebują.</small>
-          </span>
-        </label>
-
-        {creating ? (
-          <section className="tile-new">
+  const newForm = (
+    <section className="tile-new">
             <h3>Nowy kafelek z bieżącego widoku</h3>
             <p className="team-hint">{describeView(current)}</p>
             <input
@@ -281,53 +219,197 @@ export function TilesModal({
               <button className="btn btn-primary" disabled={!name.trim()} onClick={create}>
                 Dodaj kafelek
               </button>
-              <button className="btn" onClick={() => setCreating(false)}>
+              <button className="btn" onClick={() => setSel(null)}>
                 Anuluj
               </button>
             </span>
           </section>
-        ) : (
-          <button className="btn" onClick={() => setCreating(true)}>
-            ＋ Nowy kafelek z bieżącego widoku
+  );
+
+  const tileEditor = (t: CustomTile) => (
+    <section className="tile-new tile-edit">
+      <header className="tile-edit-head">
+        <h3>Kafelek</h3>
+        <button className="btn" onClick={() => onChange(moveTile(cfg, t.id, -1))} title="Przesuń w lewo" aria-label="Przesuń w lewo">
+          ←
+        </button>
+        <button className="btn" onClick={() => onChange(moveTile(cfg, t.id, 1))} title="Przesuń w prawo" aria-label="Przesuń w prawo">
+          →
+        </button>
+        <button
+          className="btn"
+          onClick={() => {
+            onChange(removeTile(cfg, t.id));
+            setSel(null);
+          }}
+          title="Usuń kafelek"
+        >
+          Usuń
+        </button>
+      </header>
+      <input
+        className="tile-row-name"
+        value={t.name}
+        maxLength={40}
+        aria-label="Nazwa kafelka"
+        onChange={(e) => onChange(updateTile(cfg, t.id, { name: e.target.value }))}
+        onBlur={(e) => !e.target.value.trim() && onChange(updateTile(cfg, t.id, { name: 'Kafelek' }))}
+      />
+      <Swatches value={t.color} onPick={(k) => onChange(updateTile(cfg, t.id, { color: k }))} />
+      <Icons value={t.icon} onPick={(k) => onChange(updateTile(cfg, t.id, { icon: k }))} />
+      <label className="team-add">
+        <span>Liczy</span>
+        <select
+          value={t.measure}
+          onChange={(e) => onChange(updateTile(cfg, t.id, { measure: e.target.value as TileMeasure }))}
+        >
+          <option value="count">liczbę zadań</option>
+          <option value="points">sumę SP</option>
+        </select>
+      </label>
+      <label className="team-add">
+        <span>Grupa</span>
+        <select value={t.group} onChange={(e) => onChange(moveToGroup(cfg, t.id, e.target.value))}>
+          {cfg.groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="team-hint">Filtry kafelka: {describeView(t)}</p>
+      <span className="tile-new-actions">
+        <button
+          className="btn"
+          onClick={() => onChange(updateTile(cfg, t.id, { ...current }))}
+          title={`Zastąp filtry kafelka bieżącym widokiem (${describeView(current)})`}
+        >
+          Użyj bieżącego widoku
+        </button>
+      </span>
+    </section>
+  );
+
+  const groupEditor = (g: TileGroup) => (
+    <section className="tile-new tile-edit">
+      <header className="tile-edit-head">
+        <h3>Grupa</h3>
+        <button className="btn" onClick={() => onChange(moveGroup(cfg, g.id, -1))} title="Przesuń w lewo" aria-label="Przesuń w lewo">
+          ←
+        </button>
+        <button className="btn" onClick={() => onChange(moveGroup(cfg, g.id, 1))} title="Przesuń w prawo" aria-label="Przesuń w prawo">
+          →
+        </button>
+        <button
+          className="btn"
+          onClick={() => {
+            onChange(removeGroup(cfg, g.id));
+            setSel(null);
+          }}
+          title="Usuń grupę razem z kafelkami"
+        >
+          Usuń grupę
+        </button>
+      </header>
+      <input
+        className="tile-row-name"
+        value={g.name}
+        maxLength={40}
+        aria-label="Nazwa grupy"
+        onChange={(e) => onChange({ ...cfg, groups: cfg.groups.map((x) => (x.id === g.id ? { ...x, name: e.target.value } : x)) })}
+        onBlur={(e) => onChange(renameGroup(cfg, g.id, e.target.value || 'Grupa'))}
+      />
+      <label className="team-hint tile-group-caption" title="Wyłącz, żeby nad kafelkami nie było nazwy grupy ani sumy">
+        <input type="checkbox" checked={!g.hideCaption} onChange={(e) => onChange(setGroupCaption(cfg, g.id, e.target.checked))} />{' '}
+        pokazuj podpis i sumę nad kafelkami
+      </label>
+    </section>
+  );
+
+  /** Pasek jak na liście: grupy z podpisem i kafelki; klik zaznacza element do edycji, plus dodaje nowy. */
+  const strip = (
+    <div className="counters tiles-strip" role="toolbar" aria-label="Kafelki do edycji">
+      {cfg.groups.map((g) => (
+        <div key={g.id} className="counters-group">
+          <button
+            className={`counters-cap counters-cap-total tiles-strip-cap${selGroup?.id === g.id ? ' tiles-strip-on' : ''}`}
+            onClick={() => setSel({ k: 'group', id: g.id })}
+            title="Edytuj grupę: nazwa, kolejność, podpis"
+          >
+            <span className="counters-cap-text">{g.name}</span>
+            {g.hideCaption && <span className="counters-cap-sp">bez podpisu</span>}
           </button>
-        )}
+          <div className="counters-group-row">
+            {cfg.tiles
+              .filter((t) => t.group === g.id)
+              .map((t) => (
+                <button
+                  key={t.id}
+                  className={`counter${selTile?.id === t.id ? ' counter-on' : ''}`}
+                  style={{ ['--c' as string]: tileColorCss(t.color) } as CSSProperties}
+                  aria-pressed={selTile?.id === t.id}
+                  onClick={() => setSel({ k: 'tile', id: t.id })}
+                  title="Edytuj kafelek"
+                >
+                  <span className="counter-icon">{TILE_ICON_NODES[t.icon] ?? TILE_ICON_NODES.list}</span>
+                  <span className="counter-body">
+                    <span className="counter-label">{t.name}</span>
+                    <span className="counter-points">{t.measure === 'points' ? 'suma SP' : 'zadania'}</span>
+                  </span>
+                </button>
+              ))}
+          </div>
+        </div>
+      ))}
+      <div className="counters-group counters-tools">
+        <span className="counters-cap counters-cap-total counters-cap-static counters-cap-ghost" aria-hidden>
+          <span className="counters-cap-text">&nbsp;</span>
+        </span>
+        <div className="counters-group-row counters-tools-row">
+          <button
+            className={`counter counter-add counter-icon-only${sel?.k === 'new' ? ' counter-on' : ''}`}
+            onClick={() => setSel({ k: 'new' })}
+            title="Nowy kafelek z bieżącego widoku"
+            aria-label="Nowy kafelek"
+          >
+            <PlusIcon />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
-        {cfg.groups.length === 0 && !creating && (
-          <p className="team-empty">Nie ma jeszcze własnych kafelków. Ustaw filtry na liście i zapisz je jako kafelek.</p>
-        )}
+  return createPortal(
+    <>
+      <div className="picker-backdrop" onClick={onClose} />
+      <div className="team-modal tiles-modal" role="dialog" aria-label="Kafelki">
+        <header className="team-head">
+          <h2>Kafelki</h2>
+          <button className="btn" onClick={onClose}>
+            Zamknij
+          </button>
+        </header>
 
-        {cfg.groups.map((g) => (
-          <section key={g.id} className="tile-group">
-            <header className="tile-group-head">
-              <input
-                value={g.name}
-                maxLength={40}
-                aria-label="Nazwa grupy"
-                onChange={(e) => onChange({ ...cfg, groups: cfg.groups.map((x) => (x.id === g.id ? { ...x, name: e.target.value } : x)) })}
-                onBlur={(e) => onChange(renameGroup(cfg, g.id, e.target.value || 'Grupa'))}
-              />
-              <label className="team-hint tile-group-caption" title="Wyłącz, żeby nad kafelkami nie było nazwy grupy ani sumy">
-                <input
-                  type="checkbox"
-                  checked={!g.hideCaption}
-                  onChange={(e) => onChange(setGroupCaption(cfg, g.id, e.target.checked))}
-                />{' '}
-                podpis i suma
-              </label>
-              <button className="btn" onClick={() => onChange(moveGroup(cfg, g.id, -1))} title="Grupa wyżej" aria-label="Grupa wyżej">
-                ↑
-              </button>
-              <button className="btn" onClick={() => onChange(moveGroup(cfg, g.id, 1))} title="Grupa niżej" aria-label="Grupa niżej">
-                ↓
-              </button>
-              <button className="btn" onClick={() => onChange(removeGroup(cfg, g.id))} title="Usuń grupę razem z kafelkami" aria-label="Usuń grupę">
-                ×
-              </button>
-            </header>
-            {cfg.tiles.filter((t) => t.group === g.id).map(tileRow)}
-            {cfg.tiles.every((t) => t.group !== g.id) && <p className="team-hint">Grupa jest pusta.</p>}
-          </section>
-        ))}
+        <label className="tiles-pack">
+          <input type="checkbox" checked={cfg.itPack} onChange={(e) => onChange({ ...cfg, itPack: e.target.checked })} />
+          <span>
+            Zestaw „proces IT” (Do wyceny, Gotowe do startu, Czeka na odpowiedź…)
+            <small>Wbudowane kafelki procesu zadań IT; inne działy zwykle ich nie potrzebują.</small>
+          </span>
+        </label>
+
+        {strip}
+
+        {selTile && tileEditor(selTile)}
+        {selGroup && groupEditor(selGroup)}
+        {sel?.k === 'new' && newForm}
+        {!sel && (
+          <p className="team-empty">
+            {cfg.tiles.length
+              ? 'Kliknij kafelek albo nazwę grupy, żeby je edytować. Plus na końcu dodaje nowy kafelek z bieżącego widoku.'
+              : 'Nie ma jeszcze własnych kafelków. Ustaw filtry na liście i dodaj kafelek przyciskiem plus.'}
+          </p>
+        )}
 
         <footer className="tile-io">
           <button className="btn" onClick={download} disabled={!cfg.tiles.length}>

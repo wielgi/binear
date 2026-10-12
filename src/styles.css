@@ -8907,3 +8907,29 @@ a.mention:hover {
   gap: 4px;
   white-space: nowrap;
 }
+
+/* Edycja kafelkow: pasek jak na liscie (grupy + kafelki), pod nim formularz zaznaczonego elementu. */
+.tiles-strip {
+  overflow-x: auto;
+  padding-bottom: var(--s2);
+}
+
+.tiles-strip-cap {
+  border: 0;
+  cursor: pointer;
+}
+
+.tiles-strip-on {
+  box-shadow: inset 0 0 0 1px var(--accent, #3b82f6);
+}
+
+.tile-edit-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.tile-edit-head h3 {
+  margin: 0;
+  margin-right: auto;
+}
