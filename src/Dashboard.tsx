@@ -16,7 +16,7 @@ import { Avatar, CheckIcon, ChevronIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { isUnassigned, tasksWord, UNASSIGNED_LABEL } from './taskView';
 import { capacityState, weekWindow } from './capacityMarker';
-import { memberHoursBetween, type TeamConfig } from './team';
+import { countsCapacity, memberHoursBetween, type TeamConfig } from './team';
 
 /*
  * Ile ostatnich sprintow pobieramy. Wykres jest JEDEN - spalanie biezacego
@@ -246,7 +246,9 @@ export function Dashboard({
         ...p,
         role: m?.role ?? '',
         cap: Math.round(cap * 10) / 10,
-        capState: m && p.sp > 0 ? capacityState(p.segments, cap) : ('ok' as const),
+        /* Osoba z wylaczona moca (np. kierownik) nie ma kreski ani ostrzezen — nie ma czego porownywac. */
+        hasCap: Boolean(m && countsCapacity(m)),
+        capState: m && countsCapacity(m) && p.sp > 0 ? capacityState(p.segments, cap) : ('ok' as const),
       };
     })
     // Sortujemy po CALOSCI, nie po reszcie: inaczej lista przeskakiwalaby przy
@@ -526,7 +528,7 @@ export function Dashboard({
                   <span className="person-bar-fill" style={{ width: `${(p.sp / barScale) * 100}%` }}>
                     <StageStrip segments={p.segments} done={p.done} />
                   </span>
-                  {p.cap > 0 && (
+                  {p.hasCap && p.cap > 0 && (
                     <span
                       className={`person-bar-cap person-bar-cap-${p.capState}`}
                       style={{ left: `${(p.cap / barScale) * 100}%` }}
@@ -545,7 +547,7 @@ export function Dashboard({
                         : 'Pozostała moc do końca tygodnia (godziny = SP)'
                   }
                 >
-                  {p.cap > 0 || p.capState !== 'ok' ? `moc ${p.cap}${p.capState === 'late' ? ' · nie zdąży' : ''}` : ''}
+                  {p.hasCap ? `moc ${p.cap}${p.capState === 'late' ? ' · nie zdąży' : ''}` : ''}
                 </span>
 
                 <span className="person-row-count">
