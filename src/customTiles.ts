@@ -43,7 +43,11 @@ export interface CustomTile {
 export interface TileGroup {
   id: string;
   name: string;
+  /** Grupa bez podpisu i sumy nad kafelkami (kafelki "luzem"). */
+  hideCaption?: boolean;
 }
+
+export const LOOSE_GROUP_NAME = 'Luzem';
 
 export interface TilesConfig {
   /** Zestaw „proces IT": wbudowane kafelki (Do wyceny, Gotowe do startu …). */
@@ -168,7 +172,7 @@ export function normalizeConfig(raw: unknown, fallbackItPack: boolean): TilesCon
   const groups: TileGroup[] = [];
   for (const g of Array.isArray(src.groups) ? src.groups : []) {
     if (g && typeof g.id === 'string' && typeof g.name === 'string' && g.name.trim() && !groups.some((x) => x.id === g.id)) {
-      groups.push({ id: g.id, name: g.name.trim().slice(0, 40) });
+      groups.push({ id: g.id, name: g.name.trim().slice(0, 40), ...(g.hideCaption === true ? { hideCaption: true } : {}) });
     }
   }
   const tiles: CustomTile[] = [];
@@ -258,6 +262,23 @@ export function moveToGroup(cfg: TilesConfig, id: string, groupId: string): Tile
 
 export const addGroup = (cfg: TilesConfig, name: string): TilesConfig =>
   name.trim() ? { ...cfg, groups: [...cfg.groups, { id: newId('g'), name: name.trim().slice(0, 40) }] } : cfg;
+
+/** Grupa bez podpisu ("Luzem") — tworzona przy pierwszym uzyciu; zwraca konfiguracje i id grupy. */
+export function ensureLooseGroup(cfg: TilesConfig): { cfg: TilesConfig; id: string } {
+  const found = cfg.groups.find((g) => g.hideCaption);
+  if (found) return { cfg, id: found.id };
+  const id = newId('g');
+  return { cfg: { ...cfg, groups: [...cfg.groups, { id, name: LOOSE_GROUP_NAME, hideCaption: true }] }, id };
+}
+
+export const setGroupCaption = (cfg: TilesConfig, id: string, show: boolean): TilesConfig => ({
+  ...cfg,
+  groups: cfg.groups.map((g) => {
+    if (g.id !== id) return g;
+    const { hideCaption: _h, ...rest } = g;
+    return show ? rest : { ...rest, hideCaption: true };
+  }),
+});
 
 export const renameGroup = (cfg: TilesConfig, id: string, name: string): TilesConfig =>
   name.trim() ? { ...cfg, groups: cfg.groups.map((g) => (g.id === id ? { ...g, name: name.trim().slice(0, 40) } : g)) } : cfg;

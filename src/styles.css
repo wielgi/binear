@@ -8894,3 +8894,16 @@ a.mention:hover {
 .filter-chip-in-or {
   box-shadow: inset 0 0 0 1px var(--accent, #3b82f6);
 }
+
+/* Druga miara kafelka (SP przy kafelku zadan, zadania przy kafelku SP) — mniejszym i bladszym tekstem. */
+.counter-second {
+  font-size: var(--t-micro);
+  opacity: 0.8;
+}
+
+.tile-group-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}

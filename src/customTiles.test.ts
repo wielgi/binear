@@ -204,3 +204,17 @@ describe('kolor, ikony i sumy grupy', () => {
     expect(shownValue({ measure: 'points' }, values.get('a')!)).toBe(10);
   });
 });
+
+describe('grupa bez podpisu', () => {
+  it('ensureLooseGroup tworzy grupe raz, a setGroupCaption przelacza podpis', async () => {
+    const { ensureLooseGroup, setGroupCaption, normalizeConfig, emptyConfig } = await import('./customTiles');
+    const a = ensureLooseGroup(emptyConfig(false));
+    const b = ensureLooseGroup(a.cfg);
+    expect(b.cfg.groups).toHaveLength(1);
+    expect(b.id).toBe(a.id);
+    expect(a.cfg.groups[0].hideCaption).toBe(true);
+    const shown = setGroupCaption(a.cfg, a.id, true);
+    expect(shown.groups[0].hideCaption).toBeUndefined();
+    expect(normalizeConfig(a.cfg, false).groups[0].hideCaption).toBe(true);
+  });
+});

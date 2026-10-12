@@ -6,6 +6,7 @@ import {
   addTile,
   DEFAULT_COLOR,
   DEFAULT_ICON,
+  ensureLooseGroup,
   exportConfig,
   importConfig,
   isHexColor,
@@ -16,6 +17,7 @@ import {
   removeGroup,
   removeTile,
   renameGroup,
+  setGroupCaption,
   TILE_COLORS,
   TILE_ICON_KEYS,
   updateTile,
@@ -101,6 +103,8 @@ function Icons({ value, onPick }: { value: string; onPick: (k: string) => void }
  * Zarzadzanie wlasnymi kafelkami: nowy kafelek z biezacego widoku, nazwy, kolory, ikony, grupy,
  * kolejnosc, zestaw „proces IT", eksport i import pliku JSON (dzieki temu dzial moze wyslac swoj zestaw).
  */
+const LOOSE = '__loose';
+
 export function TilesModal({
   cfg,
   current,
@@ -130,7 +134,11 @@ export function TilesModal({
     if (!name.trim()) return;
     let next = cfg;
     let g = groupId;
-    if (newGroup.trim() || !cfg.groups.length) {
+    if (groupId === LOOSE && !newGroup.trim()) {
+      const loose = ensureLooseGroup(next);
+      next = loose.cfg;
+      g = loose.id;
+    } else if (newGroup.trim() || !cfg.groups.length) {
       next = addGroup(next, newGroup.trim() || 'Moje kafelki');
       g = next.groups[next.groups.length - 1].id;
     }
@@ -253,12 +261,14 @@ export function TilesModal({
             </label>
             <label className="team-add">
               <span>Grupa</span>
-              <select value={groupId} onChange={(e) => setGroupId(e.target.value)} disabled={!cfg.groups.length}>
+              <select value={groupId} onChange={(e) => setGroupId(e.target.value)}>
                 {cfg.groups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
                   </option>
                 ))}
+                {!cfg.groups.length && <option value="">Moje kafelki (nowa grupa)</option>}
+                <option value={LOOSE}>Bez grupy (bez podpisu i sumy)</option>
               </select>
               <input
                 placeholder={cfg.groups.length ? 'albo nowa grupa' : 'nazwa grupy (opcjonalnie)'}
@@ -296,6 +306,14 @@ export function TilesModal({
                 onChange={(e) => onChange({ ...cfg, groups: cfg.groups.map((x) => (x.id === g.id ? { ...x, name: e.target.value } : x)) })}
                 onBlur={(e) => onChange(renameGroup(cfg, g.id, e.target.value || 'Grupa'))}
               />
+              <label className="team-hint tile-group-caption" title="Wyłącz, żeby nad kafelkami nie było nazwy grupy ani sumy">
+                <input
+                  type="checkbox"
+                  checked={!g.hideCaption}
+                  onChange={(e) => onChange(setGroupCaption(cfg, g.id, e.target.checked))}
+                />{' '}
+                podpis i suma
+              </label>
               <button className="btn" onClick={() => onChange(moveGroup(cfg, g.id, -1))} title="Grupa wyżej" aria-label="Grupa wyżej">
                 ↑
               </button>
