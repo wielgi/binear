@@ -8548,6 +8548,13 @@ a.mention:hover {
 }
 
 /* Podsumowanie sprintu: kafelki stanow, pasek calosci i dzialy z tematami. */
+/* Przewijany jest zewnetrzny kontener (jak .dash), a nie waska kolumna tresci. */
+.sum-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .sum {
   display: flex;
   flex-direction: column;
