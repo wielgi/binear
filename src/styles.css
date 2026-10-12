@@ -9408,3 +9408,14 @@ a.mention:hover {
   margin: 0;
   margin-right: auto;
 }
+
+/* Przeciaganie chipow filtrow: zrodlo przezroczyste, cel z obwodka. */
+.filter-chip-dragging {
+  opacity: 0.6;
+  cursor: grabbing;
+  z-index: 2;
+}
+
+.filter-chip-over {
+  box-shadow: inset 0 0 0 2px var(--accent, #3b82f6);
+}

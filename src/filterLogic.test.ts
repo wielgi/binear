@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { groupedKeys, matchGrouped, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
+import { groupedKeys, matchGrouped, moveCondition, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
 
 interface C {
   id: string;
@@ -68,5 +68,23 @@ describe('normalizeGroups / refreshGroups / groupedKeys', () => {
     expect(groupedKeys([mk('a', true, 'x'), mk('b', true, 'x')], key)).not.toEqual(
       groupedKeys([mk('a', true), mk('b', true)], key),
     );
+  });
+});
+
+describe('moveCondition', () => {
+  it('przenosi chip na miejsce docelowe', () => {
+    const r = moveCondition([mk('a', true), mk('b', true), mk('c', true)], 'a', 'c');
+    expect(r.map((c) => c.id)).toEqual(['b', 'c', 'a']);
+    expect(moveCondition([mk('a', true), mk('b', true), mk('c', true)], 'c', 'a').map((c) => c.id)).toEqual(['c', 'a', 'b']);
+  });
+  it('wyjmuje przenoszony chip z grupy LUB i zdejmuje nawias z jednym warunkiem', () => {
+    const r = moveCondition([mk('a', true, 'x'), mk('b', true, 'x'), mk('c', true)], 'a', 'c');
+    expect(r.map((c) => c.id)).toEqual(['b', 'c', 'a']);
+    expect(r.every((c) => !c.or)).toBe(true);
+  });
+  it('bez zmian, gdy to samo miejsce albo nieznane id', () => {
+    const l = [mk('a', true), mk('b', true)];
+    expect(moveCondition(l, 'a', 'a')).toEqual(l);
+    expect(moveCondition(l, 'x', 'a')).toEqual(l);
   });
 });
