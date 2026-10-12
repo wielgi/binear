@@ -9316,3 +9316,14 @@ a.mention:hover {
   opacity: 0;
   cursor: pointer;
 }
+
+/* Przyciski dodawania i edycji kafelkow: jeden nad drugim, razem na wysokosc kafelka. */
+.counters-tools-row {
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.counters-tools-row .counter-icon-only {
+  flex: 1 1 0;
+  align-items: center;
+}
