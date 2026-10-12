@@ -109,6 +109,25 @@ with names (`{"243":{"id":243,"title":"EMX"}}`), so no dictionary query is neede
 Clicking a tag filters the list (shown in the scope bar, cleared with ✕). Tags are
 also a palette section with usage counts.
 
+## Custom tiles
+
+Besides the built-in counters (which encode the IT task process) you can build your own tiles — useful for any
+department. A tile is a **saved view**: a scope (active sprint / outside / all), the filters from the filter bar,
+and the *only mine* / *show completed* switches, plus how it looks:
+
+- **name, colour (8 swatches), icon (15)**, and what it counts — **tasks** or the **sum of SP**;
+- a **group** with its own caption; groups and tiles can be reordered (↑ ↓) and moved between groups;
+- click a tile to apply its view, click it again to clear the filters; a tile is highlighted while the list
+  shows exactly its view.
+
+Create one with **＋ Kafelek** (it saves the *current* view) and manage them with **Kafelki…** (rename, recolour,
+regroup, reorder, replace a tile's filters with the current view, delete). The built-in IT counters are a
+**preset** ("proces IT") that is **off by default for a fresh install** and on for anyone who already used
+binear; toggle it in the same dialog.
+
+The configuration lives in this browser (`localStorage`, key `binear.tiles.v1`). **Export / import** a JSON file
+to move a department's set to another browser; an import *adds* tiles and groups (new ids), it never overwrites.
+
 ## Counters
 
 A row of cards under the header answers "what is there to do in the register",

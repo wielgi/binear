@@ -182,6 +182,9 @@ import { tylkoOstatnie, zapiszPrzeniesienie, type Dodane } from './planRecent';
 import { ImportantMarks } from './ImportantMarks';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
+import { TilesBar } from './TilesBar';
+import { TilesModal } from './TilesModal';
+import { groupedTiles, loadTiles, sameView, saveTiles, tileValue, type CustomTile, type TilesConfig } from './customTiles';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
@@ -9192,6 +9195,70 @@ export default function App() {
     scope: (k === 'sprint' ? 'sprint' : k === 'poza' || k === 'wycena' ? 'outside' : 'all') as Scope,
     done: k === 'sprint',
   });
+  /*
+   * WLASNE KAFELKI: zapisane widoki (zakres + filtry) z nazwa, kolorem, ikona i grupa. Konfiguracja zyje w
+   * przegladarce; zestaw „proces IT" (wbudowane liczniki) jest domyslnie wylaczony dla swiezej instalacji,
+   * ale wlaczony dla kogos, kto juz uzywal binear.
+   */
+  const [tilesCfg, setTilesCfgState] = useState<TilesConfig>(() => {
+    let had = false;
+    try {
+      had = localStorage.getItem(SETTINGS_KEY) !== null;
+    } catch {
+      /* brak dostepu do pamieci — traktujemy jak swiezego uzytkownika */
+    }
+    return loadTiles(had);
+  });
+  const setTilesCfg = useCallback((next: TilesConfig) => {
+    setTilesCfgState(next);
+    saveTiles(next);
+  }, []);
+  const [tilesOpen, setTilesOpen] = useState<null | 'new' | 'manage'>(null);
+  /* Warunki paska <-> zapisywalne (bez id). */
+  const toTileFilters = (f: Filters) => f.map((c) => ({ field: c.field, op: c.op, values: c.values }));
+  const tileValues = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const tile of tilesCfg.tiles) {
+      const rows = tasks.filter((t) => {
+        const mineOrFree = t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
+        if (tile.onlyMine && !mineOrFree) return false;
+        if (!tile.showDone && CLOSED_STATUSES.has(t.status)) return false;
+        const inSprint = sprintId !== null && t.sprintId === sprintId;
+        if (tile.scope === 'sprint' && !inSprint) return false;
+        if (tile.scope === 'outside' && inSprint) return false;
+        return matchFilters(t, tile.filters.map((c) => ({ ...c, id: '' })) as Filters, stageNames);
+      });
+      m.set(tile.id, tileValue(tile, rows));
+    }
+    return m;
+  }, [tilesCfg.tiles, tasks, me, withUnassigned, sprintId, stageNames]);
+  const activeTileId = useMemo(
+    () =>
+      tilesCfg.tiles.find((t) =>
+        sameView(t, {
+          scope: scopePref,
+          filters: filters.map((c) => ({ field: c.field, op: c.op, values: c.values })),
+          onlyMine,
+          showDone,
+        }),
+      )?.id ?? null,
+    [tilesCfg.tiles, scopePref, filters, onlyMine, showDone],
+  );
+  const pickTile = (tile: CustomTile) => {
+    setCard(null);
+    if (activeTileId === tile.id) {
+      setFilters(EMPTY_FILTERS); // ponowny klik: czyscimy filtry
+      return;
+    }
+    setScope(tile.scope);
+    setShowDone(tile.showDone);
+    setOnlyMine(tile.onlyMine);
+    setFilters(tile.filters.map((c) => ({ ...c, id: newCondId() })) as Filters);
+    setQuery('');
+    searchRef.current?.setValue('');
+    setEditingViewId(null);
+  };
+
   const pickCard = useCallback((k: CounterKey | null) => {
     setCard(k);
     if (!k) return;
@@ -11672,14 +11739,26 @@ export default function App() {
         {/* Liczniki pod samym naglowkiem, nad zakresem i filtrami: licza cala grupe,
             wiec stoja ponad tym, co pasek nizej zaweza. */}
         {showCounters && (viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
-          <CountersBar
-            defs={counterDefs.filter((d) => !hiddenCounters.includes(d.key))}
-            values={counterValues}
-            pending={counterPending}
-            prev={counterPrev}
-            active={card}
-            onPick={pickCard}
-          />
+          <>
+            {tilesCfg.itPack && (
+              <CountersBar
+                defs={counterDefs.filter((d) => !hiddenCounters.includes(d.key))}
+                values={counterValues}
+                pending={counterPending}
+                prev={counterPrev}
+                active={card}
+                onPick={pickCard}
+              />
+            )}
+            <TilesBar
+              groups={groupedTiles(tilesCfg)}
+              values={tileValues}
+              activeId={activeTileId}
+              onPick={pickTile}
+              onAdd={() => setTilesOpen('new')}
+              onManage={() => setTilesOpen('manage')}
+            />
+          </>
         )}
 
         {/* Zakres jest zawsze na wierzchu — wyjscie poza aktywny sprint to jedno klikniecie. */}
@@ -12581,6 +12660,15 @@ export default function App() {
             setHistOpen(false);
             setHistFocus(null);
           }}
+        />
+      )}
+      {tilesOpen && (
+        <TilesModal
+          cfg={tilesCfg}
+          current={{ scope: scopePref, filters: toTileFilters(filters), onlyMine, showDone }}
+          startNew={tilesOpen === 'new'}
+          onChange={setTilesCfg}
+          onClose={() => setTilesOpen(null)}
         />
       )}
       {gapPrompt && (
