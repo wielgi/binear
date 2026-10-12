@@ -9581,3 +9581,16 @@ a.mention:hover {
   border-top: 0;
   padding-top: 0;
 }
+
+/* Pola w oknie „Tagi i epiki" maja byc jednowierszowe, a nie rozciagniete na wysokosc kolumny. */
+.manage-modal input[type='text'],
+.manage-modal input:not([type]),
+.manage-modal .tile-row-name {
+  flex: 0 0 auto;
+  height: 32px;
+  box-sizing: border-box;
+}
+
+.manage-row .tile-row-name {
+  flex: 1 1 auto;
+}
