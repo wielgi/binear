@@ -9594,3 +9594,17 @@ a.mention:hover {
 .manage-row .tile-row-name {
   flex: 1 1 auto;
 }
+
+/* Stala wysokosc okna „Tagi i epiki": lista przewija sie w srodku, gora okna stoi w miejscu przy filtrowaniu. */
+.manage-modal {
+  display: flex;
+  flex-direction: column;
+  height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+}
+
+.manage-modal .manage-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
