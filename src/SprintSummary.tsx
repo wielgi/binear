@@ -1,7 +1,7 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { Sprint, Task } from "./bitrix";
-import { printSnapshot } from "./printSnapshot";
+import { downloadSnapshot } from "./printSnapshot";
 import { sprintDeadline, workHoursBetween } from "./sprintClock";
 import {
   SUMMARY_STATES,
@@ -133,6 +133,7 @@ export function SprintSummary({
   onOpen: (id: number) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const [saving, setSaving] = useState<string | null>(null);
   const data = useMemo(
     () =>
       sprint ? summarizeSprint(tasks, sprint.id, workStageIds, epicName) : null,
@@ -166,11 +167,24 @@ export function SprintSummary({
           <button
             className="btn sum-pdf"
             data-no-print
-            title="Zrzut tego widoku z rozwiniętymi sekcjami — w oknie druku wybierz „Zapisz jako PDF”"
-            onClick={() => rootRef.current && printSnapshot(rootRef.current, `Podsumowanie ${sprint.name} ${new Date().toLocaleDateString("pl-PL")}`)}
+            disabled={saving === "…"}
+            title="Pobierz zrzut tego widoku (z rozwiniętymi sekcjami) jako plik PDF"
+            onClick={() => {
+              if (!rootRef.current) return;
+              setSaving("…");
+              void downloadSnapshot(
+                rootRef.current,
+                `Podsumowanie ${sprint.name} ${new Date().toLocaleDateString("pl-PL")}`,
+              ).then((kind) => setSaving(kind === "pdf" ? null : "html"));
+            }}
           >
-            Zapisz PDF
+            {saving === "…" ? "Generuję…" : "Pobierz PDF"}
           </button>
+          {saving === "html" && (
+            <span className="sum-dates" data-no-print>
+              Brak przeglądarki do PDF na serwerze — zapisano plik HTML.
+            </span>
+          )}
           <span className="sum-dates">
             {dm(sprint.dateStart)} – {dm(sprint.dateEnd)}
             {end && hoursLeft > 0 && (
