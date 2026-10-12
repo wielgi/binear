@@ -9493,3 +9493,12 @@ a.mention:hover {
   width: auto;
   padding: 0 var(--s2);
 }
+
+/* Kolumny wiersza osoby maja stala szerokosc, zeby kazdy slupek startowal w tym samym miejscu. */
+.person-row-name {
+  flex: 0 0 190px;
+}
+
+.person-bar {
+  flex: 1 1 0;
+}
