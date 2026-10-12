@@ -1,13 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   addMember,
+  budgetExcludedIds,
   EMPTY_TEAM,
   fmtFte,
   fteOnDay,
   isoDate,
   isPresent,
+  loadTeam,
+  memberHoursBetween,
   mondayOf,
   removeMember,
+  saveTeam,
+  setMember,
   setFte,
   teamHoursBetween,
   teamWeekHours,
@@ -114,5 +119,44 @@ describe('edycja zespolu', () => {
     expect(fmtFte(3.5)).toBe('3,5');
     expect(fmtFte(4)).toBe('4');
     expect(fmtFte(0.75)).toBe('0,75');
+  });
+});
+
+describe('role, moc i budzet osoby', () => {
+  const mon = new Date(2026, 9, 12);
+  const sun = new Date(2026, 9, 18, 23);
+  const base = {
+    members: [
+      { id: 1, name: 'A', fte: 1 },
+      { id: 2, name: 'Kierownik', fte: 1, role: 'Kierownik IT', capacity: false, budget: false },
+    ],
+    off: {},
+  };
+
+  it('osoba bez mocy nie wchodzi do mocy zespolu, ale reszta liczy sie normalnie', () => {
+    expect(teamWeekHours(base, mon)).toBe(40);
+    expect(memberHoursBetween(base, 2, mon, sun)).toBe(0);
+    expect(memberHoursBetween(base, 1, mon, sun)).toBe(40);
+  });
+
+  it('budzet i moc to osobne ustawienia', () => {
+    expect(budgetExcludedIds(base)).toEqual([2]);
+    const onlyCapacityOff = setMember(base, 1, { capacity: false });
+    expect(budgetExcludedIds(onlyCapacityOff)).toEqual([2]);
+    expect(teamWeekHours(onlyCapacityOff, mon)).toBe(0);
+    expect(budgetExcludedIds(EMPTY_TEAM)).toBeNull();
+  });
+
+  it('zapis i odczyt zachowuje role oraz wylaczone ustawienia', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    });
+    saveTeam(base);
+    const loaded = loadTeam();
+    expect(loaded.members[1]).toMatchObject({ role: 'Kierownik IT', capacity: false, budget: false });
+    expect(loaded.members[0].capacity).toBeUndefined();
+    vi.unstubAllGlobals();
   });
 });

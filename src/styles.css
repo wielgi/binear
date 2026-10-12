@@ -8484,3 +8484,86 @@ a.mention:hover {
   color: var(--fg-muted);
   font-size: var(--t-mini);
 }
+
+/* Slupki osob w skali wspolnej: dlugosc = SP wzgledem najwiekszego (albo mocy), kolory = etapy; kreska = moc. */
+.person-row {
+  max-width: 980px;
+}
+
+.person-bar {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 160px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+}
+
+.person-bar-fill {
+  display: block;
+  min-width: 0;
+}
+
+.person-bar-fill .stage-strip {
+  width: 100%;
+  height: 10px;
+}
+
+.person-bar-cap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--fg);
+  opacity: 0.8;
+}
+
+.person-row-role {
+  display: block;
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+}
+
+.person-row-cap {
+  flex: 0 0 auto;
+  width: 64px;
+  text-align: right;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.person-row-over {
+  color: var(--warn, #f59e0b);
+}
+
+.dash-team-btn {
+  margin-left: auto;
+}
+
+.team-modal-wide {
+  width: min(960px, calc(100vw - 32px));
+}
+
+.team-role {
+  width: 130px;
+}
+
+.header-team {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 0 var(--s2);
+}
+
+/* Kolumny wiersza osoby maja stala szerokosc, zeby kazdy slupek startowal w tym samym miejscu. */
+.person-row-name {
+  flex: 0 0 190px;
+}
+
+.person-bar {
+  flex: 1 1 0;
+}

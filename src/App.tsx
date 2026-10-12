@@ -184,7 +184,7 @@ import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from '
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity, sprintDeadline } from './sprintClock';
 import { TeamModal } from './TeamModal';
-import { loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
+import { budgetExcludedIds, loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
 import {
@@ -7116,7 +7116,7 @@ function ViewMenu({
         */}
         <div className={`ds-check ds-check-row${planMode ? ' ds-check-off' : ''}`}>
           <label htmlFor="ds-show-counters" className="ds-check-row-label">
-            Pokaż liczniki
+            Pokaż kafelki
           </label>
           <button
             className={`ds-check-edit${tilesOpen ? ' ds-check-edit-on' : ''}`}
@@ -8926,6 +8926,11 @@ export default function App() {
     setTeamState(next);
     saveTeam(next);
   }, []);
+  /* Osoby, ktorych zadania nie zjadaja budzetu SP: ustawienie „Budzet" w zespole, a bez zespolu stara konfiguracja. */
+  const capacityExcluded = useMemo(
+    () => budgetExcludedIds(team) ?? config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED,
+    [team, config?.capacityExcludeIds],
+  );
   const teamCapacity = useMemo(() => {
     const end = sprintDeadline(activeSprint?.dateEnd ?? null);
     return team.members.length > 0 && end ? teamHoursBetween(team, now, end) : null;
@@ -8938,11 +8943,11 @@ export default function App() {
         devs: config?.capacityDevs ?? 4,
         sprintId,
         waitingStageIds,
-        excludedIds: config?.capacityExcludeIds ?? [],
+        excludedIds: capacityExcluded,
         tasks,
         teamCapacity,
       }),
-    [now, activeSprint?.dateEnd, config?.capacityDevs, config?.capacityExcludeIds, sprintId, waitingStageIds, tasks, teamCapacity],
+    [now, activeSprint?.dateEnd, config?.capacityDevs, capacityExcluded, sprintId, waitingStageIds, tasks, teamCapacity],
   );
   /* Chip tylko wtedy, gdy widok naprawde pokazuje ten sprint — w „Wszystkich" etap „Nowe"
      zlewa zadania z wielu sprintow i liczba nie odpowiadalaby temu, co widac. */
@@ -10476,7 +10481,7 @@ export default function App() {
             me,
             itUsers: config?.itUsers ?? NO_IDS,
             itDepartments: config?.itDepartments ?? NO_IDS,
-            kierownicy: config?.capacityExcludeIds ?? NO_IDS,
+            kierownicy: capacityExcluded,
             unassignedId: UNASSIGNED_ID,
             departmentsOf: new Map(directory.map((e) => [e.id, e.departments])),
           }
@@ -10578,7 +10583,7 @@ export default function App() {
    * Bez zadan kierownika: planowanie mierzy do tego limitu sam zespol, wiec
    * punkty kierownika w odniesieniu zawyzalyby wolne miejsce o jego udzial.
    */
-  const kierownicy = config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED;
+  const kierownicy = capacityExcluded;
   const lastDone = useMemo(() => {
     const done = [...sprints].reverse().find((sp) => sp.status === 'completed');
     if (!done) return null;
@@ -11469,6 +11474,10 @@ export default function App() {
           </button>
           {/* Skroty byly kiedys wypisane w panelu bocznym. Po jego usunieciu zostal
               sam klawisz "?", ktory trzeba znac — stad jawny przycisk. */}
+          <button className="icon-btn header-team" onClick={() => setTeamOpen(true)} title="Zespół i grafik: role, moc, budżet SP, urlopy">
+            <PersonIcon />
+            <span>Zespół</span>
+          </button>
           <button
             className="icon-btn"
             onClick={() => {
@@ -11717,7 +11726,12 @@ export default function App() {
           onDragCancel={() => setDraggingId(null)}
         >
         {viewMode === 'charts' ? (
-          <Dashboard groupId={groupId} people={people} />
+          <Dashboard
+            groupId={groupId}
+            people={people}
+            team={team}
+            onOpenTeam={() => setTeamOpen(true)}
+          />
         ) : viewMode === 'planning' ? (
           /*
            * Planowanie dostaje zadania PO filtrach i wyszukiwaniu — dzieki temu
