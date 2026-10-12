@@ -8567,3 +8567,66 @@ a.mention:hover {
 .person-bar {
   flex: 1 1 0;
 }
+
+/* Okno „Tagi i epiki": lista z akcjami przy kazdym wierszu. */
+.manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.manage-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius);
+}
+
+.manage-row:hover {
+  background: var(--bg-hover);
+}
+
+.manage-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manage-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.manage-error {
+  color: var(--danger, #f85149);
+}
+
+.sum-pdf {
+  margin-left: auto;
+  order: 3;
+}
+
+/* Stan kreski pozostalej mocy: ostrzezenie (w toku), nie zdazy (nowe). */
+.person-bar-cap-warn,
+.person-row-cap-warn {
+  background: var(--accent-amber, #f59e0b);
+  color: var(--accent-amber, #f59e0b);
+}
+
+.person-bar-cap-late,
+.person-row-cap-late {
+  background: var(--danger, #f85149);
+  color: var(--danger, #f85149);
+}
+
+.person-row-cap-warn,
+.person-row-cap-late {
+  background: none;
+}
