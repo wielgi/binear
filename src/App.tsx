@@ -9352,6 +9352,7 @@ export default function App() {
   const filterCtx = useMemo<FilterCtx>(() => ({ answered, folders }), [answered, folders]);
   const tileValues = useMemo(() => {
     const m = new Map<string, TileNumbers>();
+    const childrenOf = groupChildren(tasks);
     for (const tile of tilesCfg.tiles) {
       const rows = tasks.filter((t) => {
         const mineOrFree = t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
@@ -9362,7 +9363,20 @@ export default function App() {
         if (tile.scope === 'outside' && inSprint) return false;
         return matchFilters(t, tile.filters.map((c) => ({ ...c, id: '' })) as Filters, stageNames, filterCtx);
       });
-      m.set(tile.id, { count: rows.length, points: rows.reduce((n, t) => n + (t.storyPoints ?? 0), 0) });
+      /*
+       * Rodzic niesie 0 SP, a praca siedzi w podzadaniach (jak na liscie, ktora pokazuje rodzicowi ich sume).
+       * Dolaczamy wiec SP podzadan rodzica, ale tylko tych, ktorych nie ma juz wsrod wierszy kafelka —
+       * inaczej kafelek obejmujacy i rodzica, i dzieci liczylby to samo dwa razy.
+       */
+      const inRows = new Set(rows.map((t) => t.id));
+      const points = rows.reduce(
+        (n, t) =>
+          n +
+          (t.storyPoints ?? 0) +
+          (childrenOf.get(t.id) ?? []).reduce((k, c) => (inRows.has(c.id) ? k : k + (c.storyPoints ?? 0)), 0),
+        0,
+      );
+      m.set(tile.id, { count: rows.length, points });
     }
     return m;
   }, [tilesCfg.tiles, tasks, me, withUnassigned, sprintId, stageNames, filterCtx]);
