@@ -50,8 +50,6 @@ export interface TileGroup {
 export const LOOSE_GROUP_NAME = 'Luzem';
 
 export interface TilesConfig {
-  /** Zestaw „proces IT": wbudowane kafelki (Do wyceny, Gotowe do startu …). */
-  itPack: boolean;
   groups: TileGroup[];
   /** Kolejnosc kafelkow = kolejnosc w tablicy (w obrebie grupy). */
   tiles: CustomTile[];
@@ -162,12 +160,12 @@ let seq = 0;
 /** Id niepowtarzalne takze po odswiezeniu strony (czas + licznik). */
 export const newId = (prefix: string): string => `${prefix}${Date.now().toString(36)}${(++seq).toString(36)}`;
 
-export const emptyConfig = (itPack: boolean): TilesConfig => ({ itPack, groups: [], tiles: [] });
+export const emptyConfig = (): TilesConfig => ({ groups: [], tiles: [] });
 
 const isScope = (v: unknown): v is TileScope => v === 'sprint' || v === 'outside' || v === 'all';
 
 /** Zbiera wejscie (z localStorage albo z pliku) do poprawnej konfiguracji; zle elementy pomija. */
-export function normalizeConfig(raw: unknown, fallbackItPack: boolean): TilesConfig {
+export function normalizeConfig(raw: unknown): TilesConfig {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Partial<TilesConfig>;
   const groups: TileGroup[] = [];
   for (const g of Array.isArray(src.groups) ? src.groups : []) {
@@ -206,7 +204,7 @@ export function normalizeConfig(raw: unknown, fallbackItPack: boolean): TilesCon
       group,
     });
   }
-  return { itPack: typeof src.itPack === 'boolean' ? src.itPack : fallbackItPack, groups, tiles };
+  return { groups, tiles };
 }
 
 /** Grupy z ich kafelkami w kolejnosci wyswietlania; pustych grup nie zwraca. */
@@ -340,7 +338,7 @@ export function importConfig(text: string, current: TilesConfig): TilesConfig | 
     return null;
   }
   if (!data || typeof data !== 'object' || (data as { binearTiles?: unknown }).binearTiles !== EXPORT_VERSION) return null;
-  const clean = normalizeConfig(data, current.itPack);
+  const clean = normalizeConfig(data);
   if (!clean.tiles.length) return null;
   const groupMap = new Map(clean.groups.map((g) => [g.id, newId('g')]));
   const groups = [...current.groups, ...clean.groups.map((g) => ({ ...g, id: groupMap.get(g.id) as string }))];
@@ -355,17 +353,13 @@ export function importConfig(text: string, current: TilesConfig): TilesConfig | 
 
 const STORAGE_KEY = 'binear.tiles.v1';
 
-/**
- * Wczytuje konfiguracje. Zestaw „proces IT" domyslnie jest WYLACZONY dla swiezej instalacji, ale wlaczony
- * dla kogos, kto juz uzywal binear (`hadSettings`) — inaczej istniejacemu uzytkownikowi zniknalyby kafelki.
- */
-export function loadTiles(hadSettings: boolean): TilesConfig {
+/** Wczytuje konfiguracje; brak albo zepsuty zapis daje pusty zestaw. */
+export function loadTiles(): TilesConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyConfig(hadSettings);
-    return normalizeConfig(JSON.parse(raw), hadSettings);
+    return raw ? normalizeConfig(JSON.parse(raw)) : emptyConfig();
   } catch {
-    return emptyConfig(hadSettings);
+    return emptyConfig();
   }
 }
 

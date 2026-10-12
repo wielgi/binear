@@ -394,14 +394,6 @@ export function TilesModal({
           </button>
         </header>
 
-        <label className="tiles-pack">
-          <input type="checkbox" checked={cfg.itPack} onChange={(e) => onChange({ ...cfg, itPack: e.target.checked })} />
-          <span>
-            Zestaw „proces IT” (Do wyceny, Gotowe do startu, Czeka na odpowiedź…)
-            <small>Wbudowane kafelki procesu zadań IT; inne działy zwykle ich nie potrzebują.</small>
-          </span>
-        </label>
-
         {strip}
 
         {selTile && tileEditor(selTile)}

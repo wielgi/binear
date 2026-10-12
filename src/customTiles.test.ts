@@ -38,15 +38,14 @@ const tile = (id: string, o: Partial<CustomTile> = {}): Omit<CustomTile, 'group'
 });
 
 describe('normalizeConfig', () => {
-  it('pusta albo zepsuta konfiguracja daje pusty zestaw z zadana flaga IT', () => {
-    expect(normalizeConfig(null, true)).toEqual({ itPack: true, groups: [], tiles: [] });
-    expect(normalizeConfig('x', false).itPack).toBe(false);
+  it('pusta albo zepsuta konfiguracja daje pusty zestaw', () => {
+    expect(normalizeConfig(null)).toEqual({ groups: [], tiles: [] });
+    expect(normalizeConfig('x')).toEqual({ groups: [], tiles: [] });
   });
 
   it('zachowuje poprawne kafelki i grupy, pomija zle', () => {
     const c = normalizeConfig(
       {
-        itPack: false,
         groups: [{ id: 'g1', name: ' Magazyn ' }, { id: 'g1', name: 'dubel' }, { id: 5, name: 'zle' }],
         tiles: [
           { id: 't1', name: 'Do spakowania', group: 'g1', color: 'green', icon: 'check', measure: 'points', scope: 'sprint' },
@@ -55,21 +54,19 @@ describe('normalizeConfig', () => {
           { id: 't2', name: '  ' },
         ],
       },
-      true,
     );
     expect(c.groups).toEqual([{ id: 'g1', name: 'Magazyn' }]);
     expect(c.tiles.map((t) => t.id)).toEqual(['t1']);
     expect(c.tiles[0]).toMatchObject({ color: 'green', icon: 'check', measure: 'points', scope: 'sprint', group: 'g1' });
-    expect(c.itPack).toBe(false);
   });
 
   it('nieznany kolor, ikona i zakres wracaja do domyslnych', () => {
-    const c = normalizeConfig({ groups: [{ id: 'g', name: 'G' }], tiles: [{ id: 't', name: 'A', group: 'g', color: 'zzz', icon: 'zzz', scope: 'zzz' }] }, true);
+    const c = normalizeConfig({ groups: [{ id: 'g', name: 'G' }], tiles: [{ id: 't', name: 'A', group: 'g', color: 'zzz', icon: 'zzz', scope: 'zzz' }] });
     expect(c.tiles[0]).toMatchObject({ color: 'blue', icon: 'list', scope: 'all', measure: 'count' });
   });
 
   it('kafelek z nieistniejaca grupa trafia do pierwszej, a gdy grup brak — zaklada domyslna', () => {
-    const c = normalizeConfig({ tiles: [{ id: 't', name: 'A', group: 'nie-ma' }] }, true);
+    const c = normalizeConfig({ tiles: [{ id: 't', name: 'A', group: 'nie-ma' }] });
     expect(c.groups).toHaveLength(1);
     expect(c.tiles[0].group).toBe(c.groups[0].id);
   });
@@ -77,13 +74,13 @@ describe('normalizeConfig', () => {
 
 describe('edycja', () => {
   it('addTile zaklada domyslna grupe, gdy nie ma zadnej', () => {
-    const c = addTile(emptyConfig(false), tile('a'));
+    const c = addTile(emptyConfig(), tile('a'));
     expect(c.groups).toHaveLength(1);
     expect(c.tiles[0].group).toBe(c.groups[0].id);
   });
 
   it('kolejnosc: moveTile przesuwa w obrebie grupy, nie wychodzi poza krance', () => {
-    let c = addTile(emptyConfig(false), tile('a'));
+    let c = addTile(emptyConfig(), tile('a'));
     c = addTile(c, tile('b'));
     c = addTile(c, tile('c'));
     c = moveTile(c, 'c', -1);
@@ -93,7 +90,7 @@ describe('edycja', () => {
   });
 
   it('moveToGroup przenosi na koniec innej grupy; groupedTiles pokazuje tylko niepuste', () => {
-    let c = addGroup(addTile(emptyConfig(false), tile('a')), 'Druga');
+    let c = addGroup(addTile(emptyConfig(), tile('a')), 'Druga');
     const druga = c.groups[1].id;
     expect(groupedTiles(c)).toHaveLength(1);
     c = moveToGroup(c, 'a', druga);
@@ -103,7 +100,7 @@ describe('edycja', () => {
   });
 
   it('grupy: zmiana nazwy, kolejnosc, usuniecie razem z kafelkami', () => {
-    let c = addGroup(addGroup(emptyConfig(false), 'A'), 'B');
+    let c = addGroup(addGroup(emptyConfig(), 'A'), 'B');
     const [a, b] = c.groups.map((g) => g.id);
     c = renameGroup(c, a, '  Magazyn ');
     expect(c.groups[0].name).toBe('Magazyn');
@@ -116,7 +113,7 @@ describe('edycja', () => {
   });
 
   it('updateTile nie zmienia id; removeTile usuwa', () => {
-    let c = addTile(emptyConfig(false), tile('a'));
+    let c = addTile(emptyConfig(), tile('a'));
     c = updateTile(c, 'a', { name: 'Nowa', id: 'x' });
     expect(c.tiles[0]).toMatchObject({ id: 'a', name: 'Nowa' });
     expect(removeTile(c, 'a').tiles).toEqual([]);
@@ -124,7 +121,7 @@ describe('edycja', () => {
 });
 
 describe('sameView i tileValue', () => {
-  const t = addTile(emptyConfig(false), tile('a', { scope: 'sprint', filters: [{ field: 'epic', op: 'is', values: ['7'] }], onlyMine: true })).tiles[0];
+  const t = addTile(emptyConfig(), tile('a', { scope: 'sprint', filters: [{ field: 'epic', op: 'is', values: ['7'] }], onlyMine: true })).tiles[0];
 
   it('ten sam widok mimo innej kolejnosci wartosci i pustych warunkow', () => {
     expect(
@@ -149,13 +146,12 @@ describe('sameView i tileValue', () => {
 
 describe('eksport i import', () => {
   it('rundka: import dodaje kafelki i grupy z nowymi id, nie nadpisuje istniejacych', () => {
-    let src = addTile(emptyConfig(false), tile('a', { name: 'Do wysylki' }));
+    let src = addTile(emptyConfig(), tile('a', { name: 'Do wysylki' }));
     src = addTile(src, tile('b', { name: 'Reklamacje' }));
     const json = exportConfig(src);
 
-    const mine = addTile(emptyConfig(true), tile('x', { name: 'Moj' }));
+    const mine = addTile(emptyConfig(), tile('x', { name: 'Moj' }));
     const merged = importConfig(json, mine)!;
-    expect(merged.itPack).toBe(true);
     expect(merged.tiles.map((t) => t.name)).toEqual(['Moj', 'Do wysylki', 'Reklamacje']);
     expect(new Set(merged.tiles.map((t) => t.id)).size).toBe(3);
     expect(merged.groups).toHaveLength(2);
@@ -165,7 +161,7 @@ describe('eksport i import', () => {
   });
 
   it('plik, ktory nie jest zestawem kafelkow, jest odrzucany', () => {
-    const cur = emptyConfig(false);
+    const cur = emptyConfig();
     expect(importConfig('nie json', cur)).toBeNull();
     expect(importConfig('{"a":1}', cur)).toBeNull();
     expect(importConfig(JSON.stringify({ binearTiles: 1, tiles: [] }), cur)).toBeNull();
@@ -175,7 +171,7 @@ describe('eksport i import', () => {
 describe('kolor, ikony i sumy grupy', () => {
   it('kolor moze byc kluczem palety albo #rrggbb; inny wraca do domyslnego', () => {
     const t = (color: unknown) =>
-      normalizeConfig({ groups: [{ id: 'g', name: 'G' }], tiles: [{ id: 't', name: 'A', group: 'g', color }] }, true).tiles[0].color;
+      normalizeConfig({ groups: [{ id: 'g', name: 'G' }], tiles: [{ id: 't', name: 'A', group: 'g', color }] }).tiles[0].color;
     expect(t('green')).toBe('green');
     expect(t('#a1B2c3')).toBe('#a1B2c3');
     expect(t('#abc')).toBe('blue');
@@ -208,13 +204,13 @@ describe('kolor, ikony i sumy grupy', () => {
 describe('grupa bez podpisu', () => {
   it('ensureLooseGroup tworzy grupe raz, a setGroupCaption przelacza podpis', async () => {
     const { ensureLooseGroup, setGroupCaption, normalizeConfig, emptyConfig } = await import('./customTiles');
-    const a = ensureLooseGroup(emptyConfig(false));
+    const a = ensureLooseGroup(emptyConfig());
     const b = ensureLooseGroup(a.cfg);
     expect(b.cfg.groups).toHaveLength(1);
     expect(b.id).toBe(a.id);
     expect(a.cfg.groups[0].hideCaption).toBe(true);
     const shown = setGroupCaption(a.cfg, a.id, true);
     expect(shown.groups[0].hideCaption).toBeUndefined();
-    expect(normalizeConfig(a.cfg, false).groups[0].hideCaption).toBe(true);
+    expect(normalizeConfig(a.cfg).groups[0].hideCaption).toBe(true);
   });
 });

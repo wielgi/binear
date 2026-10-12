@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-import { Delta } from './CountersBar';
+import { Delta } from './CounterHistory';
 import type { DaySnapshot } from './counters';
 import { colorCss, groupTotals, shownValue, type CustomTile, type TileGroup, type TileNumbers } from './customTiles';
 import { PenIcon } from './icons';

@@ -204,7 +204,7 @@ import {
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
-import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
+import { useAnsweredTasks, useCounterHistory } from './CounterHistory';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
 import { TeamModal } from './TeamModal';
@@ -212,13 +212,8 @@ import { loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
 import {
-  COUNTERS,
-  counterDef,
-  countAll,
   foldersOf,
   paybackRank,
-  type CounterCtx,
-  type CounterKey,
   type DaySnapshot,
 } from './counters';
 import { CommandPalette, type Command } from './CommandPalette';
@@ -627,8 +622,6 @@ interface Settings {
   showEmpty: boolean;
   /** Karty licznikow pod naglowkiem (patrz `CountersBar`). */
   showCounters: boolean;
-  /** Kafelki licznikow schowane przez uzytkownika (olowek przy „Pokaż liczniki"). */
-  hiddenCounters: string[];
   /**
    * PUSTE kategorie (kolumny/grupy), ktore mimo braku zadan maja byc widoczne —
    * po NAZWIE, bo te same etapy maja rozne id w kazdym sprincie (patrz stageOrder).
@@ -686,7 +679,6 @@ const DEFAULT_SETTINGS: Settings = {
   planZwiniete: [],
   showEmpty: false,
   showCounters: true,
-  hiddenCounters: [],
   shownEmpty: [],
   detailWidth: 520,
   collapsed: [],
@@ -7152,7 +7144,6 @@ function ViewMenu({
     empty: boolean;
     counters: boolean;
     /** Kafelki do wyboru w panelu olowka — klucz, podpis, czy widoczny. */
-    counterTiles: { key: string; label: string; shown: boolean }[];
     filtersOn: boolean;
     theme: Theme;
     font: Font;
@@ -7177,7 +7168,6 @@ function ViewMenu({
     deadline: (v: DeadlineLook) => void;
     empty: () => void;
     counters: () => void;
-    counterTile: (key: string) => void;
     toggleColumn: (name: string) => void;
     clearFilters: () => void;
     reload: () => void;
@@ -7204,12 +7194,6 @@ function ViewMenu({
 
   // Panel „Kolumny/Grupy" wyskakuje jako OSOBNY panel obok (panel w panelu), nie sekcja.
   const [colsOpen, setColsOpen] = useState(false);
-  /* Panel olowka przy „Pokaż liczniki": ktore kafelki maja byc widoczne. */
-  const [tilesOpen, setTilesOpen] = useState(false);
-  const tilesOff = !state.counters || planMode;
-  useEffect(() => {
-    if (tilesOff) setTilesOpen(false);
-  }, [tilesOff]);
   const [permsOpen, setPermsOpen] = useState(false);
   // Nazwa mowi, po co ten panel jest: trzymac PUSTE kategorie widoczne mimo braku zadan.
   const colTitle = boardMode
@@ -7391,32 +7375,10 @@ function ViewMenu({
         */}
         {check('Pokaż zakończone', state.done, on.done, planMode)}
         {/* Liczniki sa tylko nad lista i tablica — w planowaniu nie ma ich czym chowac. */}
-        {/*
-          Olowek obok: dobor kafelkow. Wygaszony, gdy licznikow nie ma — nie ma
-          wtedy czego dobierac.
-        */}
-        {/*
-          Kolejnosc: podpis, olowek, przelacznik — przelacznik zostaje na prawej
-          krawedzi, w jednej linii z pozostalymi. Olowek NIE moze siedziec w
-          `<label>`: przycisk jest kontrolka, wiec label przejalby go i klik w
-          podpis otwieralby panel zamiast przelaczac. Stad `htmlFor`.
-        */}
         <div className={`ds-check ds-check-row${planMode ? ' ds-check-off' : ''}`}>
           <label htmlFor="ds-show-counters" className="ds-check-row-label">
             Pokaż liczniki
           </label>
-          <button
-            className={`ds-check-edit${tilesOpen ? ' ds-check-edit-on' : ''}`}
-            disabled={tilesOff}
-            title={tilesOff ? 'Włącz liczniki, żeby wybrać kafelki' : 'Wybierz, które kafelki widać'}
-            onClick={() => {
-              setColsOpen(false);
-              setPermsOpen(false);
-              setTilesOpen((o) => !o);
-            }}
-          >
-            <PenIcon />
-          </button>
           <input
             id="ds-show-counters"
             type="checkbox"
@@ -7471,20 +7433,6 @@ function ViewMenu({
       </div>
 
       {permsOpen && <PermsFlyout left={flyLeft} top={top} width={flyW} />}
-
-      {/* Dobor kafelkow licznikow — ten sam panel obok co „Puste grupy". */}
-      {tilesOpen && (
-        <div className="menu view-cols-flyout" style={{ left: flyLeft, top, width: flyW }}>
-          <div className="ds-colhead">Kafelki liczników</div>
-          <div className="ds-colhint">Odznacz te, których nie potrzebujesz. Liczby się nie zmieniają.</div>
-          {state.counterTiles.map((t) => (
-            <label key={t.key} className="ds-check">
-              <span>{t.label}</span>
-              <input type="checkbox" checked={t.shown} onChange={() => on.counterTile(t.key)} />
-            </label>
-          ))}
-        </div>
-      )}
 
       {/* Panel w panelu — osobny, obok menu widoku; checkbox na kazda kolumne/grupe. */}
       {colsOpen && columns.length > 0 && (
@@ -8829,9 +8777,6 @@ export default function App() {
   );
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
   const [showCounters, setShowCounters] = useState(saved.showCounters ?? true);
-  const [hiddenCounters, setHiddenCounters] = useState<string[]>(() =>
-    Array.isArray(saved.hiddenCounters) ? saved.hiddenCounters.filter((k) => typeof k === 'string') : [],
-  );
   const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
@@ -9046,7 +8991,6 @@ export default function App() {
       setFilters(EMPTY_FILTERS);
       setQuery('');
       setCursor(0);
-      setCard(null);
       selectProject(id);
     },
     [groupId, selectProject],
@@ -9266,7 +9210,6 @@ export default function App() {
    * przelacznikow i filtrow — bo odpowiadaja na pytanie „ile tego jest", a nie „ile
    * widze". Klikniecie karty podmienia liste na dokladnie te zadania, ktore liczy.
    */
-  const [card, setCard] = useState<CounterKey | null>(null);
   const answered = useAnsweredTasks(tasks, {
     closed: CLOSED_STATUSES,
     itDepartments: config?.itDepartments ?? [],
@@ -9277,70 +9220,8 @@ export default function App() {
   });
   /* Foldery liczymy z CALEJ listy — dziecko moze lezec w innym sprincie niz rodzic. */
   const folders = useMemo(() => foldersOf(tasks, CLOSED_STATUSES), [tasks]);
-  /* Fakty z czatow: rozpoznania i uzasadnienia STRATEGII — nie widac ich w tagach. */
-  const chatFacts = useChatFacts(tasks, {
-    closed: CLOSED_STATUSES,
-    sprintId,
-    groupId,
-    enabled: metaReady,
-  });
-  const counterCtx = useMemo<CounterCtx>(
-    () => ({ sprintId, closed: CLOSED_STATUSES, answered, chat: chatFacts, folders }),
-    [sprintId, answered, chatFacts, folders],
-  );
-  const counterDefs = useMemo(
-    () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),
-    [activeSprint],
-  );
-  const counterValues = useMemo(
-    () => countAll(tasks, counterCtx, counterDefs),
-    [tasks, counterCtx, counterDefs],
-  );
-  /* Dopoki nie doszlo swieze pobranie ze story pointami, na ekranie jest migawka z
-     poprzedniej sesji — liczba bylaby wczorajsza, wiec pokazujemy wielokropek. */
-  const counterPending = useMemo(() => {
-    const s = new Set<CounterKey>();
-    for (const d of counterDefs) {
-      if (
-        !metaReady ||
-        ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null) ||
-        (d.needsChatFacts && chatFacts === null)
-      ) {
-        s.add(d.key);
-      }
-    }
-    return s;
-  }, [counterDefs, metaReady, answered, chatFacts]);
-  const cardTasks = useMemo(
-    () => (card ? tasks.filter((t) => counterDef(card).match(t, counterCtx)) : null),
-    [card, tasks, counterCtx],
-  );
-  /*
-   * Karta USTAWIA pasek pod siebie: zakres, „Pokaż zakończone" i filtry maja
-   * mowic, co naprawde jest na liscie. Wczesniej karta podmieniala liste, a pasek
-   * dalej pokazywal np. „Aktywny sprint" nad zadaniami spoza sprintu.
-   *
-   * Karta liczy cala grupe, wiec filtry i „Tylko moje" schodza; zakonczone widac
-   * tylko przy „W sprincie" (tylko ona je liczy).
-   */
-  const stanKarty = (k: CounterKey) => ({
-    scope: (k === 'sprint' ? 'sprint' : k === 'poza' || k === 'wycena' ? 'outside' : 'all') as Scope,
-    done: k === 'sprint',
-  });
-  /*
-   * WLASNE KAFELKI: zapisane widoki (zakres + filtry) z nazwa, kolorem, ikona i grupa. Konfiguracja zyje w
-   * przegladarce; zestaw „proces IT" (wbudowane liczniki) jest domyslnie wylaczony dla swiezej instalacji,
-   * ale wlaczony dla kogos, kto juz uzywal binear.
-   */
-  const [tilesCfg, setTilesCfgState] = useState<TilesConfig>(() => {
-    let had = false;
-    try {
-      had = localStorage.getItem(SETTINGS_KEY) !== null;
-    } catch {
-      /* brak dostepu do pamieci — traktujemy jak swiezego uzytkownika */
-    }
-    return loadTiles(had);
-  });
+  /* KAFELKI: zapisane widoki (zakres + filtry) z nazwa, kolorem, ikona i grupa. Konfiguracja zyje w przegladarce. */
+  const [tilesCfg, setTilesCfgState] = useState<TilesConfig>(loadTiles);
   const setTilesCfg = useCallback((next: TilesConfig) => {
     setTilesCfgState(next);
     saveTiles(next);
@@ -9383,10 +9264,6 @@ export default function App() {
   /* Historia dzienna: wbudowane liczniki + wlasne kafelki (klucz "t:<id>") — stad strzalki wzgledem dnia poprzedniego. */
   const counterSnap = useMemo<DaySnapshot>(() => {
     const s: DaySnapshot = {};
-    for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
-    if (!counterPending.has('sprint') && counterValues.sprint?.points != null) {
-      s.sprintPoints = counterValues.sprint.points;
-    }
     const byGroup = new Map<string, CustomTile[]>();
     for (const t of tilesCfg.tiles) {
       const v = tileValues.get(t.id);
@@ -9399,7 +9276,7 @@ export default function App() {
       s[`gs:${gid}`] = total.points;
     }
     return s;
-  }, [counterDefs, counterPending, counterValues, tileValues, tilesCfg.tiles]);
+  }, [tileValues, tilesCfg.tiles]);
   const counterPrev = useCounterHistory(groupId, counterSnap);
   const activeTileId = useMemo(
     () =>
@@ -9414,7 +9291,6 @@ export default function App() {
     [tilesCfg.tiles, scopePref, filters, onlyMine, showDone],
   );
   const pickTile = (tile: CustomTile) => {
-    setCard(null);
     if (activeTileId === tile.id) {
       setFilters(EMPTY_FILTERS); // ponowny klik: czyscimy filtry
       return;
@@ -9427,34 +9303,6 @@ export default function App() {
     searchRef.current?.setValue('');
     setEditingViewId(null);
   };
-
-  const pickCard = useCallback((k: CounterKey | null) => {
-    setCard(k);
-    if (!k) return;
-    const st = stanKarty(k);
-    setScope(st.scope);
-    setShowDone(st.done);
-    setOnlyMine(false);
-    setFilters(EMPTY_FILTERS);
-    /*
-     * Wyszukiwanie tez schodzi, tak jak przy wyborze widoku zapisanego (applyView):
-     * karta pokazuje to, co liczy, a wpisana wczesniej fraza zostawiala z niej pusta
-     * liste. SearchBox trzyma wlasny draft, wiec sam `setQuery` zostawilby w polu tekst.
-     * Po wybraniu karty mozna znowu szukac — fraza zaweza wtedy zawartosc karty.
-     */
-    setQuery('');
-    searchRef.current?.setValue('');
-    setEditingViewId(null);
-  }, []);
-  /* RECZNA zmiana zakresu, „Pokaż zakończone" albo „Tylko moje" rozjezdza pasek z karta — wtedy
-     wracasz do zwyklego widoku. Porownujemy ze stanem karty zamiast reagowac na sama zmiane, bo
-     ustawienie paska przez karte tez jest zmiana. FILTRY (epik, tag, ...) karty NIE zrywaja:
-     zawezaja jej zawartosc — klik w epik na liscie z wlaczona karta zostaje w obrebie karty. */
-  useEffect(() => {
-    if (!card) return;
-    const st = stanKarty(card);
-    if (scopePref !== st.scope || showDone !== st.done || onlyMine) setCard(null);
-  }, [card, onlyMine, showDone, scopePref]);
 
   // Przelaczniki dzialaja niezaleznie od zakresu, zeby liczniki przy zakresach
   // pokazywaly to, co faktycznie zobaczysz po klliknieciu.
@@ -9512,8 +9360,8 @@ export default function App() {
    * z filtrow TRESCI (tylko moje, zakonczone, tag, szukanie) — patrz efekt nizej.
    */
   const panelIds = useMemo(
-    () => new Set([...queriedBase, ...(cardTasks ?? [])].map((t) => t.id)),
-    [queriedBase, cardTasks],
+    () => new Set(queriedBase.map((t) => t.id)),
+    [queriedBase],
   );
 
   /*
@@ -9535,13 +9383,6 @@ export default function App() {
   }, [queriedBase, query, opisyIndeks]);
 
   const filtered = useMemo(() => {
-    // Aktywna karta licznika: lista = to, co karta liczy, zawezone filtrami z paska (plus szukanie).
-    if (cardTasks) {
-      const wKarcie = anyFilter(filters)
-        ? cardTasks.filter((t) => matchFilters(t, filters, stageNames))
-        : cardTasks;
-      return matchQuery(wKarcie, query, opisyIndeks);
-    }
     const inScope = base.filter((t) => {
       const inSprint = sprintId !== null && t.sprintId === sprintId;
       if (scope === 'sprint' && !inSprint) return false;
@@ -9549,7 +9390,7 @@ export default function App() {
       return true;
     });
     return matchQuery(inScope, query, opisyIndeks);
-  }, [base, scope, sprintId, query, opisyIndeks, cardTasks, filters, stageNames]);
+  }, [base, scope, sprintId, query, opisyIndeks]);
 
   /** Wszystkie tagi wystepujace w grupie, alfabetycznie, z liczba uzyc — do palety, filtra i edycji tagow. */
   const allTags = useMemo(() => tagCounts(tasks), [tasks]);
@@ -10103,7 +9944,6 @@ export default function App() {
       szukajWOpisach: wOpisach,
       showEmpty,
       showCounters,
-      hiddenCounters,
       shownEmpty,
       detailWidth,
       collapsed: [...collapsed],
@@ -10114,7 +9954,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, hiddenCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -11953,16 +11793,6 @@ export default function App() {
             wiec stoja ponad tym, co pasek nizej zaweza. */}
         {showCounters && (viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
           <>
-            {tilesCfg.itPack && (
-              <CountersBar
-                defs={counterDefs.filter((d) => !hiddenCounters.includes(d.key))}
-                values={counterValues}
-                pending={counterPending}
-                prev={counterPrev}
-                active={card}
-                onPick={pickCard}
-              />
-            )}
             <TilesBar
               groups={groupedTiles(tilesCfg)}
               values={tileValues}
@@ -12012,10 +11842,7 @@ export default function App() {
             scopes={scopes}
             counts={scopeCounts}
             activeSprint={activeSprint}
-            onPick={(s) => {
-              setCard(null);
-              setScope(s);
-            }}
+            onPick={setScope}
             blokada={blokadaZakresu}
           />
 
@@ -12830,11 +12657,6 @@ export default function App() {
             deadline: deadlineLook,
             empty: showEmpty,
             counters: showCounters,
-            counterTiles: counterDefs.map((d) => ({
-              key: d.key,
-              label: d.label,
-              shown: !hiddenCounters.includes(d.key),
-            })),
             filtersOn: anyFilter(filters),
             theme,
             font,
@@ -12864,16 +12686,7 @@ export default function App() {
             tint: setListTint,
             deadline: setDeadlineLook,
             empty: () => setShowEmpty((v) => !v),
-            /* Schowane karty nie zostawiaja wybranej — nie byloby jak z niej wyjsc. */
-            counters: () => {
-              setShowCounters((v) => !v);
-              setCard(null);
-            },
-            /* Schowanie wybranej karty wychodzi z jej widoku — jak przy schowaniu wszystkich. */
-            counterTile: (key) => {
-              setHiddenCounters((h) => (h.includes(key) ? h.filter((k) => k !== key) : [...h, key]));
-              if (card === key) setCard(null);
-            },
+            counters: () => setShowCounters((v) => !v),
             toggleColumn,
             clearFilters: () => setFilters(EMPTY_FILTERS),
             reload: () => void reload(),
