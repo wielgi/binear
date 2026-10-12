@@ -162,3 +162,12 @@ export function efficiency(
   if (capacity === null || capacity <= 0) return null;
   return { pct: (delivered / capacity) * 100, hPerSp: delivered > 0 ? capacity / delivered : null };
 }
+
+/**
+ * Wartosci do narysowania paska. Zadanie bez SP nie ma wagi w punktach, wiec temat albo dzial, w ktorym
+ * NIE MA zadnych SP, wygladalby jak pusty (czyli „nic nie ruszone"), choc zadanie moze byc wdrozone.
+ * Wtedy pasek liczy zadania (kazde po 1) — `estimated: false` mowi, ze to nie punkty.
+ */
+export function barValues(totals: Totals): { by: StateSums; estimated: boolean } {
+  return totals.points > 0 ? { by: totals.by, estimated: true } : { by: totals.counts, estimated: false };
+}

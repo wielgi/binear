@@ -7,6 +7,7 @@ import {
   efficiency,
   STATE_LABELS,
   summarizeSprint,
+  barValues,
   type Dept,
   type SummaryState,
   type Totals,
@@ -30,7 +31,8 @@ function StateBar({
   totals: Totals;
   thick?: boolean;
 }) {
-  if (totals.points <= 0)
+  const { by, estimated } = barValues(totals);
+  if (SUMMARY_STATES.every((s) => by[s] <= 0))
     return (
       <span
         className={`sum-bar${thick ? " sum-bar-thick" : ""} sum-bar-empty`}
@@ -39,16 +41,18 @@ function StateBar({
   return (
     <span
       className={`sum-bar${thick ? " sum-bar-thick" : ""}`}
-      title={SUMMARY_STATES.filter((s) => totals.by[s] > 0)
-        .map((s) => `${STATE_LABELS[s].toLowerCase()} ${totals.by[s]} SP`)
-        .join(" · ")}
+      title={
+        SUMMARY_STATES.filter((s) => by[s] > 0)
+          .map((s) => `${STATE_LABELS[s].toLowerCase()} ${by[s]} ${estimated ? "SP" : "zad."}`)
+          .join(" · ") + (estimated ? "" : " (bez SP — pasek liczy zadania)")
+      }
     >
       {SUMMARY_STATES.map((s) =>
-        totals.by[s] > 0 ? (
+        by[s] > 0 ? (
           <span
             key={s}
             className={`sum-seg is-${s}`}
-            style={{ flexGrow: totals.by[s] }}
+            style={{ flexGrow: by[s] }}
           />
         ) : null,
       )}
@@ -265,7 +269,10 @@ export function SprintSummary({
               ))}
             </div>
             {data.depts.map((d) => {
-              const done = d.totals.by.wdrozone + d.totals.by.pr;
+              const bv = barValues(d.totals);
+              /* Dzial bez zadnych SP: pasek i podpis liczy zadania, nie punkty. */
+              const done = bv.by.wdrozone + bv.by.pr;
+              const total = bv.estimated ? d.totals.points : d.totals.count;
               return (
                 <div key={d.epicId ?? 0} className="sum-chart-row">
                   <span className="sum-chart-name" title={d.name}>
@@ -274,28 +281,30 @@ export function SprintSummary({
                   <span className="sum-chart-track">
                     <span
                       className="sum-chart-bar"
-                      style={{ width: `${(d.totals.points / maxDept) * 100}%` }}
+                      style={{
+                        width: `${bv.estimated ? (d.totals.points / maxDept) * 100 : 12}%`,
+                      }}
                     >
                       {SUMMARY_STATES.map((s) =>
-                        d.totals.by[s] > 0 ? (
+                        bv.by[s] > 0 ? (
                           <span
                             key={s}
                             className={`sum-seg is-${s}`}
-                            style={{ flexGrow: d.totals.by[s] }}
-                            title={`${STATE_LABELS[s]}: ${d.totals.by[s]} SP`}
+                            style={{ flexGrow: bv.by[s] }}
+                            title={`${STATE_LABELS[s]}: ${bv.by[s]} ${bv.estimated ? "SP" : "zad. (bez SP)"}`}
                           >
-                            {d.totals.by[s]}
+                            {bv.by[s]}
                           </span>
                         ) : null,
                       )}
                     </span>
                   </span>
                   <span className="sum-chart-done">
-                    {done}/{d.totals.points} SP
-                    {d.totals.points > 0 && (
+                    {done}/{total} {bv.estimated ? "SP" : "zad."}
+                    {total > 0 && (
                       <small>
                         {" "}
-                        · {Math.round((done / d.totals.points) * 100)}%
+                        · {Math.round((done / total) * 100)}%
                       </small>
                     )}
                   </span>
