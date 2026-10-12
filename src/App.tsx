@@ -6318,7 +6318,16 @@ function DetailPanel({
               <dt>Story points</dt>
               <dd>
                 <FieldButton kind="points" onPick={onPick}>
-                  {task.storyPoints != null ? task.storyPoints : '—'}
+                  {task.storyPoints ? (
+                    task.storyPoints
+                  ) : childProgress && childProgress.points > 0 ? (
+                    /* Rodzic nie ma wlasnych SP (punkty siedza na podzadaniach) — pokazujemy ich sume. */
+                    <span title="Zadanie nadrzędne nie ma własnych SP — suma z podzadań">Σ {childProgress.points}</span>
+                  ) : task.storyPoints != null ? (
+                    task.storyPoints
+                  ) : (
+                    '—'
+                  )}
                 </FieldButton>
               </dd>
             </>
