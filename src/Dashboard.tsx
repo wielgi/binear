@@ -16,6 +16,7 @@ import { Avatar, CheckIcon, ChevronIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { isUnassigned, tasksWord, UNASSIGNED_LABEL } from './taskView';
 import { capacityState, weekWindow } from './capacityMarker';
+import { teamFirst } from './peopleOrder';
 import { countsCapacity, memberHoursBetween, type TeamConfig } from './team';
 
 /*
@@ -392,7 +393,7 @@ export function Dashboard({
           </button>
 
           {people.length > 1 && (
-            <PersonPicker people={people} value={persons} onPick={setPersons} />
+            <PersonPicker people={people} value={persons} onPick={setPersons} teamIds={new Set(team.members.map((m) => m.id))} />
           )}
         </header>
 
@@ -598,7 +599,9 @@ function PersonPicker({
   people,
   value,
   onPick,
+  teamIds,
 }: {
+  teamIds: ReadonlySet<number>;
   people: { id: number; name: string; photo: string | null; sp: number; left: number; unassigned: boolean }[];
   value: number[];
   onPick: (ids: number[]) => void;
@@ -668,7 +671,8 @@ function PersonPicker({
           selected={value.length ? value.map(String) : ['']}
           options={[
             { value: '', label: 'Cały zespół', icon: <span className="person-all" aria-hidden /> },
-            ...people.map((p) => ({
+            ...teamFirst(people, teamIds).map(({ item: p, section }) => ({
+              section,
               value: String(p.id),
               label: p.name,
               photo: p.photo,

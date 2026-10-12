@@ -209,6 +209,7 @@ import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
 import { TeamModal } from './TeamModal';
 import { ManageModal } from './ManageModal';
+import { teamFirst } from './peopleOrder';
 import { budgetExcludedIds, loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
@@ -9181,6 +9182,7 @@ export default function App() {
   /* Zespol i grafik tygodniowy (zapis w przegladarce). Pusty zespol = moce liczone po staremu. */
   const [team, setTeamState] = useState<TeamConfig>(loadTeam);
   const [teamOpen, setTeamOpen] = useState(false);
+  const teamIds = useMemo(() => new Set(team.members.map((m) => m.id)), [team]);
   const [manageOpen, setManageOpen] = useState<null | 'tags' | 'epics'>(null);
   const setTeam = useCallback((next: TeamConfig) => {
     setTeamState(next);
@@ -9617,18 +9619,19 @@ export default function App() {
     const field = filters.find((c) => c.id === filterPick?.condId)?.field;
     if (!field) return [];
     if (field === 'assignee')
-      return people.map((p) => ({
+      return teamFirst(people, teamIds, new Set<number>([me ?? -1, UNASSIGNED_ID])).map(({ item: p, section }) => ({
         value: String(p.id),
         label: p.name,
         // „Nieprzypisane" to konto-zaslepka: pusty awatar, nie inicjal — tak samo jak
         // w wierszu listy, na karcie i w pickerze osoby.
         photo: p.id === UNASSIGNED_ID ? undefined : p.photo,
         icon: p.id === UNASSIGNED_ID ? <Avatar name={null} /> : undefined,
+        section,
       }));
     if (field === 'creator')
-      return creators.map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }));
+      return teamFirst(creators, teamIds).map(({ item: p, section }) => ({ value: String(p.id), label: p.name, photo: p.photo, section }));
     if (field === 'observer')
-      return observers.map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }));
+      return teamFirst(observers, teamIds).map(({ item: p, section }) => ({ value: String(p.id), label: p.name, photo: p.photo, section }));
     if (field === 'priority')
       return Object.entries(labels.priority).map(([value, label]) => ({
         value,
@@ -9724,7 +9727,7 @@ export default function App() {
         icon: <span className="tag-dot" style={{ background: tagHue(tag) }} />,
       })),
     ];
-  }, [filters, filterPick, people, creators, observers, labels, stages, sprintId, stageMeta, allTags, epics, tasks]);
+  }, [filters, filterPick, people, teamIds, me, creators, observers, labels, stages, sprintId, stageMeta, allTags, epics, tasks]);
 
   /*
    * Klucze pustych grup dla danej osi — tylko etap i status maja skonczony, znany
@@ -11455,19 +11458,20 @@ export default function App() {
         title: 'Osoba odpowiedzialna',
         // Zalogowany uzytkownik stoi na gorze (patrz sortowanie `people`); kreska
         // pod nim oddziela "ja" od pozostalych osob.
-        options: people.map((p, i) => ({
+        options: teamFirst(people, teamIds, new Set<number>([me ?? -1, UNASSIGNED_ID])).map(({ item: p, section }, i, all) => ({
           value: String(p.id),
           label: p.name,
           // „Nieprzypisane" to konto-zaslepka — pusty awatar (kolko-placeholder), ten sam
           // co przy nieprzypisanym zadaniu w wierszu; nie zdjecie/inicjal.
           photo: p.id === UNASSIGNED_ID ? undefined : p.photo,
           icon: p.id === UNASSIGNED_ID ? <Avatar name={null} /> : undefined,
-          // Kreska pod para „ja + Nieprzypisane" — oddziela skroty od reszty ludzi.
+          // Podpis grupy („Zespół" / „Pozostali"); bez zespolu kreska pod para „ja + Nieprzypisane".
+          section,
           divider:
             i > 0 &&
             p.id !== me &&
             p.id !== UNASSIGNED_ID &&
-            (people[i - 1].id === me || people[i - 1].id === UNASSIGNED_ID),
+            (all[i - 1].item.id === me || all[i - 1].item.id === UNASSIGNED_ID),
         })),
         apply: (value: string) => {
           const p = people.find((x) => x.id === Number(value));
