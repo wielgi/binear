@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { efficiency, share, summarizeSprint, summaryState } from './sprintTotals';
+import { barValues, efficiency, share, summarizeSprint, summaryState } from './sprintTotals';
 
 const WORK = new Set([4779]);
 const nazwa = (id: number | null) => (id === 1 ? 'Magazyn' : id === 2 ? 'Handlowy' : 'Bez epika');
@@ -45,6 +45,22 @@ describe('efficiency', () => {
     expect(efficiency(0, 100)).toEqual({ pct: 0, hPerSp: null });
     expect(efficiency(10, null)).toBeNull();
     expect(efficiency(10, 0)).toBeNull();
+  });
+});
+
+describe('barValues', () => {
+  it('z punktami pasek jest w punktach', () => {
+    const d = summarizeSprint([t(1, { status: '5', storyPoints: 8 }), t(2)], 70, WORK, nazwa);
+    const v = barValues(d.totals);
+    expect(v.estimated).toBe(true);
+    expect(v.by.wdrozone).toBe(8);
+  });
+
+  it('bez zadnych SP pasek liczy zadania, wiec wdrozone zadanie nie wyglada na nieruszone', () => {
+    const d = summarizeSprint([t(1, { status: '5', storyPoints: null }), t(2, { storyPoints: null })], 70, WORK, nazwa);
+    const v = barValues(d.totals);
+    expect(v.estimated).toBe(false);
+    expect(v.by).toMatchObject({ wdrozone: 1, czeka: 1 });
   });
 });
 
