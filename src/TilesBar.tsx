@@ -39,8 +39,7 @@ export function TilesBar({
         const total = groupTotals(tiles, values);
         const prevCount = prev?.snap[`g:${group.id}`];
         const prevPoints = prev?.snap[`gs:${group.id}`];
-        return (
-          <div key={group.id} className="counters-group" style={{ ['--n' as string]: tiles.length } as CSSProperties}>
+        const caption = group.hideCaption ? null : (
             <span
               className="counters-cap counters-cap-total counters-cap-static"
               title={
@@ -54,6 +53,17 @@ export function TilesBar({
               <span className="counters-cap-sp">{total.points} SP</span>
               {prev && <Delta now={total.count} before={prevCount} day={prev.day} riseIsBad={false} />}
             </span>
+          );
+        return (
+          <div key={group.id} className="counters-group" style={{ ['--n' as string]: tiles.length } as CSSProperties}>
+            {caption ?? (
+              /* Grupa bez podpisu: niewidoczny odpowiednik trzyma kafelki na wysokosci sasiednich grup. */
+              <span className="counters-cap counters-cap-total counters-cap-static counters-cap-ghost" aria-hidden>
+                <span className="counters-cap-text">&nbsp;</span>
+                <span className="counters-cap-count">0</span>
+                <span className="counters-cap-sp">0 SP</span>
+              </span>
+            )}
             <div className="counters-group-row">
               {tiles.map((t) => {
                 const on = activeId === t.id;
@@ -73,6 +83,10 @@ export function TilesBar({
                       <span className="counter-top">
                         <span className="counter-value">{shown}</span>
                         {t.measure === 'points' && <span className="counter-points">SP</span>}
+                        {/* Druga miara mniejszym tekstem: kafelek liczy zadania -> obok SP, i odwrotnie. */}
+                        <span className="counter-points counter-second">
+                          {t.measure === 'points' ? `${v.count} zad.` : `${v.points} SP`}
+                        </span>
                       </span>
                       <span className="counter-label">{t.name}</span>
                       {prev && <Delta now={shown} before={prev.snap[`t:${t.id}`]} day={prev.day} riseIsBad={false} />}
