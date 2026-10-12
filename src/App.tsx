@@ -187,6 +187,19 @@ import { groupChildren, parentProgress, type ParentProgress } from './parentProg
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { SprintSummary } from './SprintSummary';
+import { TilesBar } from './TilesBar';
+import { TilesModal } from './TilesModal';
+import {
+  groupedTiles,
+  groupTotals,
+  loadTiles,
+  sameView,
+  saveTiles,
+  shownValue,
+  type CustomTile,
+  type TileNumbers,
+  type TilesConfig,
+} from './customTiles';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
@@ -301,7 +314,9 @@ type FilterField =
   | 'epic'
   | 'points'
   | 'deadline'
-  | 'observer';
+  | 'observer'
+  | 'answered'
+  | 'kind';
 
 /**
  * Operatory jak w Linearze. Wymiary jednowartosciowe (osoba/priorytet/status/etap —
@@ -344,6 +359,8 @@ const FILTER_FIELDS: { field: FilterField; label: string; icon: ReactNode; divid
   { field: 'epic', label: 'Epik', icon: <LayersIcon />, divider: true },
   { field: 'tag', label: 'Tag', icon: <TagIcon /> },
   { field: 'points', label: 'Story points', icon: <HashIcon /> },
+  { field: 'answered', label: 'Odpowiedź w czacie', icon: <CommentIcon /> },
+  { field: 'kind', label: 'Rodzaj zadania', icon: <ParentIcon /> },
 ];
 
 const FILTER_LABEL = Object.fromEntries(FILTER_FIELDS.map((f) => [f.field, f.label])) as Record<
@@ -2079,12 +2096,40 @@ function matchQuery(list: Task[], query: string, opisy?: Map<number, string> | n
  * wymiaru LUB, miedzy wymiarami ORAZ. Etap dopasowujemy po nazwie (etapy sa per
  * sprint), osobe po id — z konto-zaslepka i brakiem zbitymi do UNASSIGNED_ID.
  */
-function matchFilters(t: Task, conditions: Filters, stageNames: Map<number, string>): boolean {
-  return conditions.every((c) => matchCondition(t, c, stageNames));
+/**
+ * Dane spoza samego zadania, potrzebne dwóm filtrom:
+ *  - `answered`: zadania, w ktorych po naszych pytaniach ktos odpisal (czyta czaty, `null` = jeszcze liczymy),
+ *  - `folders`: zadania nadrzedne z otwartym podzadaniem.
+ */
+interface FilterCtx {
+  answered: ReadonlySet<number> | null;
+  folders: ReadonlySet<number>;
+}
+const NO_FILTER_CTX: FilterCtx = { answered: null, folders: new Set<number>() };
+
+function matchFilters(
+  t: Task,
+  conditions: Filters,
+  stageNames: Map<number, string>,
+  ctx: FilterCtx = NO_FILTER_CTX,
+): boolean {
+  return conditions.every((c) => matchCondition(t, c, stageNames, ctx));
 }
 
-function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>): boolean {
+function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>, ctx: FilterCtx): boolean {
   if (!c.values.length) return true; // niedokonczony warunek nie zawezaja
+
+  if (c.field === 'answered') {
+    const key = ctx.answered?.has(t.id) ? 'yes' : 'no';
+    const inSet = c.values.includes(key);
+    return c.op === 'isNot' ? !inSet : inSet;
+  }
+
+  if (c.field === 'kind') {
+    const key = ctx.folders.has(t.id) ? 'parent' : t.parentId ? 'child' : 'plain';
+    const inSet = c.values.includes(key);
+    return c.op === 'isNot' ? !inSet : inSet;
+  }
 
   if (c.field === 'tag') {
     // „Bez tagów" (NO_TAGS) pasuje do zadania z pusta lista tagow; reszta jak zwykle.
@@ -9232,15 +9277,6 @@ export default function App() {
     }
     return s;
   }, [counterDefs, metaReady, answered, chatFacts]);
-  const counterSnap = useMemo<DaySnapshot>(() => {
-    const s: DaySnapshot = {};
-    for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
-    if (!counterPending.has('sprint') && counterValues.sprint?.points != null) {
-      s.sprintPoints = counterValues.sprint.points;
-    }
-    return s;
-  }, [counterDefs, counterPending, counterValues]);
-  const counterPrev = useCounterHistory(groupId, counterSnap);
   const cardTasks = useMemo(
     () => (card ? tasks.filter((t) => counterDef(card).match(t, counterCtx)) : null),
     [card, tasks, counterCtx],
@@ -9257,6 +9293,92 @@ export default function App() {
     scope: (k === 'sprint' ? 'sprint' : k === 'poza' || k === 'wycena' ? 'outside' : 'all') as Scope,
     done: k === 'sprint',
   });
+  /*
+   * WLASNE KAFELKI: zapisane widoki (zakres + filtry) z nazwa, kolorem, ikona i grupa. Konfiguracja zyje w
+   * przegladarce; zestaw „proces IT" (wbudowane liczniki) jest domyslnie wylaczony dla swiezej instalacji,
+   * ale wlaczony dla kogos, kto juz uzywal binear.
+   */
+  const [tilesCfg, setTilesCfgState] = useState<TilesConfig>(() => {
+    let had = false;
+    try {
+      had = localStorage.getItem(SETTINGS_KEY) !== null;
+    } catch {
+      /* brak dostepu do pamieci — traktujemy jak swiezego uzytkownika */
+    }
+    return loadTiles(had);
+  });
+  const setTilesCfg = useCallback((next: TilesConfig) => {
+    setTilesCfgState(next);
+    saveTiles(next);
+  }, []);
+  const [tilesOpen, setTilesOpen] = useState<null | 'new' | 'manage'>(null);
+  /* Warunki paska <-> zapisywalne (bez id). */
+  const toTileFilters = (f: Filters) => f.map((c) => ({ field: c.field, op: c.op, values: c.values }));
+  const filterCtx = useMemo<FilterCtx>(() => ({ answered, folders }), [answered, folders]);
+  const tileValues = useMemo(() => {
+    const m = new Map<string, TileNumbers>();
+    for (const tile of tilesCfg.tiles) {
+      const rows = tasks.filter((t) => {
+        const mineOrFree = t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
+        if (tile.onlyMine && !mineOrFree) return false;
+        if (!tile.showDone && CLOSED_STATUSES.has(t.status)) return false;
+        const inSprint = sprintId !== null && t.sprintId === sprintId;
+        if (tile.scope === 'sprint' && !inSprint) return false;
+        if (tile.scope === 'outside' && inSprint) return false;
+        return matchFilters(t, tile.filters.map((c) => ({ ...c, id: '' })) as Filters, stageNames, filterCtx);
+      });
+      m.set(tile.id, { count: rows.length, points: rows.reduce((n, t) => n + (t.storyPoints ?? 0), 0) });
+    }
+    return m;
+  }, [tilesCfg.tiles, tasks, me, withUnassigned, sprintId, stageNames, filterCtx]);
+  /* Historia dzienna: wbudowane liczniki + wlasne kafelki (klucz "t:<id>") — stad strzalki wzgledem dnia poprzedniego. */
+  const counterSnap = useMemo<DaySnapshot>(() => {
+    const s: DaySnapshot = {};
+    for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
+    if (!counterPending.has('sprint') && counterValues.sprint?.points != null) {
+      s.sprintPoints = counterValues.sprint.points;
+    }
+    const byGroup = new Map<string, CustomTile[]>();
+    for (const t of tilesCfg.tiles) {
+      const v = tileValues.get(t.id);
+      if (v) s[`t:${t.id}`] = shownValue(t, v);
+      byGroup.set(t.group, [...(byGroup.get(t.group) ?? []), t]);
+    }
+    for (const [gid, list] of byGroup) {
+      const total = groupTotals(list, tileValues);
+      s[`g:${gid}`] = total.count;
+      s[`gs:${gid}`] = total.points;
+    }
+    return s;
+  }, [counterDefs, counterPending, counterValues, tileValues, tilesCfg.tiles]);
+  const counterPrev = useCounterHistory(groupId, counterSnap);
+  const activeTileId = useMemo(
+    () =>
+      tilesCfg.tiles.find((t) =>
+        sameView(t, {
+          scope: scopePref,
+          filters: filters.map((c) => ({ field: c.field, op: c.op, values: c.values })),
+          onlyMine,
+          showDone,
+        }),
+      )?.id ?? null,
+    [tilesCfg.tiles, scopePref, filters, onlyMine, showDone],
+  );
+  const pickTile = (tile: CustomTile) => {
+    setCard(null);
+    if (activeTileId === tile.id) {
+      setFilters(EMPTY_FILTERS); // ponowny klik: czyscimy filtry
+      return;
+    }
+    setScope(tile.scope);
+    setShowDone(tile.showDone);
+    setOnlyMine(tile.onlyMine);
+    setFilters(tile.filters.map((c) => ({ ...c, id: newCondId() })) as Filters);
+    setQuery('');
+    searchRef.current?.setValue('');
+    setEditingViewId(null);
+  };
+
   const pickCard = useCallback((k: CounterKey | null) => {
     setCard(k);
     if (!k) return;
@@ -9298,10 +9420,10 @@ export default function App() {
         if (!showDone && CLOSED_STATUSES.has(t.status)) return false;
         // Filtry z paska (Linear) — patrz `matchFilters`. Sa w `base`, wiec liczniki
         // przy zakresach i decyzja o zamknieciu panelu tez je uwzgledniaja.
-        if (!matchFilters(t, filters, stageNames)) return false;
+        if (!matchFilters(t, filters, stageNames, filterCtx)) return false;
         return true;
       }),
-    [tasks, onlyMine, withUnassigned, showDone, filters, stageNames, me],
+    [tasks, onlyMine, withUnassigned, showDone, filters, stageNames, me, filterCtx],
   );
 
   // `base` po wyszukiwaniu, ale BEZ ograniczenia zakresem — wspolne dla licznikow
@@ -9406,6 +9528,9 @@ export default function App() {
       if (field === 'status') return labels.status[value] ?? value;
       if (field === 'epic')
         return value === '0' ? 'Bez epika' : (epicNames.get(Number(value))?.name ?? `#${value}`);
+      if (field === 'answered') return value === 'yes' ? 'Tak — ktoś odpowiedział' : 'Nie';
+      if (field === 'kind')
+        return value === 'parent' ? 'Nadrzędne (z otwartym podzadaniem)' : value === 'child' ? 'Podzadanie' : 'Zwykłe';
       if (field === 'tag' && value === NO_TAGS) return 'Bez tagów';
       if (field === 'points') return value === NO_POINTS ? 'Bez oszacowania' : `${value} SP`;
       if (field === 'deadline') return value === NO_DEADLINE ? 'Bez terminu' : dayLabel(Number(value));
@@ -9622,6 +9747,17 @@ export default function App() {
       }
       return opts;
     }
+    if (field === 'answered')
+      return [
+        { value: 'yes', label: 'Tak — ktoś odpowiedział po naszych pytaniach' },
+        { value: 'no', label: 'Nie' },
+      ];
+    if (field === 'kind')
+      return [
+        { value: 'parent', label: 'Nadrzędne (z otwartym podzadaniem)' },
+        { value: 'child', label: 'Podzadanie' },
+        { value: 'plain', label: 'Zwykłe (bez podzadań)' },
+      ];
     if (field === 'deadline') {
       /*
        * Poza zakresem termin ma tylko JEDNO sensowne pytanie: czy w ogole jest.
@@ -10863,10 +10999,10 @@ export default function App() {
         const mineOrFree =
           t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
         if (onlyMine && !mineOrFree) return false;
-        if (!matchFilters(t, filters, stageNames)) return false;
+        if (!matchFilters(t, filters, stageNames, filterCtx)) return false;
         return true;
       }),
-    [tasks, onlyMine, withUnassigned, filters, stageNames, me],
+    [tasks, onlyMine, withUnassigned, filters, stageNames, me, filterCtx],
   );
 
   /*
@@ -11760,14 +11896,27 @@ export default function App() {
         {/* Liczniki pod samym naglowkiem, nad zakresem i filtrami: licza cala grupe,
             wiec stoja ponad tym, co pasek nizej zaweza. */}
         {showCounters && (viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
-          <CountersBar
-            defs={counterDefs.filter((d) => !hiddenCounters.includes(d.key))}
-            values={counterValues}
-            pending={counterPending}
-            prev={counterPrev}
-            active={card}
-            onPick={pickCard}
-          />
+          <>
+            {tilesCfg.itPack && (
+              <CountersBar
+                defs={counterDefs.filter((d) => !hiddenCounters.includes(d.key))}
+                values={counterValues}
+                pending={counterPending}
+                prev={counterPrev}
+                active={card}
+                onPick={pickCard}
+              />
+            )}
+            <TilesBar
+              groups={groupedTiles(tilesCfg)}
+              values={tileValues}
+              prev={counterPrev}
+              activeId={activeTileId}
+              onPick={pickTile}
+              onAdd={() => setTilesOpen('new')}
+              onManage={() => setTilesOpen('manage')}
+            />
+          </>
         )}
 
         {/* Zakres jest zawsze na wierzchu — wyjscie poza aktywny sprint to jedno klikniecie. */}
@@ -12690,6 +12839,15 @@ export default function App() {
       )}
       {teamOpen && (
         <TeamModal team={team} people={people} now={now} onChange={setTeam} onClose={() => setTeamOpen(false)} />
+      )}
+      {tilesOpen && (
+        <TilesModal
+          cfg={tilesCfg}
+          current={{ scope: scopePref, filters: toTileFilters(filters), onlyMine, showDone }}
+          startNew={tilesOpen === 'new'}
+          onChange={setTilesCfg}
+          onClose={() => setTilesOpen(null)}
+        />
       )}
       {gapPrompt && (
         <GapPrompt

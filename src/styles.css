@@ -9131,3 +9131,188 @@ a.mention:hover {
   color: var(--fg-muted);
   font-size: 16px;
 }
+
+/* Wlasne kafelki: dodatkowy rzad pod wbudowanymi licznikami i okno zarzadzania. */
+.counters-custom {
+  margin-top: var(--s2);
+}
+
+.counter-add {
+  --c: var(--border-strong);
+  align-items: center;
+  border-style: dashed;
+  border-left-style: dashed;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.counter-add:hover {
+  color: var(--fg);
+}
+
+.tiles-modal {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.tiles-pack {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+}
+
+.tiles-pack small {
+  display: block;
+  color: var(--fg-muted);
+}
+
+.tile-new,
+.tile-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tile-new h3 {
+  margin: 0;
+  font-size: var(--t-small);
+}
+
+.tile-new-actions {
+  display: flex;
+  gap: var(--s2);
+}
+
+.tile-group-head,
+.tile-row,
+.tile-io {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.tile-group-head input,
+.tile-row-name {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.tile-row {
+  padding: var(--s1) 0;
+  border-top: 1px solid var(--border);
+}
+
+.tile-row-icon {
+  display: inline-flex;
+}
+
+.tile-row-style {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.tile-row-view {
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+}
+
+.tile-swatches,
+.tile-icons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+
+.tile-swatch {
+  width: 18px;
+  height: 18px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.tile-swatch-on {
+  border-color: var(--fg);
+}
+
+.tile-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.tile-icon-on {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+/* Podpis grupy wlasnych kafelkow: suma zadan i SP + roznica wzgledem poprzedniego dnia (jak w zestawie IT). */
+.counters-cap-static {
+  cursor: default;
+}
+
+.counters-cap-sp {
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Przyciski dodawania i edycji: same ikony, kwadratowe, w jednym rzedzie. */
+.counters-tools-row {
+  align-items: stretch;
+}
+
+.counter-icon-only {
+  min-width: 0;
+  padding: var(--s2);
+  justify-content: center;
+}
+
+/* Formularz kafelka: pole nazwy ma byc jednowierszowe, a nie rozciagniete na wysokosc kolumny. */
+.tile-new .tile-row-name,
+.tile-new input,
+.tile-new select {
+  flex: 0 0 auto;
+}
+
+.tile-new input[type='text'],
+.tile-new .tile-row-name {
+  width: 100%;
+  height: 32px;
+}
+
+.tile-icons {
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.tile-swatch-custom {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
+}
+
+.tile-swatch-custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
