@@ -307,7 +307,6 @@ export function sameView(
   return (
     tile.scope === state.scope &&
     tile.onlyMine === state.onlyMine &&
-    tile.showDone === state.showDone &&
     a.length === b.length &&
     a.every((x, i) => x === b[i])
   );

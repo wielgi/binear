@@ -2885,6 +2885,11 @@ function DraggableChip({ id, className, children }: { id: string; className: str
   );
 }
 
+/** Czy zestaw filtrow ma niepusty warunek po statusie — wtedy zakonczone nie sa wstepnie ukrywane. */
+function touchesStatus(conds: readonly { field: string; values: readonly string[] }[]): boolean {
+  return conds.some((c) => c.field === 'status' && c.values.length > 0);
+}
+
 function ScrollX({
   children,
   onSpare,
@@ -6895,7 +6900,7 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ['R'], label: 'Odśwież dane z Bitriksa' },
   { keys: ['X'], label: 'Wyczyść filtry i wyszukiwanie' },
   { keys: ['V'], label: 'Zapisane widoki — potem 1…9 wybiera widok' },
-  { keys: ['1', '2', '3', '4'], label: 'Lista / Tablica / Wykresy / Planowanie' },
+  { keys: ['1', '2', '3', '4', '5'], label: 'Planowanie / Lista / Tablica / Wykresy / Podsumowanie' },
   { keys: ['W'], label: 'Sprint — wrzuć do sprintu albo do backlogu' },
   { keys: ['M'], label: 'Etap w sprincie' },
   { keys: ['A'], label: 'Osoba odpowiedzialna' },
@@ -7137,7 +7142,6 @@ function ViewMenu({
     scope: Scope;
     mine: boolean;
     unassigned: boolean;
-    done: boolean;
     /** Wariant kolorowania grup listy — do porownania na zywo. */
     tint: ListTint;
     deadline: DeadlineLook;
@@ -7163,7 +7167,6 @@ function ViewMenu({
     scope: (s: Scope) => void;
     mine: () => void;
     unassigned: () => void;
-    done: () => void;
     tint: (v: ListTint) => void;
     deadline: (v: DeadlineLook) => void;
     empty: () => void;
@@ -7225,6 +7228,14 @@ function ViewMenu({
         <div className="ds-tabs" role="tablist">
           <button
             role="tab"
+            aria-selected={state.view === 'planning'}
+            className={`ds-tab${state.view === 'planning' ? ' ds-tab-on' : ''}`}
+            onClick={() => on.view('planning')}
+          >
+            <PlanIcon /> Planowanie
+          </button>
+          <button
+            role="tab"
             aria-selected={state.view === 'list'}
             className={`ds-tab${state.view === 'list' ? ' ds-tab-on' : ''}`}
             onClick={() => on.view('list')}
@@ -7249,11 +7260,11 @@ function ViewMenu({
           </button>
           <button
             role="tab"
-            aria-selected={state.view === 'planning'}
-            className={`ds-tab${state.view === 'planning' ? ' ds-tab-on' : ''}`}
-            onClick={() => on.view('planning')}
+            aria-selected={state.view === 'summary'}
+            className={`ds-tab${state.view === 'summary' ? ' ds-tab-on' : ''}`}
+            onClick={() => on.view('summary')}
           >
-            <PlanIcon /> Planowanie
+            <SummaryIcon /> Podsumowanie
           </button>
         </div>
 
@@ -7373,7 +7384,6 @@ function ViewMenu({
           bo w Bitriksie to status 5 i 4, a nie jedno). Wygaszamy go tutaj,
           zamiast zostawiac przycisk, ktory nic nie robi.
         */}
-        {check('Pokaż zakończone', state.done, on.done, planMode)}
         {/* Liczniki sa tylko nad lista i tablica — w planowaniu nie ma ich czym chowac. */}
         <div className={`ds-check ds-check-row${planMode ? ' ds-check-off' : ''}`}>
           <label htmlFor="ds-show-counters" className="ds-check-row-label">
@@ -8726,7 +8736,11 @@ export default function App() {
   // Domyslnie wlaczone — na starcie interesuja mnie moje zadania, nie caly zespol.
   const [onlyMine, setOnlyMine] = useState(saved.onlyMine);
   const [withUnassigned, setWithUnassigned] = useState(saved.withUnassigned);
-  const [showDone, setShowDone] = useState(saved.showDone);
+  /*
+   * Zakonczonych nie przelaczamy osobnym przelacznikiem: sa ukryte, dopoki nie dodasz filtra STATUSU —
+   * wtedy o tym, co widac, decyduje ten filtr (np. status = zakonczone pokazuje tylko zakonczone).
+   */
+  const showDone = useMemo(() => touchesStatus(filters), [filters]);
   const [planDone, setPlanDone] = useState(saved.planDone ?? false);
   const [planReview, setPlanReview] = useState(saved.planReview ?? true);
   /*
@@ -9243,7 +9257,7 @@ export default function App() {
       const rows = tasks.filter((t) => {
         const mineOrFree = t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
         if (tile.onlyMine && !mineOrFree) return false;
-        if (!tile.showDone && CLOSED_STATUSES.has(t.status)) return false;
+        if (!touchesStatus(tile.filters) && CLOSED_STATUSES.has(t.status)) return false;
         const inSprint = sprintId !== null && t.sprintId === sprintId;
         if (tile.scope === 'sprint' && !inSprint) return false;
         if (tile.scope === 'outside' && inSprint) return false;
@@ -9301,7 +9315,6 @@ export default function App() {
       return;
     }
     setScope(tile.scope);
-    setShowDone(tile.showDone);
     setOnlyMine(tile.onlyMine);
     setFilters(refreshGroups(tile.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })) as Filters);
     setQuery('');
@@ -10035,7 +10048,6 @@ export default function App() {
     setScope(v.scope);
     setOnlyMine(v.onlyMine);
     setWithUnassigned(v.withUnassigned);
-    setShowDone(v.showDone);
     setShowEmpty(v.showEmpty);
     // Menu zostaje otwarte — mozna przeklikiwac widoki i patrzec na wynik bez
     // ponownego otwierania listy. Zamyka je klikniecie poza (backdrop) albo Esc.
@@ -10310,14 +10322,14 @@ export default function App() {
         if (current) setOpenId(current.id);
       } else if (e.key === 'r') {
         void reload();
-      } else if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') {
+      } else if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4' || e.key === '5') {
         /*
          * Widoki pod cyframi w KOLEJNOSCI ZAKLADEK z panelu widoku. Osobny
          * klawisz tylko dla wybranych bylby wyjatkiem bez reguly - kazdy widok
          * dostaje swoja cyfre.
          */
         e.preventDefault();
-        setViewMode((['list', 'board', 'charts', 'planning', 'summary'] as const)[Number(e.key) - 1]);
+        setViewMode((['planning', 'list', 'board', 'charts', 'summary'] as const)[Number(e.key) - 1]);
       } else if (e.key === 'v') {
         /*
          * Menu kotwiczymy do PRZYCISKU, nie do srodka ekranu: to samo miejsce,
@@ -11102,6 +11114,12 @@ export default function App() {
 
     list.push(
       {
+        id: 'view-planning',
+        section: 'Widok',
+        label: 'Planowanie (rejestr obok sprintów)',
+        run: () => setViewMode('planning'),
+      },
+      {
         id: 'view-list',
         section: 'Widok',
         label: 'Lista',
@@ -11124,12 +11142,6 @@ export default function App() {
         section: 'Widok',
         label: 'Podsumowanie sprintu (jak na radzie)',
         run: () => setViewMode('summary'),
-      },
-      {
-        id: 'view-planning',
-        section: 'Widok',
-        label: 'Planowanie (rejestr obok sprintów)',
-        run: () => setViewMode('planning'),
       },
       ...scopes.map((s) => ({
         id: `scope-${s.key}`,
@@ -11185,12 +11197,6 @@ export default function App() {
         section: 'Filtry',
         label: withUnassigned ? 'Ukryj nieprzypisane' : 'Pokaż też nieprzypisane',
         run: () => setWithUnassigned((v) => !v),
-      },
-      {
-        id: 'toggle-done',
-        section: 'Filtry',
-        label: showDone ? 'Ukryj zakończone' : 'Pokaż zakończone',
-        run: () => setShowDone((v) => !v),
       },
       {
         id: 'reload',
@@ -11694,10 +11700,10 @@ export default function App() {
           <span className="mode-group" role="group" aria-label="Widok">
             {(
               [
-                { key: 'list', icon: <ListIcon />, label: 'Lista (1)' },
-                { key: 'board', icon: <BoardIcon />, label: 'Tablica (2)' },
-                { key: 'charts', icon: <ChartIcon />, label: 'Wykresy (3)' },
-                { key: 'planning', icon: <PlanIcon />, label: 'Planowanie (4)' },
+                { key: 'planning', icon: <PlanIcon />, label: 'Planowanie (1)' },
+                { key: 'list', icon: <ListIcon />, label: 'Lista (2)' },
+                { key: 'board', icon: <BoardIcon />, label: 'Tablica (3)' },
+                { key: 'charts', icon: <ChartIcon />, label: 'Wykresy (4)' },
                 { key: 'summary', icon: <SummaryIcon />, label: 'Podsumowanie sprintu (5)' },
               ] as const
             ).map((m) => (
@@ -12666,7 +12672,6 @@ export default function App() {
             scope,
             mine: onlyMine,
             unassigned: withUnassigned,
-            done: showDone,
             tint: listTint,
             deadline: deadlineLook,
             empty: showEmpty,
@@ -12696,7 +12701,6 @@ export default function App() {
             scope: setScope,
             mine: () => setOnlyMine((v) => !v),
             unassigned: () => setWithUnassigned((v) => !v),
-            done: () => setShowDone((v) => !v),
             tint: setListTint,
             deadline: setDeadlineLook,
             empty: () => setShowEmpty((v) => !v),
