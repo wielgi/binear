@@ -208,6 +208,7 @@ import { useAnsweredTasks, useCounterHistory } from './CounterHistory';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
 import { TeamModal } from './TeamModal';
+import { ManageModal } from './ManageModal';
 import { budgetExcludedIds, loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
@@ -9180,6 +9181,7 @@ export default function App() {
   /* Zespol i grafik tygodniowy (zapis w przegladarce). Pusty zespol = moce liczone po staremu. */
   const [team, setTeamState] = useState<TeamConfig>(loadTeam);
   const [teamOpen, setTeamOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState<null | 'tags' | 'epics'>(null);
   const setTeam = useCallback((next: TeamConfig) => {
     setTeamState(next);
     saveTeam(next);
@@ -11785,6 +11787,10 @@ export default function App() {
             <PersonIcon />
             <span>Zespół</span>
           </button>
+          <button className="icon-btn header-team" onClick={() => setManageOpen('tags')} title="Zarządzanie tagami i epikami projektu">
+            <TagIcon />
+            <span>Tagi i epiki</span>
+          </button>
           <button
             className="icon-btn"
             onClick={() => {
@@ -12741,6 +12747,17 @@ export default function App() {
           }}
         />
       )}
+      {manageOpen && (
+        <ManageModal
+          tasks={tasks}
+          epics={epics}
+          groupId={groupId}
+          initialTab={manageOpen}
+          onChanged={() => void reload(true)}
+          onClose={() => setManageOpen(null)}
+        />
+      )}
+
       {teamOpen && (
         <TeamModal team={team} people={people} now={now} onChange={setTeam} onClose={() => setTeamOpen(false)} />
       )}

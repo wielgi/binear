@@ -9502,3 +9502,43 @@ a.mention:hover {
 .person-bar {
   flex: 1 1 0;
 }
+
+/* Okno „Tagi i epiki": lista z akcjami przy kazdym wierszu. */
+.manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.manage-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius);
+}
+
+.manage-row:hover {
+  background: var(--bg-hover);
+}
+
+.manage-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manage-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.manage-error {
+  color: var(--danger, #f85149);
+}

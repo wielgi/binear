@@ -34,6 +34,10 @@ const ALLOWED = new Set([
   'task.item.update', // legacy CTaskItem::update — jedyna droga zapisu DEPENDS_ON (zadania powiazane)
   'task.stages.movetask',
   'tasks.api.scrum.task.update', // sprint <-> backlog; przynaleznosc trzyma scrum, nie pole zadania
+  // zarzadzanie epikami projektu (okno „Tagi i epiki")
+  'tasks.api.scrum.epic.add',
+  'tasks.api.scrum.epic.update',
+  'tasks.api.scrum.epic.delete',
   /*
    * KARTA na tablicy sprintu. Bez niej wejscie do sprintu jest tylko wpisem w
    * bazie: zadanie ma sprint i etap, ale na tablicy Bitriksa karty nie ma, wiec

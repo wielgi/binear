@@ -807,6 +807,21 @@ export async function fetchEpics(groupId: number): Promise<Epic[]> {
   }
 }
 
+/** Dodaje epik do projektu (okno „Tagi i epiki"). Kolor jako #rrggbb. */
+export async function addEpic(groupId: number, name: string, color: string): Promise<void> {
+  await call('tasks.api.scrum.epic.add', { fields: { groupId, name, description: '', color } });
+}
+
+/** Zmienia nazwe i/albo kolor epiku. */
+export async function editEpic(id: number, fields: { name?: string; color?: string }): Promise<void> {
+  await call('tasks.api.scrum.epic.update', { id, fields });
+}
+
+/** Usuwa epik; zadania zostaja, tracac przypisanie. W UI zawsze za potwierdzeniem. */
+export async function deleteEpic(id: number): Promise<void> {
+  await call('tasks.api.scrum.epic.delete', { id });
+}
+
 /**
  * Czy w grupie zmienilo sie cokolwiek od podanego znacznika.
  *
