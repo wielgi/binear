@@ -9327,3 +9327,17 @@ a.mention:hover {
   flex: 1 1 0;
   align-items: center;
 }
+
+/* Grupa z przyciskami rozciaga sie do wysokosci najwyzszej grupy, a jej rzad wypelnia reszte — razem rowno z kafelkami. */
+.counters-tools {
+  align-self: stretch;
+}
+
+.counters-tools .counters-tools-row {
+  flex: 1 1 auto;
+  align-items: stretch;
+}
+
+.counters-cap-ghost {
+  visibility: hidden;
+}

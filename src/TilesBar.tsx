@@ -85,8 +85,12 @@ export function TilesBar({
         );
       })}
       <div className="counters-group counters-tools">
-        <span className="counters-cap counters-cap-empty" aria-hidden>
+        {/* Niewidoczny odpowiednik podpisu grupy (te same klasy i tresc) — dzieki temu rzad przyciskow zaczyna sie
+            na tej samej wysokosci co kafelki, a nie kilka pikseli nizej. */}
+        <span className="counters-cap counters-cap-total counters-cap-static counters-cap-ghost" aria-hidden>
           <span className="counters-cap-text">&nbsp;</span>
+          <span className="counters-cap-count">0</span>
+          <span className="counters-cap-sp">0 SP</span>
         </span>
         <div className="counters-group-row counters-tools-row">
           <button
