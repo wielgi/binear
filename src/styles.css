@@ -8630,3 +8630,19 @@ a.mention:hover {
 .person-row-cap-late {
   background: none;
 }
+
+/* Podpis sekcji w liscie wyboru (np. „Zespół", „Pozostali"). */
+.picker-section {
+  margin: var(--s2) var(--s2) 2px;
+  padding-top: var(--s1);
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.picker-list > .picker-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
