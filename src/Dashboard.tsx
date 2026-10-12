@@ -15,6 +15,8 @@ import { BurndownChart, Legend, ScopeBar, StageStrip, type Series } from './Char
 import { Avatar, CheckIcon, ChevronIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { isUnassigned, tasksWord, UNASSIGNED_LABEL } from './taskView';
+import { sprintDeadline, sprintWorkEnd } from './sprintClock';
+import { memberHoursBetween, type TeamConfig } from './team';
 
 /*
  * Ile ostatnich sprintow pobieramy. Wykres jest JEDEN - spalanie biezacego
@@ -51,10 +53,15 @@ function writeFlags(flags: Record<string, boolean>) {
 export function Dashboard({
   groupId,
   people: roster,
+  team,
+  onOpenTeam,
 }: {
   groupId: number | null;
   /** Ludzie projektu ze ZDJECIAMI — zadania sprintu niosa tylko id i imie. */
   people: { id: number; name: string; photo: string | null }[];
+  /** Zespol i grafik: rola i moc osoby w sprincie (kreska na slupku). */
+  team: TeamConfig;
+  onOpenTeam: () => void;
 }) {
   const [summaries, setSummaries] = useState<SprintSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -180,6 +187,14 @@ export function Dashboard({
     else byPerson.set(t.responsibleId, [t]);
   }
 
+  /* Przedzial sprintu jak w podsumowaniu: od 8:00 pierwszego dnia do konca pracy ostatniego. */
+  const sprintSpan = (() => {
+    const start = base.sprint.dateStart ? new Date(base.sprint.dateStart) : null;
+    const end = sprintDeadline(base.sprint.dateEnd ?? null);
+    if (!start || Number.isNaN(start.getTime()) || !end) return null;
+    return { from: new Date(start.getFullYear(), start.getMonth(), start.getDate(), 8), to: sprintWorkEnd(end) };
+  })();
+
   const people = [...byPerson.entries()]
     .map(([id, own]) => {
       const known = byId.get(id);
@@ -205,9 +220,32 @@ export function Dashboard({
         segments: stageBreakdown(own, stages),
       };
     })
+    .concat(
+      /* Osoby z zespolu bez zadan w tym sprincie: widac u nich wolna moc. */
+      team.members
+        .filter((m) => !byPerson.has(m.id))
+        .map((m) => ({
+          id: m.id,
+          unassigned: false,
+          name: m.name,
+          photo: byId.get(m.id)?.photo ?? null,
+          sp: 0,
+          done: 0,
+          left: 0,
+          count: 0,
+          segments: [] as ReturnType<typeof stageBreakdown>,
+        })),
+    )
+    .map((p) => {
+      const m = team.members.find((x) => x.id === p.id);
+      const cap = m && sprintSpan ? memberHoursBetween(team, p.id, sprintSpan.from, sprintSpan.to) : 0;
+      return { ...p, role: m?.role ?? '', cap: Math.round(cap * 10) / 10 };
+    })
     // Sortujemy po CALOSCI, nie po reszcie: inaczej lista przeskakiwalaby przy
     // kazdym przelaczeniu, a szuka sie w niej po nazwisku, nie po liczbie.
     .sort((a, b) => b.sp - a.sp || a.name.localeCompare(b.name, 'pl'));
+  /* Wspolna skala slupkow: najdluzszy z (SP, moc) = 100%, zeby dlugosci dalo sie porownac miedzy osobami. */
+  const barScale = Math.max(1, ...people.map((p) => Math.max(p.sp, p.cap)));
 
   // Wybor osoby przelicza sprint LOKALNIE — te same zadania, wezsze wejscie.
   /*
@@ -441,6 +479,9 @@ export function Dashboard({
             <span className="dash-sub">
               {persons.length ? 'Klik zdejmuje zaznaczenie' : 'Klik filtruje wykres wyżej'}
             </span>
+            <button className="btn dash-team-btn" onClick={onOpenTeam} title="Role, moc, budżet SP i urlopy">
+              Zespół i grafik
+            </button>
           </header>
 
           <div className="dash-people">
@@ -461,7 +502,10 @@ export function Dashboard({
                 }}
               >
                 <Avatar name={p.unassigned ? null : p.name} photo={p.photo} />
-                <span className="person-row-name">{p.name}</span>
+                <span className="person-row-name">
+                  {p.name}
+                  {p.role && <small className="person-row-role">{p.role}</small>}
+                </span>
 
                 {/* „zrobione z calosci" — sama calosc nie reaguje na przelacznik,
                     a sama reszta gubi skale (6 SP u kogos, kto ma 76). */}
@@ -469,7 +513,23 @@ export function Dashboard({
                   <b>{p.done}</b> / {p.sp} SP
                 </span>
 
-                <StageStrip segments={p.segments} done={p.done} />
+                {/* Slupek w skali wspolnej dla wszystkich; kreska = moc osoby w tym sprincie. */}
+                <span className="person-bar">
+                  <span className="person-bar-fill" style={{ width: `${(p.sp / barScale) * 100}%` }}>
+                    <StageStrip segments={p.segments} done={p.done} />
+                  </span>
+                  {p.cap > 0 && (
+                    <span
+                      className="person-bar-cap"
+                      style={{ left: `${(p.cap / barScale) * 100}%` }}
+                      title={`Moc w tym sprincie: ${p.cap} h`}
+                    />
+                  )}
+                </span>
+
+                <span className={`person-row-cap${p.cap > 0 && p.sp > p.cap ? ' person-row-over' : ''}`}>
+                  {p.cap > 0 ? `moc ${p.cap}` : ''}
+                </span>
 
                 <span className="person-row-count">
                   {p.count} {tasksWord(p.count)}

@@ -3,13 +3,17 @@ import { createPortal } from 'react-dom';
 
 import {
   addMember,
+  countsCapacity,
   FTE_OPTIONS,
   fmtFte,
   isoDate,
   isPresent,
   mondayOf,
   removeMember,
+  ROLE_SUGGESTIONS,
   setFte,
+  setMember,
+  takesBudget,
   teamWeekHours,
   togglePresence,
   weekDays,
@@ -48,7 +52,7 @@ export function TeamModal({
   return createPortal(
     <>
       <div className="picker-backdrop" onClick={onClose} />
-      <div className="team-modal" role="dialog" aria-label="Zespół i grafik">
+      <div className="team-modal team-modal-wide" role="dialog" aria-label="Zespół i grafik">
         <header className="team-head">
           <h2>Zespół i grafik</h2>
           <button className="btn" onClick={onClose}>
@@ -83,7 +87,10 @@ export function TeamModal({
             <thead>
               <tr>
                 <th>Osoba</th>
+                <th>Rola</th>
                 <th>Etat</th>
+                <th title="Godziny osoby wchodzą do mocy zespołu (potencjał sprintu)">Moc</th>
+                <th title="Zadania osoby zjadają budżet SP w planowaniu">Budżet</th>
                 {days.map((d, i) => (
                   <th key={i} className="team-day" title={isoDate(d)}>
                     {DNI[i]}
@@ -98,6 +105,17 @@ export function TeamModal({
                 <tr key={m.id}>
                   <td>{m.name}</td>
                   <td>
+                    <input
+                      className="team-role"
+                      list="team-roles"
+                      value={m.role ?? ''}
+                      maxLength={40}
+                      placeholder="rola"
+                      aria-label={`Rola: ${m.name}`}
+                      onChange={(e) => onChange(setMember(team, m.id, { role: e.target.value }))}
+                    />
+                  </td>
+                  <td>
                     <select
                       value={m.fte}
                       onChange={(e) => onChange(setFte(team, m.id, Number(e.target.value)))}
@@ -111,6 +129,22 @@ export function TeamModal({
                           </option>
                         ))}
                     </select>
+                  </td>
+                  <td className="team-day">
+                    <input
+                      type="checkbox"
+                      checked={countsCapacity(m)}
+                      onChange={(e) => onChange(setMember(team, m.id, { capacity: e.target.checked }))}
+                      aria-label={`${m.name}: godziny liczą się do mocy zespołu`}
+                    />
+                  </td>
+                  <td className="team-day">
+                    <input
+                      type="checkbox"
+                      checked={takesBudget(m)}
+                      onChange={(e) => onChange(setMember(team, m.id, { budget: e.target.checked }))}
+                      aria-label={`${m.name}: zadania zjadają budżet SP`}
+                    />
                   </td>
                   {days.map((d, i) => (
                     <td key={i} className="team-day">
@@ -137,8 +171,8 @@ export function TeamModal({
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={2}>Moce tygodnia</td>
-                <td colSpan={6} className="team-total">
+                <td colSpan={4}>Moce tygodnia</td>
+                <td colSpan={8} className="team-total">
                   <b>{Math.round(hours * 10) / 10}</b> h (= SP)
                 </td>
               </tr>
@@ -146,6 +180,11 @@ export function TeamModal({
           </table>
         )}
 
+        <datalist id="team-roles">
+          {ROLE_SUGGESTIONS.map((r) => (
+            <option key={r} value={r} />
+          ))}
+        </datalist>
         <label className="team-add">
           <span>Dodaj osobę</span>
           <select
@@ -164,8 +203,9 @@ export function TeamModal({
           </select>
         </label>
         <p className="team-hint">
-          Zaznaczone = w pracy. Moce = etat × 8 h na każdy zaznaczony dzień roboczy; jedna godzina to jeden punkt.
-          Konfiguracja jest zapisana tylko w tej przeglądarce.
+          <b>Moc</b> — godziny osoby wchodzą do mocy zespołu. <b>Budżet</b> — jej zadania zjadają budżet SP w planowaniu.
+          Statystyki (wykresy, podsumowanie) liczą zadania wszystkich, także tych bez mocy. Dni zaznaczone = w pracy;
+          moc = etat × 8 h na dzień, jedna godzina to jeden punkt. Zapis tylko w tej przeglądarce.
         </p>
       </div>
     </>,

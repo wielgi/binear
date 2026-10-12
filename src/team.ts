@@ -8,6 +8,11 @@
  *  - czlonek zespolu ma wymiar etatu (0.5, 1 ...), liczony do mocy, gdy jest obecny,
  *  - domyslnie jest obecny w kazdy dzien roboczy (pn–pt); zapisujemy tylko WYJATKI — dni, w ktore
  *    go nie ma (`off`), dzieki czemu urlop to jedno klikniecie, a nie wypelnianie calego tygodnia,
+ *  - TRZY osobne ustawienia osoby (rola jest tylko opisem):
+ *      · `capacity` — jej godziny liczą się do mocy zespołu (potencjał sprintu),
+ *      · `budget`   — jej zadania zjadają budżet SP w planowaniu (kierownik zwykle nie),
+ *      · statystyki — zawsze liczą wszystkich: zadanie zrobione przez kierownika jest wynikiem zespołu,
+ *        nawet jeśli jego godzin nie wliczamy do mocy,
  *  - dzien roboczy to 8–16 (jak w odliczaniu do konca sprintu), 1 godzina = 1 punkt na etat.
  */
 import { WORK_END_HOUR, WORK_START_HOUR } from './sprintClock';
@@ -17,7 +22,19 @@ export interface TeamMember {
   name: string;
   /** Wymiar etatu: 1 = pelny, 0.5 = pol etatu. */
   fte: number;
+  /** Rola w zespole (opis: Programista, Kierownik IT ...); nie wplywa na liczenie. */
+  role?: string;
+  /** Czy godziny osoby wchodza do mocy zespolu. Brak wartosci = tak. */
+  capacity?: boolean;
+  /** Czy zadania osoby zjadaja budzet SP w planowaniu. Brak wartosci = tak. */
+  budget?: boolean;
 }
+
+/** Role do podpowiedzi w formularzu — pole jest dowolne, to tylko skrot. */
+export const ROLE_SUGGESTIONS = ['Programista', 'Kierownik IT', 'Tester', 'Analityk', 'Projektant'] as const;
+
+export const countsCapacity = (m: Pick<TeamMember, 'capacity'>): boolean => m.capacity !== false;
+export const takesBudget = (m: Pick<TeamMember, 'budget'>): boolean => m.budget !== false;
 
 export interface TeamConfig {
   members: TeamMember[];
@@ -75,7 +92,25 @@ export function togglePresence(team: TeamConfig, memberId: number, d: Date): Tea
 
 /** Etaty w pracy danego dnia: suma wymiarow obecnych osob. */
 export function fteOnDay(team: TeamConfig, d: Date): number {
-  return team.members.reduce((n, m) => n + (isPresent(team, m.id, d) ? m.fte : 0), 0);
+  return team.members.reduce((n, m) => n + (countsCapacity(m) && isPresent(team, m.id, d) ? m.fte : 0), 0);
+}
+
+/** Id osob, ktorych zadania NIE zjadaja budzetu SP (zespol niepusty), albo `null`, gdy zespol jest pusty. */
+export function budgetExcludedIds(team: TeamConfig): number[] | null {
+  return team.members.length ? team.members.filter((m) => !takesBudget(m)).map((m) => m.id) : null;
+}
+
+/** Moc JEDNEJ osoby (godziny = SP) w przedziale od–do; 0, gdy nie liczy sie do mocy albo jej nie ma. */
+export function memberHoursBetween(team: TeamConfig, memberId: number, from: Date, to: Date): number {
+  const m = team.members.find((x) => x.id === memberId);
+  if (!m || !countsCapacity(m) || to.getTime() <= from.getTime()) return 0;
+  let total = 0;
+  const day = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  while (day.getTime() <= to.getTime()) {
+    if (isPresent(team, m.id, day)) total += dayHoursWithin(day, from, to) * m.fte;
+    day.setDate(day.getDate() + 1);
+  }
+  return total;
 }
 
 /** Godziny jednego dnia roboczego (8–16) mieszczace sie w przedziale od–do. */
@@ -125,7 +160,12 @@ export function removeMember(team: TeamConfig, id: number): TeamConfig {
 }
 
 export function setFte(team: TeamConfig, id: number, fte: number): TeamConfig {
-  return { ...team, members: team.members.map((m) => (m.id === id ? { ...m, fte } : m)) };
+  return setMember(team, id, { fte });
+}
+
+/** Zmienia ustawienia jednej osoby (etat, rola, moc, budzet). */
+export function setMember(team: TeamConfig, id: number, patch: Partial<Omit<TeamMember, 'id' | 'name'>>): TeamConfig {
+  return { ...team, members: team.members.map((m) => (m.id === id ? { ...m, ...patch } : m)) };
 }
 
 /* ---------- zapis w przegladarce ---------- */
@@ -140,7 +180,14 @@ export function loadTeam(): TeamConfig {
     const p = JSON.parse(raw) as Partial<TeamConfig>;
     const members = (Array.isArray(p.members) ? p.members : [])
       .filter((m) => m && Number.isFinite(m.id) && typeof m.name === 'string')
-      .map((m) => ({ id: Number(m.id), name: m.name, fte: Number.isFinite(m.fte) && m.fte > 0 ? Math.min(1, m.fte) : 1 }));
+      .map((m) => ({
+        id: Number(m.id),
+        name: m.name,
+        fte: Number.isFinite(m.fte) && m.fte > 0 ? Math.min(1, m.fte) : 1,
+        ...(typeof m.role === 'string' && m.role.trim() ? { role: m.role.trim().slice(0, 40) } : {}),
+        ...(m.capacity === false ? { capacity: false } : {}),
+        ...(m.budget === false ? { budget: false } : {}),
+      }));
     const off: Record<string, string[]> = {};
     for (const [k, v] of Object.entries(p.off ?? {})) {
       if (Array.isArray(v)) off[k] = v.filter((x) => typeof x === 'string');
