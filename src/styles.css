@@ -592,15 +592,11 @@ kbd {
   scrollbar-color: var(--border-strong) transparent;
 }
 
-/* Firefox nie zna `::-webkit-scrollbar` — tam „grubszy po najechaniu" da sie zrobic
-   tylko przeskokiem `thin` -> `auto`. Skokowo, ale lepiej niz wcale. */
-.list:hover,
-.detail-body:hover,
-.col-body:hover,
-.board:hover {
-  scrollbar-width: auto;
-}
-
+/*
+ * Szerokosc paska NIE zmienia sie po najechaniu. Wczesniej `thin` -> `auto` na :hover poszerzalo pasek, a ze
+ * zajmuje on miejsce w pojemniku, cala tresc (wszystko wyrownane do prawej) przeskakiwala o kilka pikseli,
+ * gdy kursor wjezdzal na liste.
+ */
 .list::-webkit-scrollbar,
 .detail-body::-webkit-scrollbar,
 .col-body::-webkit-scrollbar,
