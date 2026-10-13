@@ -155,6 +155,9 @@ function dayLabel(day: string, today: Date): string {
   return `${d}.${m}`;
 }
 
+/** Wzrost wiekszy niz to jest „goracy" (czerwony); do tej wartosci wlacznie — bursztynowy. */
+const HOT_RISE = 10;
+
 export function Delta({
   now,
   before,
@@ -169,7 +172,15 @@ export function Delta({
   if (before === undefined) return <span className="counter-delta">—</span>;
   const diff = now - before;
   const when = dayLabel(day, new Date());
-  const tone = diff === 0 || !riseIsBad ? '' : diff > 0 ? ' counter-delta-up' : ' counter-delta-down';
+  /* Spadek zawsze zielony; wzrost bursztynowy do 10 wlacznie, powyzej czerwony. */
+  const tone =
+    diff === 0 || !riseIsBad
+      ? ''
+      : diff < 0
+        ? ' counter-delta-down'
+        : diff > HOT_RISE
+          ? ' counter-delta-hot'
+          : ' counter-delta-up';
   return (
     <span className={`counter-delta${tone}`} title={`${when}: ${before}`}>
       {diff === 0 ? '=' : diff > 0 ? `▲ ${diff}` : `▼ ${-diff}`}{' '}

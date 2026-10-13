@@ -9604,3 +9604,8 @@ a.mention:hover {
   min-height: 0;
   max-height: none;
 }
+
+/* Duzy wzrost (powyzej 10) — czerwony. */
+.counter-delta-hot {
+  color: var(--accent-red, var(--danger, #f85149));
+}

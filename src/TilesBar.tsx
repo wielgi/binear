@@ -51,7 +51,7 @@ export function TilesBar({
               <span className="counters-cap-text">{group.name}</span>
               <span className="counters-cap-count">{total.count}</span>
               <span className="counters-cap-sp">{total.points} SP</span>
-              {prev && <Delta now={total.count} before={prevCount} day={prev.day} riseIsBad={false} />}
+              {prev && <Delta now={total.count} before={prevCount} day={prev.day} riseIsBad />}
             </span>
           );
         return (
@@ -89,7 +89,7 @@ export function TilesBar({
                         </span>
                       </span>
                       <span className="counter-label">{t.name}</span>
-                      {prev && <Delta now={shown} before={prev.snap[`t:${t.id}`]} day={prev.day} riseIsBad={false} />}
+                      {prev && <Delta now={shown} before={prev.snap[`t:${t.id}`]} day={prev.day} riseIsBad />}
                     </span>
                   </button>
                 );
