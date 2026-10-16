@@ -154,6 +154,7 @@ import {
   withoutBugTag,
   shortDate,
   isImportant,
+  isLowPriority,
   isUnassigned,
   setUnassignedId,
   stageOf,
@@ -3481,7 +3482,7 @@ function TaskRow({
       {...listeners}
       className={`row${active ? ' row-active' : ''}${selected ? ' row-selected' : ''}${
         marked ? ' row-marked' : ''
-      }${isImportant(task) ? ' row-important' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
+      }${isImportant(task) ? ' row-important' : ''}${isLowPriority(task) ? ' row-low' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
       /* Shift+klik zaznaczylby tekst miedzy wierszami, Ctrl+klik potrafi zaczac
          zaznaczanie w niektorych przegladarkach. Blokujemy TYLKO z modyfikatorem,
          zeby zwykle zaznaczanie i kopiowanie tytulu dzialalo dalej.
