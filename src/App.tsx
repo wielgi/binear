@@ -142,6 +142,7 @@ import {
   ElsewhereIcon,
   TrashIcon,
   PinIcon,
+  matrixColor,
   tagHue,
 } from './icons';
 import {
@@ -3182,6 +3183,9 @@ function TagStrip({
 
 /** Tag Bitriksa. Odcien wyliczany z nazwy, wiec dla danego tagu stale ten sam. */
 function Tag({ name, onPick }: { name: string; onPick?: (name: string) => void }) {
+  const mx = matrixColor(name);
+  const tagClass = mx ? 'tag tag-matrix' : 'tag';
+  const tagStyle = mx ? ({ ['--mx' as string]: mx } as CSSProperties) : undefined;
   const body = (
     <>
       <span className="tag-dot" style={{ background: tagHue(name) }} />
@@ -3196,14 +3200,15 @@ function Tag({ name, onPick }: { name: string; onPick?: (name: string) => void }
    */
   if (!onPick) {
     return (
-      <span className="tag" title={name}>
+      <span className={tagClass} style={tagStyle} title={name}>
         {body}
       </span>
     );
   }
   return (
     <button
-      className="tag"
+      className={tagClass}
+      style={tagStyle}
       title={`Filtruj po tagu: ${name}`}
       onClick={(e) => {
         e.stopPropagation(); // klik w tag nie ma otwierac zadania

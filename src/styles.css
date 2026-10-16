@@ -9609,3 +9609,10 @@ a.mention:hover {
 .counter-delta-hot {
   color: var(--accent-red, var(--danger, #f85149));
 }
+
+/* Tagi macierzy A–D: kolor wazonosci na calym chipie, nie tylko na kropce. */
+.tag-matrix {
+  color: var(--mx);
+  font-weight: var(--w-semibold, 600);
+  background: color-mix(in srgb, var(--mx) 16%, transparent);
+}

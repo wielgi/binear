@@ -120,6 +120,15 @@ export const TILE_ICON_KEYS = [
   'refresh',
   'smile',
   'plusCircle',
+  // dla zadan malo waznych, do odlozenia albo do usuniecia
+  'trash',
+  'xCircle',
+  'ban',
+  'archive',
+  'arrowDown',
+  'moon',
+  'eyeOff',
+  'pause',
 ] as const;
 
 /** Kolor kafelka: klucz z palety albo dowolny kolor w zapisie #rrggbb (wybrany z pickera). */

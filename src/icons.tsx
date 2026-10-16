@@ -752,9 +752,20 @@ function nameHash(name: string): number {
   return hash;
 }
 
+/**
+ * Tagi macierzy Eisenhowera (A–D) maja STALE kolory, zeby waznosc bylo widac bez czytania litery:
+ * A czerwony, B bursztynowy, C niebieski, D szary.
+ */
+const MATRIX_COLORS: Record<string, string> = { A: '#e5534b', B: '#e8923c', C: '#4d9de0', D: '#8b949e' };
+
+/** Kolor tagu macierzy (A–D), albo `null` dla zwyklego tagu. */
+export function matrixColor(name: string): string | null {
+  return MATRIX_COLORS[name.trim().toUpperCase()] ?? null;
+}
+
 /** Stabilny odcien z nazwy — ten sam tag ma zawsze ten sam kolor, w liscie i na tablicy. */
 export function tagHue(name: string): string {
-  return `hsl(${nameHash(name)} 52% 55%)`;
+  return matrixColor(name) ?? `hsl(${nameHash(name)} 52% 55%)`;
 }
 
 /*

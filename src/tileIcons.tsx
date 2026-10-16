@@ -192,6 +192,51 @@ const AlertIcon = () => (
   </Svg>
 );
 
+const TrashTileIcon = () => (
+  <Svg>
+    <path d="M2.5 4.5h11M6 4.5V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5M4 4.5l.7 8.3a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8.3M6.7 7v4M9.3 7v4" />
+  </Svg>
+);
+const XCircleIcon = () => (
+  <Svg>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" />
+  </Svg>
+);
+const BanIcon = () => (
+  <Svg>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M3.8 3.8l8.4 8.4" />
+  </Svg>
+);
+const ArchiveIcon = () => (
+  <Svg>
+    <rect x="1.8" y="2.5" width="12.4" height="3.2" rx=".8" />
+    <path d="M3 5.7v6.8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.7M6.4 8.6h3.2" />
+  </Svg>
+);
+const ArrowDownIcon = () => (
+  <Svg>
+    <path d="M8 2.5v10M3.8 8.5L8 12.7l4.2-4.2" />
+  </Svg>
+);
+const MoonIcon = () => (
+  <Svg>
+    <path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z" />
+  </Svg>
+);
+const EyeOffIcon = () => (
+  <Svg>
+    <path d="M1.8 8S4 3.8 8 3.8c1 0 1.9.3 2.7.7M14.2 8S12 12.2 8 12.2c-1 0-1.9-.3-2.7-.7M2.5 2.5l11 11M6.6 6.6a2 2 0 0 0 2.8 2.8" />
+  </Svg>
+);
+const PauseCircleIcon = () => (
+  <Svg>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M6.4 5.8v4.4M9.6 5.8v4.4" />
+  </Svg>
+);
+
 /**
  * Ikony do wyboru przy kafelku. Klucze sa zapisywane w konfiguracji, wiec ich NIE zmieniamy; nowe tylko dopisujemy.
  * `TILE_ICON_KEYS` w customTiles.ts musi miec dokladnie te same klucze (pilnuje tego test).
@@ -248,4 +293,12 @@ export const TILE_ICON_NODES: Record<string, ReactNode> = {
   refresh: <RefreshIcon />,
   smile: <SmileIcon />,
   plusCircle: <PlusCircleIcon />,
+  trash: <TrashTileIcon />,
+  xCircle: <XCircleIcon />,
+  ban: <BanIcon />,
+  archive: <ArchiveIcon />,
+  arrowDown: <ArrowDownIcon />,
+  moon: <MoonIcon />,
+  eyeOff: <EyeOffIcon />,
+  pause: <PauseCircleIcon />,
 };
