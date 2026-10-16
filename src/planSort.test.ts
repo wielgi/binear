@@ -156,12 +156,15 @@ describe('sortowanie po zwrocie', () => {
   });
 });
 
-describe('domyslna kolejnosc planowania: plomien, pula, Wysoki, zwrot, SP', () => {
+describe('stos z pulami: plomien, pula, Wysoki, zwrot, SP malejaco', () => {
   const d = { ...deps, paybackRank };
-
-  it('domyslny stos to priorytet, pula, Wysoki, zwrot, SP', () => {
-    expect(PLAN_SORT_DOMYSLNY.map((l) => l.by)).toEqual(['priority', 'pula', 'wysoki', 'zwrot', 'sp']);
-  });
+  const STOS_PULA = [
+    { by: 'priority', dir: 'asc' },
+    { by: 'pula', dir: 'asc' },
+    { by: 'wysoki', dir: 'asc' },
+    { by: 'zwrot', dir: 'asc' },
+    { by: 'sp', dir: 'desc' },
+  ] as const;
 
   it('plomien (priorytet 2) jest nad wszystkim — takze nad pula', () => {
     const tasks = [
@@ -169,7 +172,7 @@ describe('domyslna kolejnosc planowania: plomien, pula, Wysoki, zwrot, SP', () =
       task(2, { priority: '2', tags: ['DZIAL', 'ZWROT-12+'] }),
       task(3, { priority: '1', tags: ['RDZEN'] }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1, 3]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1, 3]);
   });
 
   it('pule ida kolejno: CIAGLOSC, RDZEN, DZIAL, a zadania bez puli na koncu', () => {
@@ -179,7 +182,7 @@ describe('domyslna kolejnosc planowania: plomien, pula, Wysoki, zwrot, SP', () =
       task(3, { tags: ['RDZEN'] }),
       task(4, { tags: ['CIAGLOSC', 'ZWROT-12+'] }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([4, 3, 2, 1]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([4, 3, 2, 1]);
   });
 
   it('pula jest nad tagiem Wysoki i nad zwrotem', () => {
@@ -187,7 +190,7 @@ describe('domyslna kolejnosc planowania: plomien, pula, Wysoki, zwrot, SP', () =
       task(1, { tags: ['DZIAL', 'Wysoki', 'ZWROT-3'] }),
       task(2, { tags: ['RDZEN'] }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1]);
   });
 
   it('w obrebie puli tag Wysoki rozstrzyga PRZED zwrotem', () => {
@@ -196,7 +199,7 @@ describe('domyslna kolejnosc planowania: plomien, pula, Wysoki, zwrot, SP', () =
       task(2, { tags: ['DZIAL', 'Wysoki', 'ZWROT-12'] }),
       task(3, { tags: ['DZIAL'] }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1, 3]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1, 3]);
   });
 
   it('w RDZEN bez zwrotu po Wysoki decyduja story pointy malejaco', () => {
@@ -205,7 +208,7 @@ describe('domyslna kolejnosc planowania: plomien, pula, Wysoki, zwrot, SP', () =
       task(2, { tags: ['RDZEN'], storyPoints: 20 }),
       task(3, { tags: ['RDZEN', 'Wysoki'], storyPoints: 2 }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 2, 1]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([3, 2, 1]);
   });
 
   it('w obrebie tej samej puli i Wysoki zwrot rosnaco: ZWROT-3, 6, 12, 12+, a bez zwrotu na koncu', () => {
@@ -216,7 +219,7 @@ describe('domyslna kolejnosc planowania: plomien, pula, Wysoki, zwrot, SP', () =
       task(4, { tags: ['DZIAL', 'ZWROT-12'] }),
       task(5, { tags: ['DZIAL', 'ZWROT-6'] }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 5, 4, 1, 2]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([3, 5, 4, 1, 2]);
   });
 
   it('wymog (z terminem) idzie przed przedzialami zwrotu w tej samej puli', () => {
@@ -224,12 +227,12 @@ describe('domyslna kolejnosc planowania: plomien, pula, Wysoki, zwrot, SP', () =
       task(1, { tags: ['DZIAL', 'ZWROT-3'] }),
       task(2, { tags: ['DZIAL', 'WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1]);
   });
 
   it('sortowanie niczego nie ukrywa — zadania bez puli tez sa na liscie', () => {
     const tasks = [task(1), task(2, { tags: ['ZWROT-6'] }), task(3, { tags: ['RDZEN'] })];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toHaveLength(3);
+    expect(ids(tasks, [...STOS_PULA], d)).toHaveLength(3);
   });
 
   it('dwie pule na jednym zadaniu: liczy sie pierwsza z listy', () => {
@@ -303,5 +306,57 @@ describe('migratePlanSort', () => {
 
   it('brak zapisu → brak wartosci (wchodzi domyslny z ustawien)', () => {
     expect(migratePlanSort(undefined)).toBeUndefined();
+  });
+});
+
+describe('domyslna kolejnosc planowania: plomien, macierz A-D, zwrot, mniejsze SP', () => {
+  const d = { ...deps, paybackRank };
+
+  it('domyslny stos to priorytet, macierz, zwrot, SP rosnaco', () => {
+    expect(PLAN_SORT_DOMYSLNY).toEqual([
+      { by: 'priority', dir: 'asc' },
+      { by: 'macierz', dir: 'asc' },
+      { by: 'zwrot', dir: 'asc' },
+      { by: 'sp', dir: 'asc' },
+    ]);
+  });
+
+  it('macierz idzie A, B, C, D, a bez tagu na koncu; BUG i B2B to nie macierz', () => {
+    const tasks = [
+      task(1, { tags: ['BUG'] }),
+      task(2, { tags: ['D'] }),
+      task(3, { tags: ['a'] }),
+      task(4, { tags: ['C'] }),
+      task(5, { tags: ['B'] }),
+      task(6, { tags: ['B2B'] }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 5, 4, 2, 6, 1]);
+  });
+
+  it('plomien jest nad macierza', () => {
+    const tasks = [task(1, { tags: ['A'] }), task(2, { priority: '2', tags: ['D'] })];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
+  });
+
+  it('w obrebie litery najpierw zwrot, potem mniejsze SP, a bez wyceny na koncu', () => {
+    const tasks = [
+      task(1, { tags: ['B', 'ZWROT-6'], storyPoints: 2 }),
+      task(2, { tags: ['B', 'ZWROT-3'], storyPoints: 20 }),
+      task(3, { tags: ['B', 'ZWROT-3'], storyPoints: 4 }),
+      task(4, { tags: ['B', 'ZWROT-3'] }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 2, 4, 1]);
+  });
+
+  it('stary domyslny stos z pulami jest zastepowany nowym', () => {
+    expect(
+      migratePlanSort([
+        { by: 'priority', dir: 'asc' },
+        { by: 'pula', dir: 'asc' },
+        { by: 'wysoki', dir: 'asc' },
+        { by: 'zwrot', dir: 'asc' },
+        { by: 'sp', dir: 'desc' },
+      ]),
+    ).toEqual(PLAN_SORT_DOMYSLNY);
   });
 });

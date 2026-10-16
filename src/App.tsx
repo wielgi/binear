@@ -1894,7 +1894,7 @@ type Dir = 'asc' | 'desc';
  * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
  * na liscie i tak grupuje sie po etapie.
  */
-type PlanSortBy = SortBy | 'stage' | 'pula' | 'wysoki' | 'sp' | 'zwrot';
+type PlanSortBy = SortBy | 'stage' | 'macierz' | 'pula' | 'wysoki' | 'sp' | 'zwrot';
 
 const SORTS: { key: SortBy; label: string }[] = [
   { key: 'updated', label: 'Zaktualizowane' },
@@ -1911,6 +1911,8 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
    * pozycje bylyby niewidoczne w liscie i nie dalo by sie poprawic zadnego z nich
    * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
    */
+  /* Macierz Eisenhowera: tagi A, B, C, D (A najwazniejsze). */
+  { key: 'macierz', label: 'Macierz (A–D)' },
   { key: 'pula', label: 'Pula' },
   { key: 'wysoki', label: 'Tag „Wysoki”' },
   /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
