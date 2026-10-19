@@ -43,9 +43,9 @@ export function TilesBar({
             <span
               className="counters-cap counters-cap-total counters-cap-static"
               title={
-                `Suma kafelków grupy: ${total.count} zadań, ${total.points} SP.` +
+                `Różnych zadań w grupie: ${total.count}, ${total.points} SP.` +
                 (prevPoints !== undefined ? ` Dzień wcześniej: ${prevCount ?? '?'} zadań, ${prevPoints} SP.` : '') +
-                ' Kafelki to osobne widoki i mogą się nakładać.'
+                ' To samo zadanie z kilku kafelków liczy się raz.'
               }
             >
               <span className="counters-cap-text">{group.name}</span>

@@ -127,9 +127,10 @@
           "field": "tag",
           "op": "noneOf",
           "values": [
-            "DZIAL",
-            "RDZEN",
-            "CIAGLOSC"
+            "A",
+            "B",
+            "C",
+            "D"
           ],
           "or": "g5"
         },
@@ -165,6 +166,16 @@
           "op": "anyOf",
           "values": [
             "DO-STARTU"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "A",
+            "B",
+            "C",
+            "D"
           ]
         }
       ],

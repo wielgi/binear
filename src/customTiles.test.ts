@@ -214,3 +214,20 @@ describe('grupa bez podpisu', () => {
     expect(normalizeConfig(a.cfg).groups[0].hideCaption).toBe(true);
   });
 });
+
+describe('groupTotals z nakladajacymi sie kafelkami', () => {
+  it('to samo zadanie w dwoch kafelkach liczy sie raz', () => {
+    const values = new Map([
+      ['a', { count: 2, points: 6, rows: new Map([[1, 2], [2, 4]]) }],
+      ['b', { count: 2, points: 7, rows: new Map([[2, 4], [3, 3]]) }],
+    ]);
+    expect(groupTotals([{ id: 'a' }, { id: 'b' }], values)).toEqual({ count: 3, points: 9 });
+  });
+  it('bez listy zadan zostaje suma kafelkow', () => {
+    const values = new Map([
+      ['a', { count: 2, points: 6 }],
+      ['b', { count: 2, points: 7 }],
+    ]);
+    expect(groupTotals([{ id: 'a' }, { id: 'b' }], values)).toEqual({ count: 4, points: 13 });
+  });
+});

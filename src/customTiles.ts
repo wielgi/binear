@@ -141,6 +141,8 @@ export const colorCss = (key: string): string => (isHexColor(key) ? key : (TILE_
 export interface TileNumbers {
   count: number;
   points: number;
+  /** Zadania kafelka (id → SP). Z tego grupa liczy ROZNE zadania, gdy kafelki sie nakladaja. */
+  rows?: ReadonlyMap<number, number>;
 }
 
 /** To, co kafelek pokazuje jako swoja liczbe. */
@@ -148,10 +150,17 @@ export const shownValue = (tile: Pick<CustomTile, 'measure'>, v: TileNumbers): n
   tile.measure === 'points' ? v.points : v.count;
 
 /**
- * Suma kafelkow grupy (zadania i SP) — do podpisu grupy. Kafelki to osobne widoki i moga sie
- * nakladac, wiec to SUMA KAFELKOW, a nie liczba roznych zadan.
+ * Suma grupy (zadania i SP) — do podpisu. Gdy znamy zadania kazdego kafelka, liczymy ROZNE zadania:
+ * kafelki moga sie nakladac (to samo zadanie w dwoch), a suma kafelkow liczylaby je dwa razy.
+ * Bez listy zadan (stare dane) zostaje zwykla suma kafelkow.
  */
 export function groupTotals(tiles: readonly Pick<CustomTile, 'id'>[], values: ReadonlyMap<string, TileNumbers>): TileNumbers {
+  const vs = tiles.map((t) => values.get(t.id)).filter((v): v is TileNumbers => Boolean(v));
+  if (vs.length && vs.every((v) => v.rows)) {
+    const seen = new Map<number, number>();
+    for (const v of vs) for (const [id, sp] of v.rows ?? []) if (!seen.has(id)) seen.set(id, sp);
+    return { count: seen.size, points: [...seen.values()].reduce((a, b) => a + b, 0) };
+  }
   return tiles.reduce(
     (n, t) => {
       const v = values.get(t.id);

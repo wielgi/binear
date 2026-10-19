@@ -9281,14 +9281,19 @@ export default function App() {
        * inaczej kafelek obejmujacy i rodzica, i dzieci liczylby to samo dwa razy.
        */
       const inRows = new Set(rows.map((t) => t.id));
-      const points = rows.reduce(
-        (n, t) =>
-          n +
+      const perTask = new Map<number, number>();
+      for (const t of rows) {
+        perTask.set(
+          t.id,
           (t.storyPoints ?? 0) +
-          (childrenOf.get(t.id) ?? []).reduce((k, c) => (inRows.has(c.id) ? k : k + (c.storyPoints ?? 0)), 0),
-        0,
-      );
-      m.set(tile.id, { count: rows.length, points });
+            (childrenOf.get(t.id) ?? []).reduce((k, c) => (inRows.has(c.id) ? k : k + (c.storyPoints ?? 0)), 0),
+        );
+      }
+      m.set(tile.id, {
+        count: rows.length,
+        points: [...perTask.values()].reduce((a, b) => a + b, 0),
+        rows: perTask,
+      });
     }
     return m;
   }, [tilesCfg.tiles, tasks, me, withUnassigned, sprintId, stageNames, filterCtx]);
