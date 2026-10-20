@@ -57,3 +57,11 @@ export function ownerOnEnteringSprint(
   if (task.responsibleId === null || task.responsibleId === ctx.unassignedId) return null;
   return isIt(task.responsibleId, ctx) === false ? ctx.unassignedId : null;
 }
+
+/**
+ * Czy przeniesienie to WEJSCIE z rejestru do sprintu (`fromSprintId` = `null`). Tylko ono idzie przez kolumne
+ * wejsciowa sprintu (karta + numer IT-NNN); przelozenie miedzy sprintami i powrot do rejestru to sama
+ * przynaleznosc — zadanie w toku nie wraca na „Nowe / Oczekujące".
+ */
+export const entersFromRegister = (fromSprintId: number | null, toSprintId: number | null): boolean =>
+  toSprintId !== null && fromSprintId === null;

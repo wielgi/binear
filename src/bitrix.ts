@@ -3,6 +3,7 @@
 import { QUESTION, type ChatMessage } from './counters';
 import { reactionsByMessage, type CommentReaction } from './reactions';
 import { describe, logAction, slimParams, taskIdOf, WRITE_METHODS } from './history';
+import { withoutFolders } from './sprintStats';
 
 export class BxError extends Error {
   constructor(
@@ -157,7 +158,7 @@ async function call<T>(method: string, params: Record<string, unknown> = {}): Pr
     logAction({
       at: Date.now(),
       method,
-      taskId: taskIdOf(params),
+      taskId: taskIdOf(params, method),
       label: describe(method, params),
       params: slimParams(params),
       error: null,
@@ -167,7 +168,7 @@ async function call<T>(method: string, params: Record<string, unknown> = {}): Pr
     logAction({
       at: Date.now(),
       method,
-      taskId: taskIdOf(params),
+      taskId: taskIdOf(params, method),
       label: describe(method, params),
       params: slimParams(params),
       error: e instanceof Error ? e.message : String(e),
@@ -807,6 +808,21 @@ export async function fetchEpics(groupId: number): Promise<Epic[]> {
   }
 }
 
+/** Dodaje epik do projektu (okno „Tagi i epiki"). Kolor jako #rrggbb. */
+export async function addEpic(groupId: number, name: string, color: string): Promise<void> {
+  await call('tasks.api.scrum.epic.add', { fields: { groupId, name, description: '', color } });
+}
+
+/** Zmienia nazwe i/albo kolor epiku. */
+export async function editEpic(id: number, fields: { name?: string; color?: string }): Promise<void> {
+  await call('tasks.api.scrum.epic.update', { id, fields });
+}
+
+/** Usuwa epik; zadania zostaja, tracac przypisanie. W UI zawsze za potwierdzeniem. */
+export async function deleteEpic(id: number): Promise<void> {
+  await call('tasks.api.scrum.epic.delete', { id });
+}
+
 /**
  * Czy w grupie zmienilo sie cokolwiek od podanego znacznika.
  *
@@ -1072,6 +1088,8 @@ export interface SprintTask {
    * ma sens wylacznie razem ze `stages` z tego samego pobrania.
    */
   stageId: number | null;
+  /** Zadanie nadrzedne — po tym poznajemy folder (rodzica z dziecmi w tym samym sprincie). */
+  parentId: number | null;
 }
 
 /**
@@ -1110,7 +1128,7 @@ export async function fetchSprintTasks(sprintId: number): Promise<SprintData> {
   for (let start = 0, page = 0; page < 40; page++) {
     const res = await call<{ tasks: any[] }>('tasks.task.list', {
       filter: { SPRINT_ID: sprintId },
-      select: ['ID', 'CLOSED_DATE', 'RESPONSIBLE_ID', 'STAGE_ID'],
+      select: ['ID', 'CLOSED_DATE', 'RESPONSIBLE_ID', 'STAGE_ID', 'PARENT_ID'],
       start,
     }).catch(() => ({ tasks: [] as any[] }));
 
@@ -1191,9 +1209,10 @@ export async function fetchSprintTasks(sprintId: number): Promise<SprintData> {
     responsibleName: str(t.responsible?.name ?? t.responsibleName) || null,
     done: finish.has(relId(t.stageId ?? t.STAGE_ID) ?? -1),
     stageId: relId(t.stageId ?? t.STAGE_ID),
+    parentId: relId(t.parentId ?? t.PARENT_ID),
   }));
 
-  return { tasks: rows, stages };
+  return { tasks: withoutFolders(rows), stages };
 }
 
 /**
@@ -2102,8 +2121,27 @@ export async function updateTask(
  * (dodanie = stary zestaw + nowa nazwa, usuniecie = zestaw bez niej). Osobna
  * funkcja, bo `updateTask` przyjmuje tylko pola skalarne, a `TAGS` to tablica.
  */
+/**
+ * Aktualne tagi zadania prosto z Bitriksa — do zmian hurtowych (Tagi i epiki). Lista w aplikacji moze byc sprzed
+ * kilku minut albo sprzed poprzedniej zmiany; zapis calego TAGS na jej podstawie cofal cudze i wlasne zmiany.
+ */
+export async function fetchTaskTags(taskId: number): Promise<string[]> {
+  const r = await call<{ task?: { tags?: unknown } }>('tasks.task.get', { taskId, select: ['ID', 'TAGS'] });
+  const raw = r?.task?.tags;
+  const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw) : [];
+  return list
+    .map((x) => (typeof x === 'string' ? x : String((x as { title?: unknown } | null)?.title ?? '')))
+    .filter((x) => x.trim() !== '');
+}
+
 export async function updateTags(taskId: number, tags: string[]): Promise<void> {
-  await call('tasks.task.update', { taskId, fields: { TAGS: tags } });
+  /*
+   * Pusta lista jako `['']`, nie `[]`: proxy koduje parametry jak formularz PHP, a pusta tablica nie daje w nim
+   * zadnego pola — Bitrix odrzucal zapis („Could not find value for parameter {fields}") i ostatni tag zostawal
+   * na zadaniu (zdjecie jedynego tagu w edytorze tagow, „Usuń" w oknie Tagi i epiki). Pusty napis Bitrix
+   * przyjmuje, ale tagow nie zdejmuje; jeden pusty element je czysci (sprawdzone na portalu, zadanie 117745).
+   */
+  await call('tasks.task.update', { taskId, fields: { TAGS: tags.length ? tags : [''] } });
 }
 
 /** Nieodwracalne usuniecie zadania. W UI zawsze poprzedzone potwierdzeniem. */
@@ -2261,6 +2299,27 @@ export async function moveToSprint(
    * wyprzedzac w kolejce.
    */
   return queued(() => enterSprint(taskId, entityId, stageId));
+}
+
+/**
+ * Wejscie do sprintu z rejestru: PRZEZ kolumne wejsciowa (typ NEW) tego sprintu.
+ *
+ * Sama przynaleznosc (`moveToSprint` bez etapu) zostawia zadanie w sprincie, ale bez karty na
+ * tablicy i bez etapu — widok sprintu uznaje je wtedy za „poza sprintem", a automatyzacja
+ * nadajaca numer IT-NNN nie odpala sie wcale. Widoczne od chwili, gdy planuje sie prosto w
+ * AKTYWNYM sprincie (w planowanym tablicy jeszcze nie ma, wiec nic tego nie zdradzalo).
+ *
+ * Gdy etapow sprintu nie da sie pobrac, zostaje sama przynaleznosc — zadanie ma trafic do sprintu
+ * nawet za cene braku karty.
+ */
+export async function moveToSprintViaEntry(
+  taskId: number,
+  entityId: number,
+): Promise<{ status: string } | undefined> {
+  const entry = (await fetchStages([entityId]).catch(() => [] as Stage[])).find(
+    (st) => st.type === 'NEW',
+  )?.id;
+  return moveToSprint(taskId, entityId, entry);
 }
 
 async function enterSprint(

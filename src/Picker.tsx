@@ -27,6 +27,8 @@ export interface Option {
   hint?: string;
   /** Kreska NAD ta pozycja — dzis oddziela zalogowanego uzytkownika od reszty osob. */
   divider?: boolean;
+  /** Podpis grupy NAD ta pozycja (np. „Zespół") — dzieli liste na nazwane sekcje. */
+  section?: string;
   /** Klucz zakladki (segments) w Pickerze — dzis "sprint" / "outside" dla rodzica. */
   group?: string;
 }
@@ -187,6 +189,22 @@ export function Picker({
   }, [cursor]);
 
   /*
+   * Esc, gdy fokus nie jest w polu pickera (np. po kliknieciu opcji mysza fokus zostaje na niej) — pole obsluguje
+   * swoj Esc samo. Przechwytywanie, zeby ten sam Esc nie zrobil niczego pod spodem.
+   */
+  useEffect(() => {
+    if (controlled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || (e.target instanceof HTMLInputElement && e.target.classList.contains('picker-input'))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  });
+
+  /*
    * Sterowanie z klawiatury, gdy filtr przychodzi Z ZEWNATRZ.
    *
    * W trybie zwyklym strzalki i Enter wisza na wlasnym polu pickera — ale przy
@@ -300,7 +318,12 @@ export function Picker({
           {shown.map((o, i) => (
             <Fragment key={o.value}>
               {/* Kreska tylko MIEDZY pozycjami — na samej gorze listy nie ma czego dzielic. */}
-              {o.divider && i > 0 && <div className="picker-sep" />}
+              {/* Naglowek tam, gdzie zmienia sie grupa WIDOCZNYCH pozycji — przy szukaniu tez. */}
+              {o.section && o.section !== shown[i - 1]?.section ? (
+                <div className="picker-section">{o.section}</div>
+              ) : (
+                o.divider && i > 0 && <div className="picker-sep" />
+              )}
               <button
                 className={`picker-item${i === cursor ? ' picker-item-active' : ''}${
                   sel.has(o.value) ? ' picker-item-on' : ''

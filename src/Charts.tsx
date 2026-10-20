@@ -20,16 +20,22 @@ import { tasksWord } from './taskView';
 /**
  * Gorna krawedz osi Y — najblizszy okragly stopien POWYZEJ najwyzszej wartosci.
  *
- * Drabinka musi byc gesta: przy samych 1/2/5 wykres na 225 SP dostaje os do 500
+ * Drabinka musi byc gesta: przy samych 1/2/5 wykres na 225 SP dostaje os do 400
  * i polowa pola zostaje pusta. Kroki co pol rzedu trzymaja slupki wysokie, a
  * podzialka nadal wypada na liczbach, ktore da sie przeczytac.
  */
 function niceMax(value: number): number {
   if (value <= 0) return 10;
-  const pow = 10 ** Math.floor(Math.log10(value));
-  const n = value / pow;
-  const step = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((c) => n <= c) ?? 10;
-  return step * pow;
+  /*
+   * Okragly jest KROK podzialki (os ma 4 rowne kroki, patrz `ticks`), a gora to 4 kroki. Wczesniej okragla byla
+   * sama gora (250), a podzialka wychodzila na 63/125/188.
+   */
+  const quarter = value / 4;
+  if (quarter <= 1) return 4;
+  const pow = 10 ** Math.floor(Math.log10(quarter));
+  const n = quarter / pow;
+  const step = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 10].find((c) => n <= c) ?? 10;
+  return 4 * step * pow;
 }
 
 /**
@@ -772,7 +778,8 @@ export function StageStrip({ segments, done }: { segments: ScopeSegment[]; done:
   return (
     <span className="stage-strip">
       {/* Ta sama umowa co w duzym slupku: przygaszone = jeszcze nie zrobione. */}
-      {done > 0 && <span className="stage-strip-pending" style={{ right: `${100 - pending}%` }} />}
+      {/* Takze przy zerze zrobionych — inaczej pelny, nasycony pasek wygladal jak skonczona praca. */}
+      <span className="stage-strip-pending" style={{ right: `${100 - pending}%` }} />
       {done > 0 && done < total && (
         <span className="stage-strip-done" style={{ left: `${pending}%` }} />
       )}

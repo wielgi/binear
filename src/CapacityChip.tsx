@@ -16,6 +16,8 @@ export function useNow(intervalMs = 60_000): Date {
 }
 
 /* Pełne liczby: godziny i punkty pokazujemy bez ułamka — kolor liczy się z dokładnych wartości. */
+/** Etaty z przecinkiem: 3,5 zamiast 3.5 (zaokraglone do dwoch miejsc). */
+const etaty = (n: number) => n.toLocaleString("pl-PL", { maximumFractionDigits: 2 });
 const num = (n: number) => n.toLocaleString('pl-PL', { maximumFractionDigits: 0 });
 
 /** Kolor dopisku w dymku — te same trzy barwy co sam chip. */
@@ -39,13 +41,13 @@ const LEVEL_NOTE: Record<CapacityLevel, string> = {
  * Na chipie stoją DWIE liczby i kolor: „mamy" (pojemność) i „czeka" (punkty czekających
  * zadań PO odjęciu tych, które nie wchodzą do limitu). Skąd się biorą, mówi dopiero dymek.
  */
-export function CapacityChip({ cap }: { cap: SprintCapacity }) {
+export function CapacityChip({ cap, compact = false }: { cap: SprintCapacity; compact?: boolean }) {
   return (
     <HoverNote
       label="Do końca sprintu"
       value={
         <>
-          {num(cap.hoursLeft)} h roboczych × {cap.devs} os. = {num(cap.capacity)} SP do zrobienia
+          {num(cap.hoursLeft)} h roboczych × {etaty(cap.devs)} os. = {num(cap.capacity)} SP do zrobienia
           <br />
           Czeka na start: {num(cap.demand)} SP
           {cap.excluded > 0 && (
@@ -60,7 +62,8 @@ export function CapacityChip({ cap }: { cap: SprintCapacity }) {
       noteColor={LEVEL_COLOR[cap.level]}
       className={`head-cap head-cap-${cap.level}`}
     >
-      mamy {num(cap.capacity)} · czeka {num(cap.demand)} SP
+      {/* Na tablicy kolumna jest waska — pelny napis ucinal nazwe etapu; tam same liczby, opis w dymku. */}
+      {compact ? `${num(cap.capacity)} / ${num(cap.demand)} SP` : `mamy ${num(cap.capacity)} · czeka ${num(cap.demand)} SP`}
     </HoverNote>
   );
 }

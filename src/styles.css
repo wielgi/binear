@@ -592,15 +592,11 @@ kbd {
   scrollbar-color: var(--border-strong) transparent;
 }
 
-/* Firefox nie zna `::-webkit-scrollbar` — tam „grubszy po najechaniu" da sie zrobic
-   tylko przeskokiem `thin` -> `auto`. Skokowo, ale lepiej niz wcale. */
-.list:hover,
-.detail-body:hover,
-.col-body:hover,
-.board:hover {
-  scrollbar-width: auto;
-}
-
+/*
+ * Szerokosc paska NIE zmienia sie po najechaniu. Wczesniej `thin` -> `auto` na :hover poszerzalo pasek, a ze
+ * zajmuje on miejsce w pojemniku, cala tresc (wszystko wyrownane do prawej) przeskakiwala o kilka pikseli,
+ * gdy kursor wjezdzal na liste.
+ */
 .list::-webkit-scrollbar,
 .detail-body::-webkit-scrollbar,
 .col-body::-webkit-scrollbar,
@@ -827,8 +823,10 @@ kbd {
   /* Odstep ikona-podpis mniejszy niz kiedys: przy czterech zakladkach „Planowanie"
      nie miescilo sie w 300 px panelu i lamalo wiersz. */
   gap: var(--s1);
-  flex: 1;
-  min-width: 0;
+  /* Szerokosc od podpisu, nie po rowno: przy pieciu zakladkach rowne czesci nie miescily
+     „Podsumowanie" i podpis wchodzil na sasiednia zakladke (patrz tez szerokosc ViewMenu). */
+  flex: 1 1 auto;
+  padding: 0 var(--s1);
   height: 28px;
   font-size: var(--t-micro);
   white-space: nowrap;
@@ -1303,6 +1301,16 @@ input[type='search']::-webkit-search-decoration {
   height: 48px;
   padding: 0 var(--s4);
   border-bottom: 1px solid var(--border);
+  /* Szerokosc paska (nie okna): przy otwartym panelu zadania pasek jest wezszy niz ekran. */
+  container-type: inline-size;
+}
+
+/* Waski pasek (np. z otwartym panelem zadania): „Zespół" i „Tagi i epiki" zostaja samymi ikonami — inaczej
+   jedynym, co moglo sie skurczyc, bylo pole szukania (do 4px, a „opisy" wchodzily na licznik). */
+@container (max-width: 1100px) {
+  .header-team > span {
+    display: none;
+  }
 }
 
 .search {
@@ -1310,7 +1318,7 @@ input[type='search']::-webkit-search-decoration {
   align-items: center;
   gap: var(--s2);
   flex: 1;
-  min-width: 0;
+  min-width: 160px;
   height: 28px;
   padding: 0 var(--s2);
   color: var(--fg-dim);
@@ -1517,9 +1525,7 @@ input[type='search']::-webkit-search-decoration {
   flex: 0 0 auto;
 }
 
-.counters-cap-total:hover .counters-cap-text,
-.counters-cap-on .counters-cap-text,
-.counters-cap-on .counters-cap-count {
+.counters-cap-total:hover .counters-cap-text{
   color: var(--accent);
 }
 
@@ -1560,6 +1566,12 @@ input[type='search']::-webkit-search-decoration {
   cursor: pointer;
 }
 
+/* Kafelki wypelniaja szerokosc grupy. Podpis z suma bywa szerszy niz jeden kafelek — wtedy grupa byla szersza
+   od swoich kafelkow i za nimi zostawala pusta przerwa (olowek stal daleko od jedynego kafelka). */
+.counters-group-row > .counter {
+  flex: 1 1 auto;
+}
+
 .counter:hover {
   background: var(--bg-hover);
   border-color: var(--border-strong);
@@ -1570,23 +1582,6 @@ input[type='search']::-webkit-search-decoration {
 .counter-on:hover {
   border-color: var(--c);
   background: color-mix(in srgb, var(--c) 12%, var(--bg-panel));
-}
-
-.counter-poza { --c: var(--accent); }
-.counter-czeka { --c: #e879a6; }
-.counter-wazne { --c: var(--danger); }
-.counter-koncept { --c: #58a6ff; }
-.counter-foldery { --c: #8b949e; }
-.counter-wywiad { --c: var(--accent-orange); }
-.counter-odpowiedzi { --c: var(--accent-amber); }
-.counter-wycena { --c: #a371f7; }
-.counter-gotowe { --c: #2bb8c9; }
-.counter-sprint { --c: var(--accent-green); }
-/* Odlozone: poza suma „Poza sprintem" — przygaszone i z przerywana ramka. */
-.counter-odlozone {
-  --c: var(--fg-dim);
-  border-style: dashed;
-  border-left-style: solid;
 }
 
 .counter-icon {
@@ -1604,6 +1599,16 @@ input[type='search']::-webkit-search-decoration {
 .counter-icon svg {
   width: 14px;
   height: 14px;
+}
+
+/*
+ * Ikony kafelkow pochodza z roznych rysunkow (viewBox 14, 16 i 24, kreska od 1 do 1,8), wiec obok siebie
+ * mialy rozny rozmiar i grubosc. Jedna grubosc kreski niezaleznie od skali — wygladaja jak jeden zestaw.
+ */
+.counter-icon svg *,
+.tile-icon-pop svg * {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.4px;
 }
 
 .counter-body {
@@ -1628,10 +1633,6 @@ input[type='search']::-webkit-search-decoration {
   font-weight: var(--w-medium);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
-}
-
-.counter-pending {
-  color: var(--fg-dim);
 }
 
 .counter-points {
@@ -3125,6 +3126,24 @@ input[type='search']::-webkit-search-decoration {
   overflow: hidden;
 }
 
+/* W ciasnym wierszu pigulki sie kurcza (z wielokropkiem), a „+N" zostaje caly — wczesniej ostatnia pigulka
+   i „+N" byly uciete w pol znaku. */
+.tag-strip > .tag {
+  flex: 0 1 auto;
+  /* Ponizej tego z pigulki zostawalo „D…" — nieczytelne; wtedy reszte i tak chowa „+N". */
+  min-width: 72px;
+}
+
+.tag-strip > .tag-more {
+  flex: 0 0 auto;
+}
+
+.tag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tag-more {
   cursor: default;
 }
@@ -3190,20 +3209,24 @@ input[type='search']::-webkit-search-decoration {
   gap: var(--s2);
 }
 
+.btn.btn-primary,
 .btn-primary {
   color: #fff;
   background: var(--accent);
 }
 
+.btn.btn-primary:hover:not(:disabled),
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
+.btn.btn-danger,
 .btn-danger {
   color: #fff;
   background: var(--danger);
 }
 
+.btn.btn-danger:hover:not(:disabled),
 .btn-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 85%, black);
 }
@@ -6035,8 +6058,10 @@ a.mention:hover {
 
 .plan-head {
   display: flex;
+  /* Za duzo liczb na jedna linie: liczby schodza pod tytul w calosci, zamiast lamac „Sprint 71" na dwa wiersze. */
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--s2);
+  gap: var(--s1) var(--s2);
   padding: var(--s3) var(--s3) var(--s2);
 }
 
@@ -6044,11 +6069,13 @@ a.mention:hover {
   margin: 0;
   font-size: var(--t-regular);
   font-weight: var(--w-semibold);
+  white-space: nowrap;
 }
 
 .plan-sub {
   font-size: var(--t-micro);
   color: var(--fg-dim);
+  white-space: nowrap;
 }
 
 /* Liczby lecą na prawo — jedna kolumna dla wszystkich paneli, da sie porownac
@@ -6057,8 +6084,10 @@ a.mention:hover {
 .plan-nums {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: baseline;
-  gap: var(--s4);
+  gap: 0 var(--s4);
   font-size: var(--t-mini);
   font-variant-numeric: tabular-nums;
 }
@@ -6513,9 +6542,9 @@ a.mention:hover {
    * Wiersz NIE rozciaga sie na cala karte. Przy szerokim ekranie nazwisko
    * zostawalo przy lewej krawedzi, a jego liczby leciały o 1300 px w prawo —
    * zeby je sparowac, trzeba bylo wodzic palcem po ekranie. Karta moze byc
-   * szeroka, wiersz ma byc czytelny.
+   * szeroka, wiersz ma byc czytelny. 980 px, nie 760: w wierszu jest teraz slupek w skali i kolumna mocy.
    */
-  max-width: 760px;
+  max-width: 980px;
   padding: var(--s2) var(--s2);
   text-align: left;
   font: inherit;
@@ -6537,8 +6566,9 @@ a.mention:hover {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* Stala szerokosc nazwiska, zeby kazdy slupek startowal w tym samym miejscu. */
 .person-row-name {
-  flex: 1 1 auto;
+  flex: 0 0 190px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -8315,7 +8345,6 @@ a.mention:hover {
   font-size: var(--t-micro);
 }
 
-
 /*
  * Opakowanie dymka wokol przelacznika zakresu MUSI byc pelnej szerokosci.
  * `.scope-picker` ma `width: 100%`, a te 100% liczy sie od najblizszego rodzica —
@@ -8388,7 +8417,6 @@ a.mention:hover {
   display: none;
 }
 
-
 /*
  * Dwa warianty licznika: „zaplanowane" i „z przeniesieniem". Stoja jeden pod
  * drugim, bo to dwa odczyty TEJ SAMEJ miary — obok siebie kazalyby porownywac
@@ -8452,6 +8480,485 @@ a.mention:hover {
   opacity: 0.8;
 }
 
+/*
+ * Pasek postepu rodzica: kazde podzadanie to kawalek o szerokosci proporcjonalnej do jego SP
+ * (flex-grow = SP), w kolorze stanu. Cienka kreska w wierszu, grubsza w panelu szczegolow.
+ */
+.parent-bar {
+  display: inline-flex;
+  gap: 1px;
+  flex: 0 0 auto;
+  width: 84px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  cursor: help;
+}
+
+.parent-bar-seg {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.parent-bar-seg.is-done {
+  background: var(--accent-green);
+}
+
+.parent-bar-seg.is-doing {
+  background: var(--accent-amber);
+}
+
+.parent-bar-seg.is-waiting {
+  background: color-mix(in srgb, var(--fg) 24%, transparent);
+}
+
+.row-sp-sum {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.subtasks-bar {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  margin: var(--s1) 0 var(--s2);
+}
+
+.subtasks-sum {
+  margin-left: var(--s2);
+  font-size: var(--t-mini);
+  font-weight: var(--w-medium);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Zespol i grafik tygodniowy — okno z macierza „osoba × dzien". */
+.team-modal {
+  position: fixed;
+  z-index: 60;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: var(--s4);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.team-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.team-head h2 {
+  margin: 0;
+  font-size: var(--t-regular);
+}
+
+.team-week {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.team-week-label {
+  min-width: 8em;
+  text-align: center;
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.team-week-now {
+  color: var(--fg-muted);
+  font-weight: var(--w-normal);
+}
+
+.team-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-small);
+}
+
+.team-table th,
+.team-table td {
+  padding: var(--s1) var(--s2);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.team-table .team-day {
+  text-align: center;
+}
+
+.team-table th small {
+  display: block;
+  color: var(--fg-muted);
+  font-weight: var(--w-normal);
+}
+
+.team-total {
+  text-align: left;
+}
+
+.team-table tfoot td {
+  border-bottom: 0;
+  font-weight: var(--w-medium);
+}
+
+.team-remove {
+  padding: 0 var(--s2);
+}
+
+.team-add {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.team-hint,
+.team-empty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+}
+
+/* Podsumowanie sprintu: kafelki stanow, pasek calosci i dzialy z tematami. */
+/* Przewijany jest zewnetrzny kontener (jak .dash), a nie waska kolumna tresci. */
+.sum-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sum {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.sum-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+}
+
+.sum-head h2 {
+  margin: 0;
+}
+
+.sum-dates,
+.sum-note,
+.sum-foot,
+.sum-empty {
+  color: var(--fg-muted);
+  font-size: var(--t-small);
+}
+
+.sum-note,
+.sum-foot {
+  margin: 0;
+}
+
+.sum-note b {
+  color: var(--fg);
+}
+
+.sum-empty {
+  padding: var(--s4);
+}
+
+.sum-tiles {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--s2);
+}
+
+.sum-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--c, var(--border-strong));
+  border-radius: var(--radius);
+}
+
+.sum-tile-n {
+  font-size: var(--t-large);
+  font-weight: var(--w-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-tile-l {
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+.sum-tile-l small {
+  display: block;
+}
+
+.sum-tile.is-wdrozone { --c: var(--accent-green); }
+.sum-tile.is-pr { --c: var(--accent); }
+.sum-tile.is-wtoku { --c: var(--accent-amber); }
+.sum-tile.is-czeka { --c: color-mix(in srgb, var(--fg) 40%, transparent); }
+.sum-tile.is-wstrzymane { --c: var(--accent-orange); }
+
+.sum-bar {
+  display: flex;
+  gap: 1px;
+  height: 8px;
+  min-width: 80px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.sum-bar-thick {
+  height: 14px;
+  border-radius: 6px;
+}
+
+.sum-seg {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.sum-seg.is-wdrozone { background: var(--accent-green); }
+.sum-seg.is-pr { background: var(--accent); }
+.sum-seg.is-wtoku { background: var(--accent-amber); }
+.sum-seg.is-czeka { background: color-mix(in srgb, var(--fg) 30%, transparent); }
+.sum-seg.is-wstrzymane { background: var(--accent-orange); }
+
+.sum-table-head,
+.sum-dept-head {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(120px, 2fr) repeat(6, minmax(52px, 0.5fr));
+  align-items: center;
+  gap: var(--s2);
+}
+
+.sum-table-head {
+  padding: 0 var(--s3);
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sum-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-total {
+  font-weight: var(--w-semibold);
+}
+
+.sum-dept {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sum-dept-head {
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.sum-dept-head::-webkit-details-marker {
+  display: none;
+}
+
+.sum-dept-name {
+  font-weight: var(--w-medium);
+}
+
+.sum-topics {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.sum-topic {
+  display: grid;
+  grid-template-columns: minmax(120px, 3.2fr) minmax(120px, 2fr) minmax(52px, 0.5fr) minmax(90px, 1fr);
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sum-topic:hover {
+  background: var(--bg-hover);
+}
+
+.sum-topic-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sum-topic-count {
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .sum-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Wykres dzialow: pasek na dzial, dlugosc proporcjonalna do SP dzialu, kawalki wg statusu. */
+.sum-headline {
+  margin: 0;
+  font-size: var(--t-large);
+}
+
+.sum-headline b {
+  font-weight: var(--w-semibold);
+}
+
+.sum-headline-pct {
+  color: var(--accent-green);
+  font-weight: var(--w-semibold);
+}
+
+.sum-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sum-chart h3 {
+  margin: 0;
+  font-size: var(--t-small);
+}
+
+.sum-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+.sum-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.sum-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.sum-dot.is-wdrozone { background: var(--accent-green); }
+.sum-dot.is-pr { background: var(--accent); }
+.sum-dot.is-wtoku { background: var(--accent-amber); }
+.sum-dot.is-czeka { background: color-mix(in srgb, var(--fg) 30%, transparent); }
+.sum-dot.is-wstrzymane { background: var(--accent-orange); }
+
+.sum-chart-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 150px) minmax(0, 1fr) 110px;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.sum-chart-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-small);
+}
+
+.sum-chart-track {
+  display: block;
+  height: 22px;
+}
+
+.sum-chart-bar {
+  display: flex;
+  gap: 1px;
+  height: 100%;
+  min-width: 6px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.sum-chart-bar .sum-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-chart-bar .sum-seg.is-czeka {
+  color: var(--fg);
+}
+
+/* Bialy na bursztynie byl nieczytelny (zwlaszcza w jasnym motywie) — ciemny tekst. */
+.sum-chart-bar .sum-seg.is-wtoku {
+  color: #1f2328;
+}
+
+.sum-chart-done {
+  font-size: var(--t-mini);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-chart-done small {
+  color: var(--fg-muted);
+}
+
+.sum-plan {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--t-small);
+}
+
+.sum-plan b {
+  color: var(--fg);
+}
+
+.sum-eff {
+  margin: 0;
+  font-size: var(--t-small);
+}
 
 /*
  * Reakcje pod komentarzem (Comments w App.tsx). Pigulki jak w Bitriksie: emoji i liczba, wlasna
@@ -8655,4 +9162,808 @@ a.mention:hover {
 .reaction-picker .reaction-more {
   color: var(--fg-muted);
   font-size: 16px;
+}
+
+.counter-add {
+  --c: var(--border);
+  align-items: center;
+  /* Ramka ciagla, jak u kafelkow, tylko bez kolorowego paska z lewej — przerywana wygladala na zaslepke. */
+  border-left-width: 1px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.counter-add:hover {
+  color: var(--fg);
+}
+
+.tiles-modal {
+  width: min(1180px, calc(100vw - 32px));
+}
+
+.tile-io {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.tile-row-name {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.tile-swatches {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+
+.tile-swatch {
+  width: 18px;
+  height: 18px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.tile-swatch-on {
+  border-color: var(--fg);
+}
+
+.tile-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.tile-icon-on {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+/* Podpis grupy wlasnych kafelkow: suma zadan i SP + roznica wzgledem poprzedniego dnia (jak w zestawie IT). */
+.counters-cap-static {
+  cursor: default;
+}
+
+.counters-cap-sp {
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Przyciski dodawania i edycji: same ikony, kwadratowe, w jednym rzedzie. */
+.counters-tools-row {
+  align-items: stretch;
+}
+
+.counter-icon-only {
+  min-width: 0;
+  padding: var(--s2);
+  justify-content: center;
+}
+
+.tile-swatch-custom {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  /* Wlasny kolor: pusta probka z plusem (wybrany kolor przychodzi w stylu), bez teczy. */
+  background: var(--bg-base);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.tile-swatch-plus {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Okna (kafelki, zespol, tagi i epiki) przyciemniaja strone pod spodem, tak jak paleta. */
+.modal-scrim {
+  z-index: 59;
+  background: #00000052;
+}
+
+/* Pola w oknach w stylu aplikacji, nie natywne z czarna ramka. */
+.team-modal .picker-input {
+  margin-bottom: 0;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font: inherit;
+}
+
+.team-select {
+  height: 28px;
+  padding: 0 var(--s1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-base);
+  color: var(--fg);
+  font: inherit;
+}
+
+.team-modal input[type='checkbox'] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.tile-swatch-custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Przyciski dodawania i edycji kafelkow: jeden nad drugim, razem na wysokosc kafelka. */
+.counters-tools-row {
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.counters-tools-row .counter-icon-only {
+  flex: 1 1 0;
+  align-items: center;
+}
+
+/* Grupa z przyciskami rozciaga sie do wysokosci najwyzszej grupy, a jej rzad wypelnia reszte — razem rowno z kafelkami. */
+.counters-tools {
+  align-self: stretch;
+}
+
+.counters-tools .counters-tools-row {
+  flex: 1 1 auto;
+  align-items: stretch;
+}
+
+/* Jeden przycisk edycji na koncu paska: waski, na pelna wysokosc kafelka (bez minimalnej szerokosci kafelka).
+   Przyklejony do prawej krawedzi — gdy kafelki sie nie mieszcza i pasek sie przewija, olowek nie ucieka. */
+.counters-tools-edit {
+  position: sticky;
+  /* Az do krawedzi paska (przez jego prawy padding) — inaczej w paddingu przeswitywal przewiniety kafelek. */
+  right: calc(-1 * var(--s4));
+  z-index: 1;
+  flex: 0 0 auto;
+  min-width: 0;
+  /* Odstep od ostatniego kafelka taki jak miedzy kafelkami (--s1), a nie jak miedzy grupami (--s3 paska). */
+  margin-left: calc(-1 * var(--s3));
+  margin-right: calc(-1 * var(--s4));
+  padding: 0 var(--s4) 0 var(--s1);
+  background: var(--bg-base);
+}
+
+/* Rzad olowka ma wysokosc kafelkow — mniejszy kwadrat staje na jego srodku. */
+.counters-tools-edit .counters-tools-row {
+  justify-content: center;
+}
+
+.counters-tools-edit .counters-cap-ghost {
+  /* Trzyma tylko wysokosc podpisu — bez szerokosci, inaczej olowek dostawal pusty pas po prawej. */
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Przy zerowej szerokosci tekst zawijalby sie w dwie linie i podpis rosl, spychajac olowek w dol. */
+.counters-tools-edit .counters-cap-ghost > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.counters-tools-edit .counter-icon-only {
+  /* Kwadrat o wysokosci kafelka: bok ustawia TilesBar z pomiaru, 58px to start przed nim. */
+  flex: 0 0 auto;
+  align-self: center;
+  width: 58px;
+  height: 58px;
+}
+
+.counters-cap-ghost {
+  visibility: hidden;
+}
+
+/* Lacznik miedzy chipami filtrow: ORAZ (domyslnie) albo LUB — chipy polaczone LUB tworza nawias. */
+.filter-join {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.filter-join:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.filter-join-or {
+  color: var(--accent, #3b82f6);
+}
+
+.filter-chip-in-or {
+  box-shadow: inset 0 0 0 1px var(--accent, #3b82f6);
+}
+
+/* Druga miara kafelka (SP przy kafelku zadan, zadania przy kafelku SP) — mniejszym i bladszym tekstem. */
+.counter-second {
+  font-size: var(--t-micro);
+  opacity: 0.8;
+}
+
+/* Edycja kafelkow: pasek jak na liscie (grupy + kafelki), pod nim formularz zaznaczonego elementu. */
+.tiles-strip {
+  overflow-x: auto;
+  padding-bottom: var(--s2);
+}
+
+.tiles-strip-cap {
+  border: 0;
+  cursor: pointer;
+}
+
+.tiles-strip-on {
+  box-shadow: inset 0 0 0 1px var(--accent, #3b82f6);
+}
+
+/* „Wczytaj domyslne kafelki" przy pustym pasku: kafelek z przerywana ramka, jak plus obok. */
+.tiles-defaults {
+  flex: 1 1 auto;
+  min-width: var(--counter-min);
+  justify-content: center;
+}
+
+/* Przeciagany kafelek przygaszony, jak przeciagany widok w menu widokow. */
+.tile-dragging {
+  opacity: 0.4;
+}
+
+/* Miejsce upuszczenia: kreska przed kafelkiem albo na koncu grupy, nie podswietlenie calego —
+   to myliloby sie z zaznaczonym kafelkiem. Cien wychodzi w odstep miedzy kafelkami. */
+.tile-drop-before {
+  box-shadow: -3px 0 0 var(--accent);
+}
+
+.tile-drop-end > .counter:last-child {
+  box-shadow: 3px 0 0 var(--accent);
+}
+
+.tile-drop-out {
+  justify-content: center;
+  border-style: dashed;
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+}
+
+.tile-drop-out-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tile-drop-end:empty {
+  min-width: var(--counter-min);
+  min-height: 40px;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/*
+ * Edytor kafelka/grupy: uklad jak panel widoku — etykieta w stalej kolumnie po lewej, kontrolka po prawej,
+ * segmenty zamiast natywnych selectow, pola tekstowe jak w pickerze. Bez ramek wokol kazdego elementu.
+ */
+.tile-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3) var(--s4);
+  background: var(--bg-base);
+  border-radius: var(--radius-lg);
+}
+
+.tile-form-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1);
+}
+
+.tile-form-head h3 {
+  margin: 0;
+  font-size: var(--t-small);
+  font-weight: var(--w-medium);
+}
+
+.tile-form-sub {
+  color: var(--fg-muted);
+  font-size: var(--t-micro);
+}
+
+.tile-form-tools {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+/* Male przyciski narzedzi jak w naglowku listy: bez tla, podswietlenie dopiero pod kursorem. */
+.tile-tool {
+  height: 24px;
+  min-width: 24px;
+  padding: 0 var(--s2);
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  font-size: var(--t-micro);
+}
+
+.tile-tool:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.tile-tool-danger:hover {
+  color: var(--danger);
+}
+
+.tile-field {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 32px;
+}
+
+.tile-field-label {
+  flex: 0 0 72px;
+  color: var(--fg-muted);
+  font-size: var(--t-small);
+}
+
+.tile-field-ctl {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.tile-form .picker-input {
+  margin: 0;
+  background: var(--bg-panel);
+}
+
+.tile-name {
+  width: min(320px, 100%);
+}
+
+.tile-new-group {
+  width: 160px;
+}
+
+.tile-segments {
+  flex-wrap: wrap;
+}
+
+.tile-form-actions {
+  gap: var(--s2);
+}
+
+/* Ikona kafelka: kwadrat z biezaca ikona (jak na pasku) + „Zmień"; siatka wszystkich ikon w okienku pod spodem. */
+.tile-icon-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tile-icon-current {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 2px var(--s2) 2px 2px;
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  font-size: var(--t-small);
+}
+
+.tile-icon-current .counter-icon {
+  margin: 0;
+}
+
+.tile-icon-current:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.tile-icon-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+}
+
+.tile-icon-pop {
+  position: fixed;
+  z-index: 76;
+  display: grid;
+  grid-template-columns: repeat(8, 32px);
+  gap: 2px;
+  padding: var(--s1);
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop), 0 0 0 1px color-mix(in oklab, var(--border-strong), var(--fg) 40%);
+}
+
+.tile-icon-pop .tile-icon-btn {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  color: var(--fg-muted);
+}
+
+.tile-icon-pop .tile-icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tile-icon-pop .tile-icon-btn:hover,
+.tile-icon-pop .tile-icon-btn:focus-visible {
+  color: var(--fg);
+  background: var(--bg-hover);
+  outline: none;
+}
+
+/* Wybrana: w kolorze kafelka, tak jak bedzie wygladac na pasku. */
+.tile-icon-pop .tile-icon-on,
+.tile-icon-pop .tile-icon-on:hover {
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+}
+
+/* Zaznaczony kolor: pierscien w kolorze tekstu z odstepem, a nie gruba obwodka na samej kropce. */
+.tile-form .tile-swatch {
+  border: 0;
+}
+
+.tile-form .tile-swatch-on {
+  box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 3.5px var(--fg);
+}
+
+.tile-keys {
+  font-size: var(--t-micro);
+}
+
+/* Pytanie z okna (kafelki, tagi i epiki): zwykly dialog aplikacji, tylko nad tym oknem (AskDialog). */
+.ask-backdrop {
+  z-index: 70;
+}
+
+.ask-dialog {
+  z-index: 71;
+}
+
+/* Listy w pytaniu (np. filtry kafelka teraz / po zmianie). */
+.ask-section {
+  margin-top: var(--s2);
+  font-size: var(--t-small);
+}
+
+.ask-section-title {
+  color: var(--fg-muted);
+  font-size: var(--t-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ask-section ul {
+  margin: var(--s1) 0 0;
+  padding-left: var(--s4);
+}
+
+/* Pasek w edytorze lamie sie na kolejne wiersze zamiast chowac grupy za krawedzia okna. */
+.tiles-strip {
+  flex-wrap: wrap;
+  row-gap: var(--s3);
+  overflow-x: visible;
+}
+
+.tiles-strip .counters-cap-sp {
+  white-space: nowrap;
+}
+
+/* Przeciaganie chipow filtrow: zrodlo przezroczyste, cel z obwodka. */
+.filter-chip-dragging {
+  opacity: 0.6;
+  cursor: grabbing;
+  z-index: 2;
+}
+
+.filter-chip-over {
+  box-shadow: inset 0 0 0 2px var(--accent, #3b82f6);
+}
+
+/* Slupki osob w skali wspolnej: dlugosc = SP wzgledem najwiekszego (albo mocy), kolory = etapy; kreska = moc. */
+.person-bar {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 160px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+}
+
+.person-bar-fill {
+  display: block;
+  min-width: 0;
+}
+
+.person-bar-fill .stage-strip {
+  width: 100%;
+  height: 10px;
+}
+
+.person-bar-cap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--fg);
+  opacity: 0.8;
+}
+
+.person-row-role {
+  display: block;
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+}
+
+.person-row-cap {
+  flex: 0 0 auto;
+  width: 64px;
+  text-align: right;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-team-btn {
+  margin-left: auto;
+}
+
+.team-modal-wide {
+  width: min(960px, calc(100vw - 32px));
+}
+
+.team-role {
+  width: 130px;
+}
+
+.header-team {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 0 var(--s2);
+}
+
+/* Okno „Tagi i epiki": lista z akcjami przy kazdym wierszu. */
+.manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.manage-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius);
+}
+
+.manage-row:hover {
+  background: var(--bg-hover);
+}
+
+.manage-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manage-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.manage-error {
+  color: var(--danger, #f85149);
+}
+
+.sum-pdf {
+  margin-left: auto;
+  order: 3;
+}
+
+/* Stan kreski pozostalej mocy: ostrzezenie (w toku), nie zdazy (nowe). */
+.person-bar-cap-warn,
+.person-row-cap-warn {
+  background: var(--accent-amber, #f59e0b);
+  color: var(--accent-amber, #f59e0b);
+}
+
+.person-bar-cap-late,
+.person-row-cap-late {
+  background: var(--danger, #f85149);
+  color: var(--danger, #f85149);
+}
+
+.person-row-cap-warn,
+.person-row-cap-late {
+  background: none;
+}
+
+/* Podpis sekcji w liscie wyboru (np. „Zespół", „Pozostali"). */
+.picker-section {
+  margin: var(--s2) var(--s2) 2px;
+  padding-top: var(--s1);
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.picker-list > .picker-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+/* Pola w oknie „Tagi i epiki" maja byc jednowierszowe, a nie rozciagniete na wysokosc kolumny. */
+.manage-modal input[type='text'],
+.manage-modal input:not([type]),
+.manage-modal .tile-row-name {
+  flex: 0 0 auto;
+  height: 32px;
+  box-sizing: border-box;
+}
+
+.manage-row .tile-row-name {
+  flex: 1 1 auto;
+}
+
+/* Stala wysokosc okna „Tagi i epiki": lista przewija sie w srodku, gora okna stoi w miejscu przy filtrowaniu. */
+.manage-modal {
+  display: flex;
+  flex-direction: column;
+  height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+}
+
+.manage-modal .manage-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+/* Duzy wzrost (powyzej 10) — czerwony. */
+.counter-delta-hot {
+  color: var(--danger);
+}
+
+/* Waskie okno: wiersz osoby i okno „Tagi i epiki" mieszcza sie bez ucinania. */
+@media (max-width: 700px) {
+  .person-row-name {
+    flex-basis: 96px;
+  }
+
+  .person-bar {
+    min-width: 60px;
+  }
+
+  .person-row-cap {
+    width: 44px;
+  }
+
+  .manage-row {
+    flex-wrap: wrap;
+  }
+
+  .manage-name {
+    flex-basis: 100%;
+  }
+}
+
+/* Zespol: dodawanie osoby — szukanie w calej firmie zamiast dlugiej listy rozwijanej. */
+.team-search {
+  flex: 0 1 280px;
+}
+
+.team-search .picker-input {
+  width: 100%;
+  margin: 0;
+}
+
+.team-add-search {
+  align-items: flex-start;
+}
+
+.team-add-search > span {
+  line-height: 28px;
+}
+
+.team-search-list {
+  /* W toku strony, nie nad nia: okno zespolu przewija sie i przycinalo wysuwana liste. */
+  margin-top: var(--s1);
+  display: flex;
+  flex-direction: column;
+  padding: var(--s1);
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop), 0 0 0 1px color-mix(in oklab, var(--border-strong), var(--fg) 40%);
+}
+
+.team-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 var(--s2);
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+.team-search-item-on {
+  background: var(--bg-active);
+}
+
+.team-search-it {
+  color: var(--fg-muted);
+  font-size: var(--t-micro);
+}
+
+.team-search-empty {
+  padding: var(--s1) var(--s2);
+  color: var(--fg-muted);
+  font-size: var(--t-small);
+}
+
+/* Tagi macierzy A–D: kolor wazonosci na calym chipie, nie tylko na kropce. */
+.tag-matrix {
+  color: var(--mx);
+  font-weight: var(--w-semibold, 600);
+  background: color-mix(in srgb, var(--mx) 16%, transparent);
+}
+
+/* Zadania z tagiem D (macierz Eisenhowera) wyszarzone — nie odciagaja wzroku; po najechaniu wracaja do normy. */
+.row-low,
+.card-low {
+  opacity: 0.5;
+  transition: opacity 120ms ease;
+}
+
+.row-low:hover,
+.card-low:hover,
+.row-low.row-active,
+.card-low.card-active,
+.row-low.row-selected,
+.card-low.card-selected {
+  opacity: 0.9;
 }

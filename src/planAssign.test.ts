@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isIt, ownerOnEnteringSprint, type ItContext } from './planAssign';
+import { entersFromRegister, isIt, ownerOnEnteringSprint, type ItContext } from './planAssign';
 
 /* Wymyslone numery: 1 = konto binear, 2 = zaslepka IT, 3 = kierownik IT, 10 = dzial IT, 20 = dzial handlowy. */
 const ctx = (o: Partial<ItContext> = {}): ItContext => ({
@@ -73,5 +73,14 @@ describe('ownerOnEnteringSprint', () => {
     expect(ownerOnEnteringSprint(zadanie(5), 69, 70, ctx())).toBeNull();
     expect(ownerOnEnteringSprint(zadanie(5), 70, null, ctx())).toBeNull();
     expect(ownerOnEnteringSprint(zadanie(5), null, null, ctx())).toBeNull();
+  });
+});
+
+describe('entersFromRegister', () => {
+  it('kolumna wejsciowa tylko z rejestru do sprintu', () => {
+    expect(entersFromRegister(null, 71)).toBe(true);
+    expect(entersFromRegister(71, 72)).toBe(false); // aktywny → nastepny: etap zostaje
+    expect(entersFromRegister(71, null)).toBe(false); // powrot do rejestru
+    expect(entersFromRegister(null, null)).toBe(false);
   });
 });
