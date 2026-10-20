@@ -3,9 +3,9 @@ import { loadEnv } from 'vite';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const run = promisify(execFile);
@@ -34,6 +34,7 @@ const ALLOWED = new Set([
   'im.dialog.messages.get', // komentarze zadan zyja dzis w czacie, nie na forum
   'sonet_group.user.groups', // projekty uzytkownika — lista w przelaczniku
   'user.get',
+  'disk.attachedObject.get', // zalaczniki zadania (w batch z src/bitrix.ts); sam plik idzie przez /api/attach
   // zapis — kazda zmiana idzie jako uzytkownik z URL-a webhooka
   'tasks.task.update',
   'task.item.update', // legacy CTaskItem::update — jedyna droga zapisu DEPENDS_ON (zadania powiazane)
@@ -117,13 +118,79 @@ function encodeParams(value: unknown, prefix = '', out: string[] = []): string[]
   return out;
 }
 
-function readBody(req: Connect.IncomingMessage): Promise<string> {
+/** Cialo zapytania jako tekst; z `max` (bajty) odrzuca wieksze, zamiast trzymac je w pamieci. */
+function readBody(req: Connect.IncomingMessage, max = Infinity): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    let size = 0;
+    // Za duze: dalej czytamy (i wyrzucamy), zeby odpowiedz 413 doszla — zerwane polaczenie dawalo tylko blad sieci.
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size <= max) chunks.push(c);
+      else chunks.length = 0;
+    });
+    req.on('end', () => (size > max ? reject(new BodyTooLarge()) : resolve(Buffer.concat(chunks).toString('utf8'))));
     req.on('error', reject);
   });
+}
+
+class BodyTooLarge extends Error {}
+
+/**
+ * Czy zapytanie przyszlo z samej aplikacji. Przegladarka dokleja Origin do kazdego POST/PUT z innej strony,
+ * wiec bez tego dowolna otwarta strona mogla wolac nasze lokalne endpointy. Brak Origin = nie przegladarka
+ * z innej strony (curl, ten sam adres) — przepuszczamy.
+ */
+export function sameOrigin(req: Pick<Connect.IncomingMessage, 'headers'>): boolean {
+  const origin = req.headers.origin;
+  return !origin || origin.replace(/^https?:\/\//, '') === req.headers.host;
+}
+
+/**
+ * Co jest nie tak z wywolaniem `batch` — albo `null`, gdy mozna je puscic.
+ *
+ * `batch` niesie w `cmd` wlasne wywolania ("metoda?parametry") — kazde musi przejsc te sama allowliste, inaczej
+ * batch byl furtka do dowolnej metody webhooka (np. tasks.task.delete). Batch w batchu tez nie. Klucze tylko
+ * `cmd` i `halt` dokladnie tak napisane: `cmd[x]`, ` cmd` albo `CMD` omijaly sprawdzenie, a Bitrix i tak czyta
+ * je jako wywolania (PHP dekoduje nazwy i sklada nawiasy).
+ */
+export function batchViolation(params: unknown): string | null {
+  const obj = params && typeof params === 'object' ? (params as Record<string, unknown>) : {};
+  if (Object.keys(obj).some((k) => k !== 'cmd' && k !== 'halt')) return 'Niedozwolony klucz w batch';
+  const cmd = obj.cmd;
+  const calls = cmd && typeof cmd === 'object' ? Object.values(cmd as Record<string, unknown>) : [];
+  const bad = calls.map((c) => String(c).split('?')[0]).find((m) => m.toLowerCase() === 'batch' || !ALLOWED.has(m));
+  return bad === undefined ? null : `Metoda spoza allowlisty w batch: ${bad}`;
+}
+
+/**
+ * Zawartosc pliku zespolow. `text === null` = pliku nie ma (pusto). `strict` (zapis): uszkodzony plik rzuca —
+ * inaczej zapis jednego projektu nadpisalby go samym soba i skasowal zespoly wszystkich pozostalych.
+ */
+export function parseTeams(text: string | null, strict: boolean): Record<string, unknown> {
+  if (text === null) return {};
+  try {
+    const p = JSON.parse(text);
+    if (p && typeof p === 'object' && !Array.isArray(p)) return p;
+  } catch {
+    /* nizej */
+  }
+  if (strict) throw new Error('plik zespolow jest uszkodzony — popraw albo usun plik');
+  return {};
+}
+
+/**
+ * HTML do PDF z polityka CSP wstawiona zaraz po `<head>` — albo `null`, gdy `<head>` nie ma (`<header>` sie
+ * nie liczy). Polityka blokuje skrypty i pliki lokalne (file://): headless Chrome renderuje tylko to, co przyslano.
+ */
+export function withCsp(html: string, host: string | undefined): string | null {
+  const head = /<head(\s[^>]*)?>/i;
+  if (!head.test(html)) return null;
+  const self = `http://${host}`;
+  const csp =
+    `default-src 'none'; img-src ${self} data: https:; font-src ${self} data: https:; ` +
+    `style-src 'unsafe-inline' ${self} https:`;
+  return html.replace(head, (h) => `${h}<meta http-equiv="Content-Security-Policy" content="${csp}">`);
 }
 
 /**
@@ -179,7 +246,8 @@ export function bxProxy(mode: string): Plugin {
     .filter((n) => Number.isInteger(n) && n > 0);
   // Odliczanie do konca sprintu: ilu programistow liczymy (1 godzina = 1 SP na osobe; moze byc ulamek — pol etatu to 0,5)
   // i czyje zadania nie wchodza do limitu. Patrz .env.example.
-  const devsRaw = Number(env.BX_CAPACITY_DEVS);
+  // Przecinek tez: „3,5" (tak liczbe pokazuje aplikacja) dawalo NaN i po cichu domyslne 3.5.
+  const devsRaw = Number(String(env.BX_CAPACITY_DEVS ?? '').trim().replace(',', '.'));
   const capacityDevs = Number.isFinite(devsRaw) && devsRaw > 0 ? devsRaw : 3.5;
   const capacityExcludeIds = (env.BX_CAPACITY_EXCLUDE_IDS || '')
     .split(',')
@@ -232,10 +300,23 @@ export function bxProxy(mode: string): Plugin {
        * dodatkowych zaleznosci. Przyjmuje gotowy dokument HTML w ciele, oddaje bajty PDF. Dziala lokalnie
        * (serwer deweloperski); bez przegladarki odpowiada 501, a front zapisuje wtedy zwykly plik HTML.
        */
+      /*
+       * Zabezpieczenia: tylko z aplikacji (sameOrigin), do 15 MB, jeden PDF naraz (kolejka najwyzej 3 —
+       * kazdy to osobna przegladarka headless), a dokument dostaje CSP: bez skryptow i bez plikow z dysku
+       * (strona otwiera sie z file://, wiec bez tego <img src="file:///..."> wydrukowalby dowolny plik).
+       * Obrazki, style i fonty tylko z adresu aplikacji (snapshotHtml ustawia <base> na niego), data: i https.
+       */
+      let pdfQueue = Promise.resolve();
+      let pdfWaiting = 0;
       server.middlewares.use('/api/pdf', async (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405;
           res.end();
+          return;
+        }
+        if (!sameOrigin(req)) {
+          res.statusCode = 403;
+          res.end('PDF tylko z aplikacji.');
           return;
         }
         const browser = findPdfBrowser(env.BX_PDF_BROWSER);
@@ -244,32 +325,135 @@ export function bxProxy(mode: string): Plugin {
           res.end('Brak przegladarki do generowania PDF (ustaw BX_PDF_BROWSER).');
           return;
         }
-        const dir = await mkdtemp(join(tmpdir(), 'binear-pdf-'));
+        let html: string;
         try {
-          const html = await readBody(req);
-          const input = join(dir, 'in.html');
-          const output = join(dir, 'out.pdf');
-          await writeFile(input, html, 'utf8');
-          await run(
-            browser,
-            [
-              '--headless=new',
-              '--disable-gpu',
-              '--no-pdf-header-footer',
-              `--user-data-dir=${join(dir, 'profile')}`,
-              `--print-to-pdf=${output}`,
-              pathToFileURL(input).href,
-            ],
-            { timeout: 60_000 },
-          );
-          const pdf = await readFile(output);
+          html = await readBody(req, 15 * 1024 * 1024);
+        } catch (e) {
+          res.statusCode = e instanceof BodyTooLarge ? 413 : 400;
+          res.end(e instanceof BodyTooLarge ? 'Dokument za duzy (max 15 MB).' : 'Blad odczytu.');
+          return;
+        }
+        const locked = withCsp(html, req.headers.host);
+        if (locked === null) {
+          res.statusCode = 400;
+          res.end('Oczekiwany dokument HTML z <head>.');
+          return;
+        }
+        html = locked;
+        if (pdfWaiting >= 3) {
+          res.statusCode = 429;
+          res.end('Za duzo PDF-ow naraz — sprobuj za chwile.');
+          return;
+        }
+        pdfWaiting++;
+        const job = pdfQueue.then(async () => {
+          const dir = await mkdtemp(join(tmpdir(), 'binear-pdf-'));
+          try {
+            const input = join(dir, 'in.html');
+            const output = join(dir, 'out.pdf');
+            await writeFile(input, html, 'utf8');
+            await run(
+              browser,
+              [
+                '--headless=new',
+                '--disable-gpu',
+                '--no-pdf-header-footer',
+                `--user-data-dir=${join(dir, 'profile')}`,
+                `--print-to-pdf=${output}`,
+                pathToFileURL(input).href,
+              ],
+              { timeout: 60_000 },
+            );
+            return await readFile(output);
+          } finally {
+            await rm(dir, { recursive: true, force: true }).catch(() => {});
+          }
+        });
+        pdfQueue = job.then(
+          () => {},
+          () => {},
+        );
+        try {
+          const pdf = await job;
           res.setHeader('content-type', 'application/pdf');
           res.end(pdf);
         } catch (e) {
           res.statusCode = 500;
           res.end(e instanceof Error ? e.message : 'blad generowania PDF');
         } finally {
-          await rm(dir, { recursive: true, force: true }).catch(() => {});
+          pdfWaiting--;
+        }
+      });
+
+      /*
+       * Zespol i grafik (okno „Zespół i grafik") — jeden plik na serwerze, wspolny dla wszystkich, ktorzy uzywaja
+       * tej instancji, osobno dla kazdego projektu: { "<groupId>": { members, off } }. Wczesniej siedzial tylko
+       * w przegladarce, wiec kazdy mial wlasny zespol i wlasne moce. Ostatni zapis wygrywa.
+       * Zapis tylko z tej samej strony (Origin == Host) — inaczej dowolna otwarta strona moglaby nadpisac zespol.
+       */
+      const teamFile = resolve(process.cwd(), env.BX_TEAM_FILE || 'binear-team.json');
+      /*
+       * `strict` (zapis): tylko brak pliku znaczy „pusto". Uszkodzony albo nieczytelny plik rzuca — inaczej zapis
+       * jednego projektu nadpisalby go samym sobą i skasowal zespoly wszystkich pozostalych.
+       */
+      const readTeams = async (strict = false): Promise<Record<string, unknown>> => {
+        let text: string | null;
+        try {
+          text = await readFile(teamFile, 'utf8');
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== 'ENOENT' && strict) throw e;
+          text = null;
+        }
+        return parseTeams(text, strict);
+      };
+      let teamWrite = Promise.resolve();
+      server.middlewares.use('/api/team', async (req, res) => {
+        const group = (req.url || '').replace(/^\//, '').split('?')[0];
+        res.setHeader('content-type', 'application/json');
+        if (!/^\d+$/.test(group)) {
+          res.statusCode = 400;
+          res.end('{"error":"zly projekt"}');
+          return;
+        }
+        if (req.method === 'GET') {
+          const teams = await readTeams();
+          res.end(JSON.stringify({ team: teams[group] ?? null }));
+          return;
+        }
+        if (req.method !== 'PUT') {
+          res.statusCode = 405;
+          res.end('{"error":"tylko GET i PUT"}');
+          return;
+        }
+        if (!sameOrigin(req)) {
+          res.statusCode = 403;
+          res.end('{"error":"zapis tylko z aplikacji"}');
+          return;
+        }
+        let team: unknown;
+        try {
+          team = JSON.parse(await readBody(req, 256 * 1024));
+          if (!team || typeof team !== 'object' || !Array.isArray((team as { members?: unknown }).members)) throw new Error();
+        } catch {
+          res.statusCode = 400;
+          res.end('{"error":"zly zespol"}');
+          return;
+        }
+        // Zapisy po kolei i przez plik tymczasowy: dwa naraz nie zgubia sie nawzajem ani nie zostawia polowy pliku.
+        const job = teamWrite.then(async () => {
+          const teams = await readTeams(true);
+          teams[group] = team;
+          const tmp = `${teamFile}.${process.pid}.tmp`;
+          await writeFile(tmp, JSON.stringify(teams, null, 2) + '\n', 'utf8');
+          await rename(tmp, teamFile);
+        });
+        teamWrite = job.catch(() => {});
+        try {
+          await job;
+          res.end('{"ok":true}');
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e instanceof Error ? e.message : 'blad zapisu' }));
         }
       });
 
@@ -282,14 +466,20 @@ export function bxProxy(mode: string): Plugin {
             return '';
           }
         };
-        const [sha, remote, branch] = await Promise.all([
+        /*
+         * Galaz NA GITHUBIE, za ktora idzie lokalna (upstream z origin), a nie lokalna nazwa — lokalna galaz bez
+         * odpowiednika (np. przegladany PR) dawala 422 z GitHuba przy kazdym sprawdzeniu. Bez upstreamu: pusto,
+         * front wtedy nie sprawdza.
+         */
+        const [sha, remote, upstream] = await Promise.all([
           git(['rev-parse', 'HEAD']),
           git(['config', '--get', 'remote.origin.url']),
-          git(['rev-parse', '--abbrev-ref', 'HEAD']),
+          git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']),
         ]);
         const repo = remote.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/i)?.[1] ?? '';
+        const branch = upstream.startsWith('origin/') ? upstream.slice('origin/'.length) : '';
         res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ sha, repo, branch: branch || 'master' }));
+        res.end(JSON.stringify({ sha, repo, branch }));
       });
 
       /**
@@ -309,6 +499,7 @@ export function bxProxy(mode: string): Plugin {
         };
 
         if (req.method !== 'POST') return send(405, { ok: false, message: 'Tylko POST' });
+        if (!sameOrigin(req)) return send(403, { ok: false, message: 'Aktualizacja tylko z samej aplikacji' });
 
         try {
           const { stdout, stderr } = await run('git', ['pull', '--ff-only'], { cwd: process.cwd() });
@@ -457,10 +648,17 @@ export function bxProxy(mode: string): Plugin {
 
         if (!webhook) return send(500, { error: 'BITRIX_WEBHOOK nie jest ustawiony w .env' });
         if (!ALLOWED.has(method)) return send(403, { error: `Metoda spoza allowlisty: ${method}` });
+        // Inna otwarta strona nie moze wolac Bitriksa naszym webhookiem (prosty POST text/plain przechodzi bez CORS).
+        if (!sameOrigin(req)) return send(403, { error: 'Zapytanie spoza aplikacji' });
 
         try {
           const raw = await readBody(req);
           const params = raw ? JSON.parse(raw) : {};
+          // Wywolania w `batch` przechodza te sama allowliste (patrz `batchViolation`).
+          if (method === 'batch') {
+            const bad = batchViolation(params);
+            if (bad) return send(403, { error: bad });
+          }
           const body = encodeParams(params).join('&');
 
           const upstream = await fetch(`${webhook}/${method}.json`, {
