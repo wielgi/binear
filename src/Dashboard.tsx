@@ -194,6 +194,8 @@ export function Dashboard({
    * i pokazuje, czy osoba jeszcze zdazy z tym, co jej zostalo.
    */
   const sprintSpan = (() => {
+    // Moc do konca tygodnia ma sens tylko dla TRWAJACEGO sprintu; przy ostatnim zamknietym nie ma czego liczyc.
+    if (base.sprint.status !== 'active') return null;
     const start = base.sprint.dateStart ? new Date(base.sprint.dateStart) : null;
     if (!start || Number.isNaN(start.getTime())) return null;
     return weekWindow(start, new Date());
@@ -248,8 +250,8 @@ export function Dashboard({
         role: m?.role ?? '',
         cap: Math.round(cap * 10) / 10,
         /* Osoba z wylaczona moca (np. kierownik) nie ma kreski ani ostrzezen — nie ma czego porownywac. */
-        hasCap: Boolean(m && countsCapacity(m)),
-        capState: m && countsCapacity(m) && p.sp > 0 ? capacityState(p.segments, cap) : ('ok' as const),
+        hasCap: Boolean(m && countsCapacity(m) && sprintSpan),
+        capState: m && countsCapacity(m) && sprintSpan && p.sp > 0 ? capacityState(p.segments, cap) : ('ok' as const),
       };
     })
     // Sortujemy po CALOSCI, nie po reszcie: inaczej lista przeskakiwalaby przy

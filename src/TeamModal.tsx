@@ -6,6 +6,7 @@ import {
   countsCapacity,
   FTE_OPTIONS,
   fmtFte,
+  isManager,
   isoDate,
   isPresent,
   mondayOf,
@@ -26,7 +27,7 @@ const dm = (d: Date) => `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '
 /**
  * Zespol i grafik tygodniowy: kogo liczymy do mocy, na jaki etat i w ktore dni jest w pracy.
  * Domyslnie wszyscy sa w pracy w kazdy dzien roboczy — odznaczasz tylko wyjatki (urlop, L4).
- * Zapis idzie od razu (przegladarka), moce w widoku planowania i odliczanie sprintu licza sie z tego.
+ * Zapis idzie od razu (plik na serwerze, wspolny dla wszystkich), moce w widoku planowania i odliczanie sprintu licza sie z tego.
  */
 export function TeamModal({
   team,
@@ -36,8 +37,11 @@ export function TeamModal({
   onClose,
 }: {
   team: TeamConfig;
-  /** Osoby z Bitriksa, z ktorych mozna wybrac czlonkow zespolu. */
-  people: { id: number; name: string }[];
+  /**
+   * Osoby, z ktorych mozna wybrac czlonkow zespolu: aktywni pracownicy z calej firmy (nie tylko ci, ktorzy maja
+   * teraz zadania), bez konta-zaslepki „Nieprzypisane". `it` = z dzialu IT — ida na gore listy.
+   */
+  people: { id: number; name: string; it?: boolean }[];
   now: Date;
   onChange: (next: TeamConfig) => void;
   onClose: () => void;
@@ -45,13 +49,27 @@ export function TeamModal({
   const [monday, setMonday] = useState(() => mondayOf(now));
   const days = useMemo(() => weekDays(monday), [monday]);
   const shift = (weeks: number) => setMonday((m) => new Date(m.getFullYear(), m.getMonth(), m.getDate() + weeks * 7));
-  const candidates = people.filter((p) => !team.members.some((m) => m.id === p.id));
+  const [q, setQ] = useState('');
+  const [cursor, setCursor] = useState(0);
+  /* Szukanie po nazwisku bez polskich znakow i wielkosci liter; IT na gorze, potem alfabetycznie. */
+  const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/ł/g, 'l');
+  const candidates = people
+    .filter((p) => !team.members.some((m) => m.id === p.id))
+    .filter((p) => !q.trim() || fold(p.name).includes(fold(q.trim())))
+    .sort((a, b) => Number(Boolean(b.it)) - Number(Boolean(a.it)) || a.name.localeCompare(b.name, 'pl'));
+  const shown = candidates.slice(0, 8);
+  const add = (p: { id: number; name: string } | undefined) => {
+    if (!p) return;
+    onChange(addMember(team, p));
+    setQ('');
+    setCursor(0);
+  };
   const hours = teamWeekHours(team, monday);
   const thisWeek = isoDate(monday) === isoDate(mondayOf(now));
 
   return createPortal(
     <>
-      <div className="picker-backdrop" onClick={onClose} />
+      <div className="picker-backdrop modal-scrim" onClick={(e) => e.detail < 2 && onClose()} />
       <div className="team-modal team-modal-wide" role="dialog" aria-label="Zespół i grafik">
         <header className="team-head">
           <h2>Zespół i grafik</h2>
@@ -89,6 +107,9 @@ export function TeamModal({
                 <th>Osoba</th>
                 <th>Rola</th>
                 <th>Etat</th>
+                <th title="Kierownik: zadania poza budżetem SP, osobny pasek w planowaniu, przy wejściu do sprintu zadania zostają u niego">
+                  Kierownik
+                </th>
                 <th title="Godziny osoby wchodzą do mocy zespołu (potencjał sprintu)">Moc</th>
                 <th title="Zadania osoby zjadają budżet SP w planowaniu">Budżet</th>
                 {days.map((d, i) => (
@@ -106,7 +127,7 @@ export function TeamModal({
                   <td>{m.name}</td>
                   <td>
                     <input
-                      className="team-role"
+                      className="picker-input team-role"
                       list="team-roles"
                       value={m.role ?? ''}
                       maxLength={40}
@@ -117,6 +138,7 @@ export function TeamModal({
                   </td>
                   <td>
                     <select
+                      className="team-select"
                       value={m.fte}
                       onChange={(e) => onChange(setFte(team, m.id, Number(e.target.value)))}
                       aria-label={`Wymiar etatu: ${m.name}`}
@@ -133,6 +155,14 @@ export function TeamModal({
                   <td className="team-day">
                     <input
                       type="checkbox"
+                      checked={isManager(m)}
+                      onChange={(e) => onChange(setMember(team, m.id, { manager: e.target.checked }))}
+                      aria-label={`${m.name}: kierownik`}
+                    />
+                  </td>
+                  <td className="team-day">
+                    <input
+                      type="checkbox"
                       checked={countsCapacity(m)}
                       onChange={(e) => onChange(setMember(team, m.id, { capacity: e.target.checked }))}
                       aria-label={`${m.name}: godziny liczą się do mocy zespołu`}
@@ -142,6 +172,8 @@ export function TeamModal({
                     <input
                       type="checkbox"
                       checked={takesBudget(m)}
+                      disabled={isManager(m)}
+                      title={isManager(m) ? 'Zadania kierownika nie zjadają budżetu' : undefined}
                       onChange={(e) => onChange(setMember(team, m.id, { budget: e.target.checked }))}
                       aria-label={`${m.name}: zadania zjadają budżet SP`}
                     />
@@ -171,8 +203,8 @@ export function TeamModal({
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={4}>Moce tygodnia</td>
-                <td colSpan={8} className="team-total">
+                <td colSpan={5}>Moce tygodnia</td>
+                <td colSpan={7} className="team-total">
                   <b>{Math.round(hours * 10) / 10}</b> h (= SP)
                 </td>
               </tr>
@@ -185,27 +217,67 @@ export function TeamModal({
             <option key={r} value={r} />
           ))}
         </datalist>
-        <label className="team-add">
+        <div className="team-add team-add-search">
           <span>Dodaj osobę</span>
-          <select
-            value=""
-            onChange={(e) => {
-              const p = people.find((x) => x.id === Number(e.target.value));
-              if (p) onChange(addMember(team, p));
-            }}
-          >
-            <option value="">— wybierz —</option>
-            {candidates.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="team-search">
+            <input
+              className="picker-input"
+              placeholder="Szukaj w firmie…"
+              // Fokus do okna po otwarciu — inaczej zostawal na przycisku w naglowku pod spodem.
+              autoFocus
+              value={q}
+              aria-label="Szukaj osoby do zespołu"
+              onChange={(e) => {
+                setQ(e.target.value);
+                setCursor(0);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setCursor((c) => Math.min(c + 1, shown.length - 1));
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setCursor((c) => Math.max(c - 1, 0));
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  add(shown[cursor]);
+                } else if (e.key === 'Escape' && q) {
+                  // Pierwszy Esc zamyka same podpowiedzi; dopiero przy pustym polu Esc zamyka okno.
+                  e.preventDefault();
+                  setQ('');
+                }
+              }}
+            />
+            {q.trim() !== '' && (
+              <div className="team-search-list" role="listbox">
+                {shown.map((p, i) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="option"
+                    aria-selected={i === cursor}
+                    className={`team-search-item${i === cursor ? ' team-search-item-on' : ''}`}
+                    onMouseEnter={() => setCursor(i)}
+                    onClick={() => add(p)}
+                  >
+                    <span>{p.name}</span>
+                    {p.it && <span className="team-search-it">IT</span>}
+                  </button>
+                ))}
+                {shown.length === 0 && <div className="team-search-empty">Nikogo takiego — albo już jest w zespole.</div>}
+                {candidates.length > shown.length && (
+                  <div className="team-search-empty">…i {candidates.length - shown.length} więcej — wpisz dokładniej</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
         <p className="team-hint">
-          <b>Moc</b> — godziny osoby wchodzą do mocy zespołu. <b>Budżet</b> — jej zadania zjadają budżet SP w planowaniu.
+          <b>Kierownik</b> — jego zadania są poza budżetem SP, mają osobny pasek w planowaniu i przy wejściu do
+          sprintu zostają u niego; dopóki nikt nie jest zaznaczony, kierownikiem jest ten z ustawień serwera
+          (BX_CAPACITY_EXCLUDE_IDS). <b>Moc</b> — godziny osoby wchodzą do mocy zespołu. <b>Budżet</b> — jej zadania zjadają budżet SP w planowaniu.
           Statystyki (wykresy, podsumowanie) liczą zadania wszystkich, także tych bez mocy. Dni zaznaczone = w pracy;
-          moc = etat × 8 h na dzień, jedna godzina to jeden punkt. Zapis tylko w tej przeglądarce.
+          moc = etat × 8 h na dzień, jedna godzina to jeden punkt. Zespół zapisuje się na serwerze — wszyscy widzą ten sam, osobny dla każdego projektu.
         </p>
       </div>
     </>,

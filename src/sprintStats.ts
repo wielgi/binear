@@ -69,6 +69,22 @@ const DAY = 86_400_000;
 const sp = (t: SprintTask) => t.storyPoints ?? 0;
 
 /**
+ * Zadania sprintu BEZ folderow — rodzicow, ktorych dziecko jest w tym samym sprincie.
+ *
+ * Podsumowanie sprintu (sprintTotals.ts) liczy same liscie, bo punkty folderu siedza
+ * na dzieciach. Wykresy liczyly folder razem z dziecmi i rozjezdzaly sie z nim o
+ * wlasne SP rodzica (Sprint 71: +12 SP z zamknietego #117137). Folder wypada stad,
+ * zeby wykres, slupek zakresu i lista osob liczyly to samo co Podsumowanie.
+ *
+ * Widzimy tylko zadania tego sprintu, wiec dziadek przy rodzicu spoza sprintu
+ * zostaje — Podsumowanie, ktore ma cala liste zadan, rozpozna go jeszcze jako folder.
+ */
+export function withoutFolders<T extends { id: number; parentId: number | null }>(tasks: T[]): T[] {
+  const parents = new Set(tasks.map((t) => t.parentId).filter((p): p is number => p !== null));
+  return tasks.filter((t) => !parents.has(t.id));
+}
+
+/**
  * Czy zadanie liczy sie jako zrobione.
  *
  * Wyciagniete z `summarize`, bo tej samej definicji potrzebuje takze lista osob

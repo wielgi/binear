@@ -740,8 +740,9 @@ export function describe(
  * Numer zadania z parametrow. Kazda metoda nazywa go inaczej (`taskId`, `id`,
  * `TASKID`, `TASK_ID`), a bez niego wpis nie ma o czym mowic.
  */
-export function taskIdOf(params: Record<string, unknown>): number | null {
-  const raw = params.taskId ?? params.TASKID ?? params.TASK_ID ?? params.id;
+export function taskIdOf(params: Record<string, unknown>, method = ''): number | null {
+  // Epiki tez maja `id` — to numer epiku, nie zadania; wpis w dzienniku linkowal wtedy do przypadkowego zadania.
+  const raw = params.taskId ?? params.TASKID ?? params.TASK_ID ?? (method.startsWith('tasks.api.scrum.epic.') ? undefined : params.id);
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }

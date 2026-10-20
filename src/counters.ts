@@ -1,60 +1,15 @@
 /*
- * Liczniki nad lista — „co mam dzis do zrobienia" w rejestrze zadan.
+ * Tagi procesu IT, gotowosc do startu i dzienna historia kafelkow.
  *
- * Liczby sa GLOBALNE — licza cala grupe, niezaleznie od zakresu, przelacznikow
- * („Tylko moje", „Zakonczone") i filtrow. Inaczej „ile mamy poza sprintem" zmienialoby
- * sie od tego, jak akurat patrzysz, a o to pytanie chodzi: czy jest 200, czy 220.
- *
- * ROZBICIE „POZA SPRINTEM"
- * Otwarte zadania spoza aktywnego sprintu, BEZ odlozonych, dziela sie na stany, ktore
- * sie wykluczaja i razem daja dokladnie „Poza sprintem":
- *
- *   DO-STARTU, z wyceną, kategorią
- *     i okresem zwrotu              → Gotowe do startu
- *   DO-STARTU, bez któregokolwiek
- *     z tych trzech                 → Do wyceny
- *   OCZEKUJE-NA-ODPOWIEDZ + wpis    → Do analizy odpowiedzi
- *   OCZEKUJE-NA-ODPOWIEDZ           → Czeka na odpowiedz
- *   cala reszta                     → Do wywiadu (DO-WYWIADU albo brak tagu gotowosci)
- *
- * „Do wywiadu" jest dopelnieniem, wiec suma zgadza sie z definicji — takze gdy zadanie
- * ma dwa tagi gotowosci (pierwszenstwo: DO-STARTU, potem OCZEKUJE) albo tag spoza
- * listy (BUG, Wysoki). Zadanie nowe, bez zadnego tagu gotowosci, to zadanie, o ktore
- * trzeba dopiero zapytac.
- *
- * FOLDERY leza POZA rejestrem: zadanie, ktore ma otwarte podzadanie, jest tylko kontenerem — praca
- * siedzi w podzadaniach, wiec liczenie rodzica obok dzieci liczyloby ten sam temat dwa razy (tak samo
- * jak kolejka audytu, ktora folderow nie pokazuje). Folder, ktorego wszystkie podzadania sa zamkniete,
- * wraca do zwyklego rejestru. Ani do „Poza sprintem", ani do zadnego stanu (w tym „Do wywiadu") —
- * pokazuje je tylko osobny kafelek „Foldery".
- *
- * KONCEPCJA lezy POZA rejestrem: to pomysly na zbyt wczesnym etapie, zeby je wliczac —
- * ani do „Poza sprintem", ani do zadnego stanu (w tym „Do wywiadu"). Pokazuje je tylko osobny
- * kafelek „Koncept". Zadanie z koncepcja, ktore trafilo do aktywnego sprintu, zostaje w „W sprincie".
- *
- * Odlozone (status 6) leza poza kolejka audytu i poza suma; pokazuje je osobna,
- * wyszarzona notka pod kafelkami.
- *
- * BUG to CECHA, nie stan: zadanie z tagiem BUG jest jednoczesnie w jednym ze stanow,
- * wiec jego kafelek stoi za pionowym separatorem, poza rozbiciem, i nie dodaje sie do sumy.
+ * Wbudowane liczniki zastapily wlasne kafelki (zapisane widoki). Ich dawne zasady — rozbicie „Poza sprintem"
+ * na Do wywiadu / Czeka / Do analizy odpowiedzi / Do wyceny / Gotowe, bez odlozonych, KONCEPCJA i folderow —
+ * siedza teraz w filtrach domyslnego zestawu (`public/binear-kafelki-IT.json`). Tu zostaje to, czego filtr sam
+ * nie wyrazi: gotowosc do startu (`readiness`, filtry „Gotowość" i „Brakuje"), fakty z czatow, odpowiedzi
+ * zglaszajacych i historia dzien po dniu.
  *
  * Modul jest czysty (bez Reacta i bez zapytan), zeby dalo sie go przetestowac.
  */
 import type { Task } from './bitrix';
-import { isImportant } from './taskView';
-
-export type CounterKey =
-  | 'poza'
-  | 'wywiad'
-  | 'czeka'
-  | 'odpowiedzi'
-  | 'wycena'
-  | 'gotowe'
-  | 'sprint'
-  | 'wazne'
-  | 'koncept'
-  | 'foldery'
-  | 'odlozone';
 
 export const TAG_DO_STARTU = 'DO-STARTU';
 export const TAG_CZEKA = 'OCZEKUJE-NA-ODPOWIEDZ';
@@ -89,27 +44,24 @@ export const TAGS_KATEGORIA = [
 export const TAGS_PULA = ['CIAGLOSC', 'RDZEN', 'DZIAL'] as const;
 export type Pula = (typeof TAGS_PULA)[number];
 
-/** Pula zadania albo `null`. Zadanie ma najwyżej jedną; przy dwóch wygrywa pierwsza z `TAGS_PULA`. */
-export const pula = (t: Pick<Task, 'tags'>): Pula | null => TAGS_PULA.find((g) => hasTag(t, g)) ?? null;
+/**
+ * Dawny tag STRATEGIA: wartosc strategiczna z wiadomosci WARTOŚĆ — to samo, co dzis znaczy pula RDZEN. Zadanie
+ * z samym STRATEGIA (bez zadnej puli) liczymy wiec jako RDZEN, zamiast zrzucac je na koniec planowania
+ * i do „Do wyceny" tylko dlatego, ze nikt jeszcze nie przepial tagu.
+ */
+export const TAG_STRATEGIA = 'STRATEGIA';
+
+/** Pula zadania albo `null`. Zadanie ma najwyżej jedną; przy dwóch wygrywa pierwsza z `TAGS_PULA` (patrz `pule`). */
+export const pula = (t: Pick<Task, 'tags'>): Pula | null =>
+  TAGS_PULA.find((g) => hasTag(t, g)) ?? (hasTag(t, TAG_STRATEGIA) ? 'RDZEN' : null);
+
+/** Ile tagow puli ma zadanie — wiecej niz jedna to blad oznaczenia (patrz brak `pule` w `readiness`). */
+export const pule = (t: Pick<Task, 'tags'>): number => TAGS_PULA.filter((g) => hasTag(t, g)).length;
 
 /** Bitrix nie rozroznia wielkosci liter w tagach — „do-startu" to ten sam tag. */
 export const hasTag = (t: Pick<Task, 'tags'>, tag: string): boolean =>
   t.tags.some((g) => g.toUpperCase() === tag);
 
-export interface CounterCtx {
-  sprintId: number | null;
-  /** Statusy uznawane za zamkniete (CLOSED_STATUSES z bitrix.ts). */
-  closed: ReadonlySet<string>;
-  /** Zadania OCZEKUJE-NA-ODPOWIEDZ z odpowiedzia po naszych pytaniach; `null` = jeszcze liczymy. */
-  answered: ReadonlySet<number> | null;
-  /**
-   * Fakty, które widać tylko w czacie zadania; `null` = jeszcze czytamy czaty. Czytamy je wyłącznie
-   * dla zadań, którym do kompletu brakuje czegoś, co może tam być (patrz `needsChat`).
-   */
-  chat: ChatFacts | null;
-  /** Zadania-FOLDERY: maja otwarte podzadanie (patrz `foldersOf`). Liczone z CALEJ listy zadan. */
-  folders: ReadonlySet<number>;
-}
 
 /**
  * Co wiemy z czatów zadań DO-STARTU:
@@ -123,6 +75,11 @@ export interface CounterCtx {
 export interface ChatFacts {
   recon: ReadonlySet<number>;
   value: ReadonlySet<number>;
+  /**
+   * Zadania, ktorych czat udalo sie przeczytac. Reszta (czat nieczytelny albo spoza zakresu odczytu, np. zadanie
+   * bez DO-STARTU) jest NIEZNANA — readiness() oddaje dla nich `null` zamiast zgadywac „brak WARTOSC".
+   */
+  read: ReadonlySet<number>;
 }
 
 type CounterTask = Pick<
@@ -145,58 +102,12 @@ export function foldersOf(
 }
 
 
-export interface CounterDef {
-  key: CounterKey;
-  label: string;
-  /** Po co ta karta — w dymku, zeby liczba nie wymagala znajomosci audytu. */
-  hint: string;
-  match: (t: CounterTask, ctx: CounterCtx) => boolean;
-  /** Liczba zalezy od story pointow — dopoki nie doszly, jest niepewna. */
-  needsMeta?: boolean;
-  /** Liczba zalezy tez od rozpoznan (dopisek w wiadomosci WYCENA w czacie) — niepewna, dopoki czaty sie czytaja. */
-  needsChatFacts?: boolean;
-  /** Karta istnieje tylko w projekcie ze sprintami (scrum). */
-  needsSprint?: boolean;
-  /**
-   * Poza suma „Poza sprintem" z innego powodu niz cecha: odlozone nie sa w ogole
-   * liczone do rejestru. Kafelek stoi w grupie „Poza sumą", jako pierwszy.
-   */
-  note?: boolean;
-  /** Cecha, nie stan: kafelek stoi w grupie „Poza sumą", poza rozbiciem „Poza sprintem". */
-  separate?: boolean;
-  /**
-   * Cecha, ktora przecina OBA swiaty: liczy zadania i ze sprintu, i spoza niego (np. bledy). Nie
-   * pasuje wiec ani do grupy „Sprint", ani do „Poza sumą" — stoi sama, bez podpisu, miedzy nimi.
-   */
-  standalone?: boolean;
-  /** Stan, ktory wchodzi do SUMY „Poza sprintem" — kafelki z tym znacznikiem sumuja sie do niej. */
-  inSum?: boolean;
-  /** Wzrost to zla wiadomosc (wiecej roboty). Dla sprintu kierunek nic nie znaczy. */
-  riseIsBad: boolean;
-}
 
-const isOpen = (t: CounterTask, ctx: CounterCtx) => !ctx.closed.has(t.status);
 /**
  * Status „Odlozone" (6). Audyt odlozonych nie rusza — leza poza kolejka, dopoki ktos
  * ich swiadomie nie wznowi — wiec nie wchodza do „Poza sprintem" ani do zadnego stanu.
  */
 export const DEFERRED_STATUS = '6';
-/** Otwarte i nieodlozone — to, czym audyt sie zajmuje. */
-const inAudit = (t: CounterTask, ctx: CounterCtx) => isOpen(t, ctx) && t.status !== DEFERRED_STATUS;
-const inSprint = (t: CounterTask, ctx: CounterCtx) =>
-  ctx.sprintId !== null && t.sprintId === ctx.sprintId;
-/** Pomysl na zbyt wczesnym etapie (KONCEPCJA) — nie jest czescia rejestru do przerobienia. */
-const isKoncept = (t: CounterTask) => hasTag(t, TAG_KONCEPCJA);
-/** Folder: kontener na podzadania, a nie praca do przerobienia — patrz `foldersOf`. */
-const isFolder = (t: CounterTask, ctx: CounterCtx) => ctx.folders.has(t.id);
-/** Rejestr do przerobienia: otwarte, nieodlozone, spoza aktywnego sprintu, nie-koncepcje i nie-foldery. */
-const outside = (t: CounterTask, ctx: CounterCtx) =>
-  inAudit(t, ctx) && !inSprint(t, ctx) && !isKoncept(t) && !isFolder(t, ctx);
-
-const isStartu = (t: CounterTask) => hasTag(t, TAG_DO_STARTU);
-/** DO-STARTU ma pierwszenstwo — zadanie z dwoma tagami gotowosci liczy sie raz. */
-const isCzeka = (t: CounterTask) => !isStartu(t) && hasTag(t, TAG_CZEKA);
-const wasAnswered = (t: CounterTask, ctx: CounterCtx) => ctx.answered?.has(t.id) ?? false;
 
 /** Ma tag kategorii korzyści (jeden z `TAGS_KATEGORIA`) — widać to z samej listy zadań. */
 export const hasCategory = (t: Pick<CounterTask, 'tags'>): boolean =>
@@ -249,181 +160,50 @@ export const needsChat = (t: CounterTask): boolean =>
   !isCompleteByTags(t) &&
   (t.storyPoints <= RECON_MAX_HOURS || pula(t) === 'RDZEN');
 
+/** Czego brakuje zadaniu do kompletu — do filtra „Brakuje" (patrz `readiness`). */
+export type Missing = 'pula' | 'pule' | 'sp' | 'kategoria' | 'zwrot' | 'termin' | 'wartosc';
+
+export const MISSING_LABEL: Record<Missing, string> = {
+  pula: 'Pula (CIAGLOSC / RDZEN / DZIAL)',
+  pule: 'Jedna pula (zadanie ma dwie)',
+  sp: 'Story points',
+  kategoria: 'Kategoria',
+  zwrot: 'Okres zwrotu (ZWROT-…)',
+  termin: 'Termin (WYMOG)',
+  wartosc: 'Wiadomość WARTOŚĆ (RDZEN)',
+};
+
 /**
- * Czy zadanie z DO-STARTU ma komplet: kompletne w tagach, rozpoznanie (po tytule albo z czatu) albo
- * RDZEN z wiadomością WARTOŚĆ — zawsze z pulą i wyceną. Dopóki czaty się czytają (`chat === null`), zadanie, które od nich zależy,
- * nie jest jeszcze ani kompletne, ani niekompletne — kafelki dostają wtedy znak „liczę" (`needsChatFacts`).
+ * Gotowosc zadania do startu wg tych samych zasad co dawny kafelek „Gotowe do startu" (`isComplete`), plus
+ * lista brakow. `ready: null` = rozstrzyga czat, a czaty jeszcze sie czytaja (`chat === null`) — wtedy
+ * zadanie nie jest ani gotowe, ani niegotowe, a `missing` podaje to, czego brakuje na pewno.
+ *
+ * Rozpoznanie (po tytule albo dopisku w czacie) jest gotowe z sama pula i wycena — reszta go nie dotyczy.
  */
-const isComplete = (t: CounterTask, ctx: CounterCtx) =>
-  isCompleteByTags(t) ||
-  (pula(t) !== null &&
-    t.storyPoints != null &&
-    (isReconByTitle(t) ||
-      (ctx.chat?.recon.has(t.id) ?? false) ||
-      (pula(t) === 'RDZEN' && (ctx.chat?.value.has(t.id) ?? false))));
+export function readiness(t: CounterTask, chat: ChatFacts | null): { ready: boolean | null; missing: Missing[] } {
+  const p = pula(t);
+  const missing: Missing[] = [];
+  if (p === null) missing.push('pula');
+  // Dwie pule naraz to blad oznaczenia — nie zgadujemy, ktora miala byc; zadanie czeka na poprawke.
+  if (pule(t) > 1) missing.push('pule');
+  if (t.storyPoints == null) missing.push('sp');
+  if (missing.length) return { ready: false, missing };
 
-/*
- * Kolejnosc = kolejnosc pracy w audycie: skala rejestru, potem stany od „trzeba zapytac"
- * po „gotowe", na koncu sprint jako punkt odniesienia i notka o odlozonych.
- */
-export const COUNTERS: CounterDef[] = [
-  {
-    key: 'poza',
-    label: 'Poza sprintem',
-    hint:
-      'Otwarte zadania spoza aktywnego sprintu, bez odłożonych, KONCEPCJA i folderów — cały rejestr, niezależnie ' +
-      'od widoku i filtrów. Kafelki obok rozbijają tę liczbę co do sztuki.',
-    match: (t, ctx) => outside(t, ctx),
-    riseIsBad: true,
-  },
-  {
-    key: 'wywiad',
-    inSum: true,
-    label: 'Do wywiadu',
-    hint:
-      'Poza sprintem: z tagiem DO-WYWIADU albo jeszcze bez tagu gotowości (nowe) — ' +
-      'trzeba zadać pytania.',
-    match: (t, ctx) => outside(t, ctx) && !isStartu(t) && !hasTag(t, TAG_CZEKA),
-    riseIsBad: true,
-  },
-  {
-    key: 'czeka',
-    inSum: true,
-    label: 'Czeka na odpowiedź',
-    hint:
-      'Poza sprintem, z tagiem OCZEKUJE-NA-ODPOWIEDZ, a po naszych pytaniach nikt spoza IT ' +
-      'jeszcze nie odpisał — piłka po stronie zgłaszającego.',
-    match: (t, ctx) => outside(t, ctx) && isCzeka(t) && !wasAnswered(t, ctx),
-    riseIsBad: true,
-  },
-  {
-    key: 'odpowiedzi',
-    inSum: true,
-    label: 'Do analizy odpowiedzi',
-    hint:
-      'OCZEKUJE-NA-ODPOWIEDZ, a po naszych pytaniach ktoś spoza IT odpisał z treścią — ' +
-      'daj DO-STARTU albo dopytaj.',
-    match: (t, ctx) => outside(t, ctx) && isCzeka(t) && wasAnswered(t, ctx),
-    riseIsBad: true,
-  },
-  {
-    key: 'wycena',
-    inSum: true,
-    label: 'Do wyceny',
-    hint:
-      'Poza sprintem, z tagiem DO-STARTU, ale bez kompletu. Pula obowiązkowa (CIAGLOSC / RDZEN / ' +
-      'DZIAL). CIAGLOSC i DZIAL: kategoria i okres zwrotu (WYMOG: termin). RDZEN: wiadomość ' +
-      'WARTOŚĆ z uzasadnieniem. Rozpoznanie: sama wycena do 4 h, z pulą.',
-    match: (t, ctx) => outside(t, ctx) && isStartu(t) && !isComplete(t, ctx),
-    needsMeta: true,
-    needsChatFacts: true,
-    riseIsBad: true,
-  },
-  {
-    key: 'gotowe',
-    inSum: true,
-    label: 'Gotowe do startu',
-    hint:
-      'Poza sprintem, z tagiem DO-STARTU i kompletem. Pula obowiązkowa (CIAGLOSC / RDZEN / ' +
-      'DZIAL). CIAGLOSC i DZIAL: kategoria i okres zwrotu (WYMOG: termin). RDZEN: wiadomość ' +
-      'WARTOŚĆ z uzasadnieniem. Rozpoznanie: sama wycena do 4 h, z pulą — można je wziąć do sprintu.',
-    match: (t, ctx) => outside(t, ctx) && isStartu(t) && isComplete(t, ctx),
-    needsMeta: true,
-    needsChatFacts: true,
-    // Wiecej gotowych to dobra wiadomosc — nie kolorujemy wzrostu na bursztynowo.
-    riseIsBad: false,
-  },
-  {
-    key: 'sprint',
-    label: 'W sprincie',
-    hint: 'Wszystkie zadania aktywnego sprintu, także zakończone, i suma ich story pointów.',
-    match: (t, ctx) => inSprint(t, ctx),
-    needsSprint: true,
-    riseIsBad: false,
-  },
-  {
-    /*
-     * Klucz `wazne`, nie dawny `bug`: kafelek liczy teraz tez plomienie, a historia dzienna jest
-     * zapisywana po kluczu. Pod starym kluczem wczorajsza liczba (same tagi BUG) porownana z dzisiejsza
-     * pokazalaby falszywy czerwony wzrost; pod nowym pierwszy dzien ma „—", a potem porownuje juz rowno.
-     */
-    key: 'wazne',
-    label: 'Ważne',
-    hint:
-      'Otwarte zadania z płomieniem (wysoki priorytet w Bitriksie) albo z tagiem BUG, bez ' +
-      'odłożonych — w sprincie i poza nim, każde liczone raz. To cecha, a nie stan: takie zadanie ' +
-      'jest też w jednym ze stanów obok (poza KONCEPCJA i folderami, których stany nie liczą), więc kafelek nie ' +
-      'wchodzi do sumy. Na listach mają czerwony płomień i/albo robaka w miejscu checkboxa.',
-    match: (t, ctx) => inAudit(t, ctx) && isImportant(t),
-    separate: true,
-    standalone: true,
-    riseIsBad: true,
-  },
-  {
-    key: 'koncept',
-    label: 'Koncept',
-    hint:
-      'Otwarte zadania z tagiem KONCEPCJA, bez odłożonych — w sprincie i ' +
-      'poza nim. To pomysły na zbyt wczesnym etapie, więc poza sprintem NIE wchodzą do „Poza ' +
-      'sprintem" ani do żadnego stanu (także „Do wywiadu") — ze stanów liczy je tylko ten kafelek.',
-    match: (t, ctx) => inAudit(t, ctx) && isKoncept(t),
-    separate: true,
-    riseIsBad: false,
-  },
-  {
-    key: 'foldery',
-    label: 'Foldery',
-    hint:
-      'Zadania spoza sprintu, które mają otwarte podzadanie — to kontenery, praca siedzi w ' +
-      'podzadaniach, więc nie wchodzą do „Poza sprintem" ani do żadnego stanu (także „Do wywiadu"), ' +
-      'tak jak w kolejce audytu. Folder, którego wszystkie podzadania są zamknięte, wraca do rejestru.',
-    match: (t, ctx) => inAudit(t, ctx) && !inSprint(t, ctx) && !isKoncept(t) && isFolder(t, ctx),
-    separate: true,
-    riseIsBad: false,
-  },
-  {
-    key: 'odlozone',
-    label: 'Odłożone',
-    hint: 'Zadania odłożone (status „Odłożone”) spoza sprintu — nie wchodzą do sumy „Poza sprintem”.',
-    match: (t, ctx) => isOpen(t, ctx) && t.status === DEFERRED_STATUS && !inSprint(t, ctx),
-    note: true,
-    riseIsBad: false,
-  },
-];
+  if (isReconByTitle(t) || (chat?.recon.has(t.id) ?? false)) return { ready: true, missing: [] };
+  // Czat, ktory moze rozstrzygnac (WARTOSC, dopisek rozpoznania), a nie zostal przeczytany: wynik nieznany.
+  const unknown = needsChat(t) && !(chat?.read.has(t.id) ?? false);
 
-export const counterDef = (key: CounterKey): CounterDef =>
-  COUNTERS.find((c) => c.key === key) as CounterDef;
-
-export interface CounterValue {
-  count: number;
-  /** Suma story pointow — tylko dla sprintu; `null` gdy nic nie jest oszacowane. */
-  points: number | null;
-}
-
-export function countAll(
-  tasks: CounterTask[],
-  ctx: CounterCtx,
-  defs: CounterDef[] = COUNTERS,
-): Record<CounterKey, CounterValue> {
-  const out = {} as Record<CounterKey, CounterValue>;
-  for (const d of defs) {
-    let count = 0;
-    let points = 0;
-    let any = false;
-    for (const t of tasks) {
-      if (!d.match(t, ctx)) continue;
-      count++;
-      if (t.storyPoints != null) {
-        points += t.storyPoints;
-        any = true;
-      }
-    }
-    out[d.key] = { count, points: d.key === 'sprint' && any ? points : null };
+  if (p === 'RDZEN') {
+    if (unknown) return { ready: null, missing: [] };
+    if (!(chat?.value.has(t.id) ?? false)) missing.push('wartosc');
+  } else {
+    if (!hasCategory(t)) missing.push('kategoria');
+    if (needsPayback(t) ? paybackBand(t) === null : t.deadline == null) missing.push(needsPayback(t) ? 'zwrot' : 'termin');
   }
-  return out;
+  // Male zadanie bez kompletu moze byc jeszcze rozpoznaniem z dopiskiem w czacie.
+  if (missing.length && unknown) return { ready: null, missing };
+  return { ready: missing.length === 0, missing };
 }
-
-// ─── Odpowiedzi w czacie ─────────────────────────────────────────────────────
 
 export interface ChatMessage {
   id: number;
@@ -566,9 +346,8 @@ export function answerState(messages: ChatMessage[], isIt: (authorId: number) =>
 // ─── Historia dzien po dniu ──────────────────────────────────────────────────
 
 /** Stan licznikow jednego dnia. Klucz `sprintPoints` = suma SP sprintu. */
-export type DaySnapshot = Partial<
-  Record<CounterKey | 'sprintPoints' | `t:${string}` | `g:${string}` | `gs:${string}`, number>
->;
+/** Wartosci dnia: kafelki (`t:<id>`), sumy grup (`g:`/`gs:`); starsze klucze dawnych licznikow zostaja w zapisie. */
+export type DaySnapshot = Partial<Record<string, number>>;
 /** Dzien (RRRR-MM-DD, czas lokalny) → stan. */
 export type CounterHistory = Record<string, DaySnapshot>;
 

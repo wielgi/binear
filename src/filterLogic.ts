@@ -76,19 +76,28 @@ export function refreshGroups<T extends Groupable>(conds: readonly T[], newGroup
 }
 
 /**
- * Przenosi warunek `fromId` na miejsce warunku `toId` (przeciaganie chipow). Przenoszony chip wychodzi
- * ze swojej grupy LUB — o tym, kto z kim sasiaduje, decyduje potem lacznik, a nie pozostalosc po starym miejscu.
+ * Przenosi warunek `fromId` na miejsce warunku `toId` (przeciaganie chipow). Grupa LUB zalezy od tego,
+ * gdzie chip wyladuje, liczac tylko widoczne chipy (`shown`):
+ * - miedzy dwoma chipami tej samej grupy — dolacza do niej (nie rozcina nawiasu),
+ * - obok chipow swojej grupy — zostaje w niej (przestawianie w nawiasie nie zmienia LUB na ORAZ),
+ * - gdzie indziej — wychodzi z grupy i laczy sie ORAZ.
  */
 export function moveCondition<T extends Groupable & { id: string }>(
   conds: readonly T[],
   fromId: string,
   toId: string,
+  shown: (c: T) => boolean = () => true,
 ): T[] {
   const from = conds.findIndex((c) => c.id === fromId);
   const to = conds.findIndex((c) => c.id === toId);
   if (from < 0 || to < 0 || from === to) return [...conds];
+  const { or: own, ...bare } = conds[from];
   const rest = conds.filter((c) => c.id !== fromId);
-  const { or: _or, ...moved } = conds[from];
-  rest.splice(to, 0, moved as unknown as T);
-  return normalizeGroups(rest);
+  rest.splice(to, 0, bare as unknown as T);
+  const vis = rest.filter((c) => c.id === fromId || shown(c));
+  const at = vis.findIndex((c) => c.id === fromId);
+  const left = vis[at - 1]?.or;
+  const right = vis[at + 1]?.or;
+  const or = left && left === right ? left : own && (left === own || right === own) ? own : undefined;
+  return normalizeGroups(or ? rest.map((c) => (c.id === fromId ? { ...c, or } : c)) : rest);
 }

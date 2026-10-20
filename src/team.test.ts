@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   addMember,
   budgetExcludedIds,
+  managerIds,
   EMPTY_TEAM,
   fmtFte,
   fteOnDay,
@@ -12,8 +13,10 @@ import {
   mondayOf,
   removeMember,
   saveTeam,
+  takeLegacyTeam,
   setMember,
   setFte,
+  takesBudget,
   teamHoursBetween,
   teamWeekHours,
   togglePresence,
@@ -144,7 +147,18 @@ describe('role, moc i budzet osoby', () => {
     const onlyCapacityOff = setMember(base, 1, { capacity: false });
     expect(budgetExcludedIds(onlyCapacityOff)).toEqual([2]);
     expect(teamWeekHours(onlyCapacityOff, mon)).toBe(0);
-    expect(budgetExcludedIds(EMPTY_TEAM)).toBeNull();
+    expect(budgetExcludedIds(EMPTY_TEAM)).toEqual([]);
+  });
+
+  it('kierownik: z .env, dopoki w zespole nikt nie jest zaznaczony; zaznaczony zastepuje .env', () => {
+    const devs = addMember(addMember(EMPTY_TEAM, { id: 1, name: 'A' }), { id: 2, name: 'B' });
+    // Pusty zespol i sami programisci: kierownik z .env dalej poza budzetem.
+    expect(budgetExcludedIds(EMPTY_TEAM, [9])).toEqual([9]);
+    expect(budgetExcludedIds(devs, [9])).toEqual([9]);
+    // Kierownik zaznaczony w zespole: on zamiast .env; jego budzet wylaczony bez wzgledu na przelacznik.
+    const zKierownikiem = setMember(devs, 2, { manager: true, budget: true });
+    expect(budgetExcludedIds(zKierownikiem, [9])).toEqual([2]);
+    expect(takesBudget(zKierownikiem.members[1])).toBe(false);
   });
 
   it('zapis i odczyt zachowuje role oraz wylaczone ustawienia', () => {
@@ -153,10 +167,36 @@ describe('role, moc i budzet osoby', () => {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => void store.set(k, v),
     });
-    saveTeam(base);
-    const loaded = loadTeam();
+    saveTeam(451, base);
+    const loaded = loadTeam(451);
     expect(loaded.members[1]).toMatchObject({ role: 'Kierownik IT', capacity: false, budget: false });
     expect(loaded.members[0].capacity).toBeUndefined();
     vi.unstubAllGlobals();
+  });
+
+  it('stary zapis bez projektu: czytany jako zapas i przenoszony tylko raz', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    store.set('binear.team.v1', JSON.stringify(base));
+    expect(loadTeam(451, true).members).toHaveLength(base.members.length);
+    // Inny projekt nie dostaje cudzego starego zespolu.
+    expect(loadTeam(452).members).toHaveLength(0);
+    expect(takeLegacyTeam()?.members).toHaveLength(base.members.length);
+    expect(takeLegacyTeam()).toBeNull();
+    expect(loadTeam(451, true).members).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('wylaczony budzet nie robi kierownika: pasek i przekazanie IT tylko dla zaznaczonych (albo z .env)', () => {
+    const t = { members: [{ id: 1, name: 'A', fte: 0.5, budget: false }, { id: 2, name: 'B', fte: 1 }], off: {} };
+    expect(managerIds(t, [9])).toEqual([9]);
+    expect(budgetExcludedIds(t, [9]).sort()).toEqual([1, 9]);
+    const z = { ...t, members: [...t.members, { id: 3, name: 'K', fte: 1, manager: true }] };
+    expect(managerIds(z, [9])).toEqual([3]);
+    expect(budgetExcludedIds(z, [9]).sort()).toEqual([1, 3]);
   });
 });

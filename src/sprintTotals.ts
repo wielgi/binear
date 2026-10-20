@@ -112,8 +112,18 @@ export function summarizeSprint(
 ): SprintSummaryData {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const inSprint = tasks.filter((t) => t.sprintId === sprintId);
+  /*
+   * Folder = ma w sprincie POTOMKA na dowolnym poziomie, nie tylko bezposrednie dziecko: przy dziadku w sprincie,
+   * rodzicu poza nim i wnuku w sprincie dziadek liczyl sie razem z wnukiem (te same punkty dwa razy).
+   */
   const hasChild = new Set<number>();
-  for (const t of inSprint) if (t.parentId !== null) hasChild.add(t.parentId);
+  for (const t of inSprint) {
+    let p = t.parentId;
+    while (p !== null && !hasChild.has(p)) {
+      hasChild.add(p);
+      p = byId.get(p)?.parentId ?? null;
+    }
+  }
 
   const totals = emptyTotals();
   const depts = new Map<string, Dept>();

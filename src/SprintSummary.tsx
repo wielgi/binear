@@ -197,7 +197,11 @@ export function SprintSummary({
         Procent liczymy od MOCY, nie od zaplanowanych SP: plan bywa kilkadziesiat procent ponad moce, wtedy
         „39% planu" wyglada na porazke, a zespol dowiozl tyle, na ile pozwalaly godziny. Plan pokazujemy obok.
       */}
-        <p className="sum-headline">
+        {/* Wykresy (Dashboard) pomijaja zadania gotowe przed startem sprintu, wiec ich liczby bywaja nizsze. */}
+        <p
+          className="sum-headline"
+          title="Liczy wszystkie zadania tego sprintu, także skończone przed jego startem. Wykresy je pomijają, bo nie były pracą tego sprintu — dlatego tam liczby bywają niższe."
+        >
           Zakończone w sprincie: <b>{delivered}</b> SP
           {effFinished && capacityTotal !== null ? (
             <span className="sum-headline-pct">

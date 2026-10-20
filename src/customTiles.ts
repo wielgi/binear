@@ -131,6 +131,19 @@ export const TILE_ICON_KEYS = [
   'pause',
 ] as const;
 
+/**
+ * Kolejnosc ikon w wyborze: wedlug znaczenia (praca, ludzie, sygnaly, firma, widoki), bez dubli — zegar,
+ * strzalka podzadania i wykres slupkowy byly po dwa razy w innych rysunkach. Ukryte klucze (`history`,
+ * `subtask`, `bars`, `plan`) zostaja w TILE_ICON_KEYS, zeby zapisane kafelki dalej je pokazywaly.
+ */
+export const TILE_ICON_PICKER = [
+  // `history` i `subtask` maja domyslne kafelki IT — bez nich okienko ikon nie pokazywalo wybranej.
+  'list', 'check', 'pen', 'comment', 'hash', 'calendar', 'clock', 'history', 'tag', 'flag', 'target', 'layers', 'parent', 'subtask',
+  'link', 'clip', 'pin', 'search', 'refresh', 'person', 'users', 'eye', 'smile', 'heart', 'star', 'flame', 'bug',
+  'alert', 'zap', 'bell', 'lock', 'shield', 'bulb', 'dollar', 'cart', 'gift', 'box', 'truck', 'warehouse', 'mail',
+  'phone', 'globe', 'cpu', 'wrench', 'camera', 'board', 'columns', 'chart',
+] as const;
+
 /** Kolor kafelka: klucz z palety albo dowolny kolor w zapisie #rrggbb (wybrany z pickera). */
 export const isHexColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
 export const validColor = (v: unknown): v is string => isHexColor(v) || (typeof v === 'string' && v in TILE_COLORS);
@@ -186,14 +199,16 @@ const isScope = (v: unknown): v is TileScope => v === 'sprint' || v === 'outside
 export function normalizeConfig(raw: unknown): TilesConfig {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Partial<TilesConfig>;
   const groups: TileGroup[] = [];
+
   for (const g of Array.isArray(src.groups) ? src.groups : []) {
-    if (g && typeof g.id === 'string' && typeof g.name === 'string' && g.name.trim() && !groups.some((x) => x.id === g.id)) {
-      groups.push({ id: g.id, name: g.name.trim().slice(0, 40), ...(g.hideCaption === true ? { hideCaption: true } : {}) });
+    // Pusta nazwa (zapisana w trakcie pisania, przed opuszczeniem pola) dostaje domyslna — grupa nie znika.
+    if (g && typeof g.id === 'string' && typeof g.name === 'string' && !groups.some((x) => x.id === g.id)) {
+      groups.push({ id: g.id, name: g.name.trim().slice(0, 40) || 'Grupa', ...(g.hideCaption === true ? { hideCaption: true } : {}) });
     }
   }
   const tiles: CustomTile[] = [];
   for (const t of Array.isArray(src.tiles) ? src.tiles : []) {
-    if (!t || typeof t.id !== 'string' || typeof t.name !== 'string' || !t.name.trim()) continue;
+    if (!t || typeof t.id !== 'string' || typeof t.name !== 'string') continue;
     if (tiles.some((x) => x.id === t.id)) continue;
     const filters: TileCondition[] = (Array.isArray(t.filters) ? t.filters : [])
       .filter((c) => c && typeof c.field === 'string' && typeof c.op === 'string' && Array.isArray(c.values))
@@ -211,7 +226,7 @@ export function normalizeConfig(raw: unknown): TilesConfig {
     }
     tiles.push({
       id: t.id,
-      name: t.name.trim().slice(0, 40),
+      name: t.name.trim().slice(0, 40) || 'Kafelek',
       scope: isScope(t.scope) ? t.scope : 'all',
       filters,
       onlyMine: t.onlyMine === true,
@@ -248,10 +263,8 @@ export const updateTile = (cfg: TilesConfig, id: string, patch: Partial<CustomTi
   tiles: cfg.tiles.map((t) => (t.id === id ? { ...t, ...patch, id: t.id } : t)),
 });
 
-export const removeTile = (cfg: TilesConfig, id: string): TilesConfig => ({
-  ...cfg,
-  tiles: cfg.tiles.filter((t) => t.id !== id),
-});
+export const removeTile = (cfg: TilesConfig, id: string): TilesConfig =>
+  dropEmptyLoose({ ...cfg, tiles: cfg.tiles.filter((t) => t.id !== id) }, cfg.tiles.find((t) => t.id === id)?.group);
 
 /** Przesuwa kafelek o jedno miejsce w obrebie jego grupy (-1 w gore, +1 w dol). */
 export function moveTile(cfg: TilesConfig, id: string, dir: -1 | 1): TilesConfig {
@@ -268,21 +281,61 @@ export function moveTile(cfg: TilesConfig, id: string, dir: -1 | 1): TilesConfig
   return { ...cfg, tiles };
 }
 
+/**
+ * Przeciagniecie kafelka: staje przed `beforeId` albo — gdy `beforeId` to `null` — na koncu grupy `groupId`.
+ * Dziala tez miedzy grupami (kafelek dostaje grupe celu).
+ */
+/*
+ * Grupa „Luzem" zalozona dla jednego kafelka: gdy kafelek z niej wyjdzie, nie ma po co zostawac. Tylko ta, ktora
+ * kafelek opuscil, i tylko automatyczna — wlasna grupe uzytkownika (nawet bez podpisu) zostawiamy.
+ */
+function dropEmptyLoose(cfg: TilesConfig, groupId: string | undefined): TilesConfig {
+  const g = cfg.groups.find((x) => x.id === groupId);
+  if (!g?.hideCaption || g.name !== LOOSE_GROUP_NAME || cfg.tiles.some((t) => t.group === g.id)) return cfg;
+  return { ...cfg, groups: cfg.groups.filter((x) => x.id !== g.id) };
+}
+
+export function placeTile(cfg: TilesConfig, id: string, groupId: string, beforeId: string | null): TilesConfig {
+  const tile = cfg.tiles.find((t) => t.id === id);
+  if (!tile || id === beforeId || !cfg.groups.some((g) => g.id === groupId)) return cfg;
+  const rest = cfg.tiles.filter((t) => t.id !== id);
+  let at = beforeId ? rest.findIndex((t) => t.id === beforeId) : -1;
+  if (at < 0) {
+    const last = rest.map((t) => t.group).lastIndexOf(groupId);
+    at = last < 0 ? rest.length : last + 1;
+  }
+  return dropEmptyLoose({ ...cfg, tiles: [...rest.slice(0, at), { ...tile, group: groupId }, ...rest.slice(at)] }, tile.group);
+}
+
+/**
+ * Wyjmuje kafelek z grupy: dostaje wlasna grupe bez podpisu na koncu paska (na pasku stoi wtedy osobno).
+ * Kafelek, ktory juz jest sam w grupie bez podpisu, zostaje, gdzie jest.
+ */
+export function detachTile(cfg: TilesConfig, id: string): TilesConfig {
+  const tile = cfg.tiles.find((t) => t.id === id);
+  if (!tile) return cfg;
+  const own = cfg.groups.find((g) => g.id === tile.group);
+  if (own?.hideCaption && cfg.tiles.every((t) => t.id === id || t.group !== own.id)) return cfg;
+  const group: TileGroup = { id: newId('g'), name: LOOSE_GROUP_NAME, hideCaption: true };
+  return dropEmptyLoose(
+    { groups: [...cfg.groups, group], tiles: [...cfg.tiles.filter((t) => t.id !== id), { ...tile, group: group.id }] },
+    tile.group,
+  );
+}
+
 /** Przenosi kafelek do innej grupy (na jej koniec). */
 export function moveToGroup(cfg: TilesConfig, id: string, groupId: string): TilesConfig {
   if (!cfg.groups.some((g) => g.id === groupId)) return cfg;
   const tile = cfg.tiles.find((t) => t.id === id);
   if (!tile || tile.group === groupId) return cfg;
-  return { ...cfg, tiles: [...cfg.tiles.filter((t) => t.id !== id), { ...tile, group: groupId }] };
+  return dropEmptyLoose({ ...cfg, tiles: [...cfg.tiles.filter((t) => t.id !== id), { ...tile, group: groupId }] }, tile.group);
 }
 
 export const addGroup = (cfg: TilesConfig, name: string): TilesConfig =>
   name.trim() ? { ...cfg, groups: [...cfg.groups, { id: newId('g'), name: name.trim().slice(0, 40) }] } : cfg;
 
-/** Grupa bez podpisu ("Luzem") — tworzona przy pierwszym uzyciu; zwraca konfiguracje i id grupy. */
+/** Nowa grupa bez podpisu ("Luzem") dla kafelka, ktory ma stac osobno; zwraca konfiguracje i id grupy. */
 export function ensureLooseGroup(cfg: TilesConfig): { cfg: TilesConfig; id: string } {
-  const found = cfg.groups.find((g) => g.hideCaption);
-  if (found) return { cfg, id: found.id };
   const id = newId('g');
   return { cfg: { ...cfg, groups: [...cfg.groups, { id, name: LOOSE_GROUP_NAME, hideCaption: true }] }, id };
 }
@@ -366,11 +419,42 @@ export function importConfig(text: string, current: TilesConfig): TilesConfig | 
   return { ...current, groups, tiles };
 }
 
+/** Domyslny zestaw kafelkow procesu IT — plik w `public/`, ten sam, ktory mozna zaimportowac recznie. */
+export const DEFAULT_TILES_URL = `${import.meta.env.BASE_URL}binear-kafelki-IT.json`;
+
+/** Tresc pliku z domyslnym zestawem; `null`, gdy nie da sie go pobrac. */
+export async function fetchDefaultTiles(): Promise<string | null> {
+  try {
+    const res = await fetch(DEFAULT_TILES_URL, { cache: 'no-cache' });
+    return res.ok ? await res.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Doklada domyslny zestaw do biezacej konfiguracji; `null`, gdy pliku nie da sie pobrac albo jest zly. */
+export async function loadDefaultTiles(current: TilesConfig): Promise<TilesConfig | null> {
+  const text = await fetchDefaultTiles();
+  return text === null ? null : importConfig(text, current);
+}
+
 /* ---------- zapis w przegladarce ---------- */
 
 const STORAGE_KEY = 'binear.tiles.v1';
 
 /** Wczytuje konfiguracje; brak albo zepsuty zapis daje pusty zestaw. */
+/**
+ * Czy ta przegladarka ma juz JAKAS zapisana konfiguracje kafelkow (takze pusta po „Wyczyść wszystko").
+ * Brak zapisu = pierwsze uruchomienie albo przejscie z wbudowanych licznikow — wtedy wczytujemy zestaw IT.
+ */
+export function hasSavedTiles(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY) !== null;
+  } catch {
+    return true; // nie wiemy — nie nadpisujemy niczego na slepo
+  }
+}
+
 export function loadTiles(): TilesConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);

@@ -25,11 +25,23 @@ export function capacityState(segments: readonly MarkerSegment[], remaining: num
   return 'ok';
 }
 
-/** Okno liczenia mocy: od poniedzialku 8:00 do piatku 16:00 tygodnia, w ktorym zaczal sie sprint. */
-export function weekWindow(sprintStart: Date, now: Date, startHour = 8, endHour = 16): { from: Date; to: Date } {
-  const back = (sprintStart.getDay() + 6) % 7;
-  const monday = new Date(sprintStart.getFullYear(), sprintStart.getMonth(), sprintStart.getDate() - back);
+/**
+ * Okno liczenia mocy: od poniedzialku 8:00 do piatku 16:00 tygodnia, w ktorym zaczal sie sprint.
+ *
+ * Start zaokraglamy do najblizszej polnocy (jak `sprintDeadline`): Bitrix potrafi oddac poniedzialek 00:00
+ * jako niedziele 23:00 czasu lokalnego, a wtedy okno wypadalo tydzien WCZESNIEJ, juz minione — moc 0 i „nie
+ * zdazy" u wszystkich.
+ *
+ * `null`, gdy tydzien pracy juz sie skonczyl (piatek po 16, weekend, poniedzialek przed zamknieciem sprintu):
+ * pozostala moc to wtedy 0 z definicji, a nie ostrzezenie — kreski i „nie zdąży" nie pokazujemy.
+ */
+export function weekWindow(sprintStart: Date, now: Date, startHour = 8, endHour = 16): { from: Date; to: Date } | null {
+  const nearest = new Date(sprintStart.getTime() + 12 * 3_600_000);
+  const day = new Date(nearest.getFullYear(), nearest.getMonth(), nearest.getDate());
+  const back = (day.getDay() + 6) % 7;
+  const monday = new Date(day.getFullYear(), day.getMonth(), day.getDate() - back);
   const start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate(), startHour);
   const end = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 4, endHour);
+  if (now.getTime() >= end.getTime()) return null;
   return { from: now.getTime() > start.getTime() ? now : start, to: end };
 }

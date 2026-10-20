@@ -41,7 +41,7 @@ const LEVEL_NOTE: Record<CapacityLevel, string> = {
  * Na chipie stoją DWIE liczby i kolor: „mamy" (pojemność) i „czeka" (punkty czekających
  * zadań PO odjęciu tych, które nie wchodzą do limitu). Skąd się biorą, mówi dopiero dymek.
  */
-export function CapacityChip({ cap }: { cap: SprintCapacity }) {
+export function CapacityChip({ cap, compact = false }: { cap: SprintCapacity; compact?: boolean }) {
   return (
     <HoverNote
       label="Do końca sprintu"
@@ -62,7 +62,8 @@ export function CapacityChip({ cap }: { cap: SprintCapacity }) {
       noteColor={LEVEL_COLOR[cap.level]}
       className={`head-cap head-cap-${cap.level}`}
     >
-      mamy {num(cap.capacity)} · czeka {num(cap.demand)} SP
+      {/* Na tablicy kolumna jest waska — pelny napis ucinal nazwe etapu; tam same liczby, opis w dymku. */}
+      {compact ? `${num(cap.capacity)} / ${num(cap.demand)} SP` : `mamy ${num(cap.capacity)} · czeka ${num(cap.demand)} SP`}
     </HoverNote>
   );
 }

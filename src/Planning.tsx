@@ -320,6 +320,7 @@ function Pane({
   carry,
   wMoce,
   kierownicy = BEZ_KIEROWNIKOW,
+  pozaBudzetem = kierownicy,
   grow,
   zwiniety = false,
   onZwin,
@@ -380,6 +381,11 @@ function Pane({
    * pod paskami zespolu, i w naglowku jako „SP kierownika".
    */
   kierownicy?: readonly number[];
+  /**
+   * Osoby, ktorych zadania nie zjadaja budzetu SP: kierownicy i ci z wylaczonym „Budżetem" w zespole.
+   * Szersze niz `kierownicy` — wylaczony budzet nie robi z nikogo kierownika (pasek, przekazanie IT).
+   */
+  pozaBudzetem?: readonly number[];
   /** Udzial w wysokosci kolumny (0-1). Brak = panel dzieli sie po rowno. */
   /** Ulamek miejsca. Tekst (`var(--plan-cols)`) pozwala ciagnac uchwyt bez renderu. */
   grow?: number | string;
@@ -439,10 +445,10 @@ function Pane({
     [doMocyKierownika, przeniesioneKierownika, people],
   );
   /* Naglowek opisuje to, co panel POKAZUJE, wiec dzieli wszystkie wyswietlane zadania. */
-  const spZespolu = sumaDoLimitu(tasks, kierownicy);
+  const spZespolu = sumaDoLimitu(tasks, pozaBudzetem);
   const spKierownika = sumaKierownika(tasks, kierownicy);
   /* To, co z zadan zespolu liczy sie do mocy (bez pracy w trakcie, oddanej i zakonczonej). */
-  const spMoceZespolu = sumaDoLimitu(wMoce ? tasks.filter(wMoce) : tasks, kierownicy);
+  const spMoceZespolu = sumaDoLimitu(wMoce ? tasks.filter(wMoce) : tasks, pozaBudzetem);
   const { setNodeRef, isOver, active } = useDroppable({ id: planDropId(sprintId) });
 
   /* Szerokosc TEGO panelu — zmienia sie przy ciagnieciu uchwytu i przy otwarciu
@@ -696,12 +702,15 @@ export function Planning({
   dodane,
   onSort,
   kierownicy = BEZ_KIEROWNIKOW,
+  pozaBudzetem = kierownicy,
 }: {
   /**
    * Osoby spoza limitu zespolu (BX_CAPACITY_EXCLUDE_IDS) — ich zadania nie zajmuja mocy sprintu:
    * ani przy pasku „z przeniesieniem", ani przy liczeniu, ile punktow rejestr moze jeszcze wziac.
    */
   kierownicy?: readonly number[];
+  /** Kierownicy i osoby z wylaczonym „Budżetem" — ich zadania nie zjadaja budzetu SP (patrz Pane). */
+  pozaBudzetem?: readonly number[];
   /**
    * Zadania do SPRINTOW — wszystkie, bez filtrow i bez szukania.
    *
@@ -851,11 +860,22 @@ export function Planning({
 
   const jestNowe = useCallback((t: Task) => dodane[t.id] !== undefined, [dodane]);
 
-  const inActive = useMemo(
-    () =>
-      activeSprint ? tasks.filter((t) => t.sprintId === activeSprint.id && inSprintView(t)) : [],
-    [tasks, activeSprint, inSprintView],
-  );
+  /*
+   * Dokad sie planuje: kolejny sprint, a gdy go nie ma — AKTYWNY. Tak wyglada proces, w ktorym
+   * stary sprint zamyka sie przed planowaniem, a nowy startuje od razu: tylko wtedy zadania
+   * wchodzace do sprintu dostaja numery IT-NNN.
+   */
+  const cel = nextSprint ?? activeSprint;
+  const planujeWAktywnym = !nextSprint && activeSprint !== null;
+  /*
+   * Planowanie wprost w aktywnym sprincie (brak kolejnego): tu tez swiezo dodane ida na gore z kreska
+   * „↑ dodane w tej sesji" — tak jak w planowanym sprincie. Gdy kolejny sprint jest, aktywny zostaje bez zmian.
+   */
+  const inActive = useMemo(() => {
+    if (!activeSprint) return [];
+    const list = tasks.filter((t) => t.sprintId === activeSprint.id && inSprintView(t));
+    return planujeWAktywnym ? ostatnioDodaneNaGorze(list, dodane) : list;
+  }, [tasks, activeSprint, inSprintView, planujeWAktywnym, dodane]);
   const inNext = useMemo(
     () =>
       nextSprint
@@ -905,15 +925,20 @@ export function Planning({
    * Moce z grafiku zespolu na sprint, do ktorego sie planuje (kolejny, a bez niego aktywny): od teraz
    * (albo od startu sprintu, jesli jeszcze nie ruszyl) do jego konca. Puste, gdy zespol nie jest wpisany.
    */
+  /* Zegar dla teamLimit: co 5 minut, inaczej otwarte na godziny planowanie liczyloby moce od chwili otwarcia. */
+  const [zegar, setZegar] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setZegar(Date.now()), 5 * 60_000);
+    return () => window.clearInterval(id);
+  }, []);
   const teamLimit = useMemo(() => {
-    const cel = nextSprint ?? activeSprint;
     const end = sprintDeadline(cel?.dateEnd ?? null);
     if (!cel || !end || team.members.length === 0) return null;
     const startMs = cel.dateStart ? Date.parse(cel.dateStart) : NaN;
-    const from = new Date(Math.max(Date.now(), Number.isNaN(startMs) ? 0 : startMs));
+    const from = new Date(Math.max(zegar, Number.isNaN(startMs) ? 0 : startMs));
     const h = teamHoursBetween(team, from, sprintWorkEnd(end));
     return h > 0 ? Math.round(h) : null;
-  }, [team, nextSprint, activeSprint]);
+  }, [team, cel, zegar]);
   const limit = moce ?? teamLimit ?? lastDone?.points ?? 0;
 
   /*
@@ -931,23 +956,16 @@ export function Planning({
    * widoku, a moce sprintu nie zaleza od tego, co ktos wlasnie ma na ekranie.
    * Zakonczone i oddane do akceptacji nie zajmuja juz mocy (`plannable`).
    */
-  /*
-   * Dokad sie planuje: kolejny sprint, a gdy go nie ma — AKTYWNY. Tak wyglada proces, w ktorym
-   * stary sprint zamyka sie przed planowaniem, a nowy startuje od razu: tylko wtedy zadania
-   * wchodzace do sprintu dostaja numery IT-NNN.
-   */
-  const cel = nextSprint ?? activeSprint;
-  const planujeWAktywnym = !nextSprint && activeSprint !== null;
   /* Tylko zespol: zadania kierownika nie zajmuja mocy, wiec nie odejmuja sie od tego, co zostalo. */
   const sumaNext = cel
     ? sumaDoLimitu(
         tasks.filter((t) => t.sprintId === cel.id && zajmujeMoce(t)),
-        kierownicy,
+        pozaBudzetem,
       )
     : 0;
   /* Wlaczone przeniesienie zajmuje moce tak samo jak wybrane recznie — inaczej
      rejestr obiecywalby punkty, ktore i tak zjedza zaleglosci. */
-  const sumaCarry = carry ? sumaDoLimitu(carry.tasks, kierownicy) : 0;
+  const sumaCarry = carry ? sumaDoLimitu(carry.tasks, pozaBudzetem) : 0;
   const zostalo = Math.max(0, limit - sumaNext - sumaCarry);
 
   const backlogUlozony = useMemo(() => {
@@ -959,9 +977,9 @@ export function Planning({
      */
     if (zostalo <= 0) return backlog;
     /* Zadanie kierownika nie zajmie mocy, wiec nigdy „nie miesci sie w pozostalych punktach". */
-    const ponad = (t: Task) => (!pozaLimitem(t, kierownicy) && (t.storyPoints ?? 0) > zostalo ? 1 : 0);
+    const ponad = (t: Task) => (!pozaLimitem(t, pozaBudzetem) && (t.storyPoints ?? 0) > zostalo ? 1 : 0);
     return [...backlog].sort((a, b) => ponad(a) - ponad(b));
-  }, [backlog, zostalo, kierownicy]);
+  }, [backlog, zostalo, pozaBudzetem]);
 
   const compare =
     limit > 0
@@ -1516,7 +1534,7 @@ export function Planning({
         title="Rejestr"
         sprintId={null}
         tasks={backlogUlozony}
-        ponad={(t) => zostalo > 0 && !pozaLimitem(t, kierownicy) && (t.storyPoints ?? 0) > zostalo}
+        ponad={(t) => zostalo > 0 && !pozaLimitem(t, pozaBudzetem) && (t.storyPoints ?? 0) > zostalo}
         people={people}
         renderRow={renderRow}
         grow="var(--plan-cols)"
@@ -1548,12 +1566,14 @@ export function Planning({
             grow={planujeWAktywnym ? 1 : 'var(--plan-split)'}
             sprintId={activeSprint.id}
             tasks={inActive}
+            nowe={planujeWAktywnym ? jestNowe : undefined}
             people={people}
             renderRow={renderRow}
             collapsible
             zwiniety={zwiniete.includes(activeSprint.id)}
             onZwin={() => onZwin(activeSprint.id)}
             kierownicy={kierownicy}
+            pozaBudzetem={pozaBudzetem}
             /* Licznik mocy tylko, gdy to wlasnie ten sprint jest planowany (brak kolejnego);
                inaczej w trwajacym sprincie nie ma juz czego planowac. */
             compare={planujeWAktywnym ? compare : undefined}
@@ -1604,6 +1624,7 @@ export function Planning({
             carry={carry}
             wMoce={zajmujeMoce}
             kierownicy={kierownicy}
+            pozaBudzetem={pozaBudzetem}
           />
         ) : activeSprint ? null : (
           /* Bez zadnego sprintu planowac nie ma dokad — mowimy to wprost,

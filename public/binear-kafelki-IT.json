@@ -26,26 +26,32 @@
       "scope": "outside",
       "filters": [
         {
-          "field": "tag",
-          "op": "anyOf",
+          "field": "status",
+          "op": "isNot",
           "values": [
-            "DO-WYWIADU"
-          ],
-          "or": "g4"
+            "6"
+          ]
         },
         {
           "field": "tag",
-          "op": "anyOf",
+          "op": "noneOf",
           "values": [
-            "\u0000"
-          ],
-          "or": "g4"
+            "KONCEPCJA"
+          ]
         },
         {
           "field": "kind",
           "op": "isNot",
           "values": [
             "parent"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "DO-STARTU",
+            "OCZEKUJE-NA-ODPOWIEDZ"
           ]
         }
       ],
@@ -62,10 +68,38 @@
       "scope": "outside",
       "filters": [
         {
+          "field": "status",
+          "op": "isNot",
+          "values": [
+            "6"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "KONCEPCJA"
+          ]
+        },
+        {
+          "field": "kind",
+          "op": "isNot",
+          "values": [
+            "parent"
+          ]
+        },
+        {
           "field": "tag",
           "op": "anyOf",
           "values": [
             "OCZEKUJE-NA-ODPOWIEDZ"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "DO-STARTU"
           ]
         },
         {
@@ -89,10 +123,38 @@
       "scope": "outside",
       "filters": [
         {
+          "field": "status",
+          "op": "isNot",
+          "values": [
+            "6"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "KONCEPCJA"
+          ]
+        },
+        {
+          "field": "kind",
+          "op": "isNot",
+          "values": [
+            "parent"
+          ]
+        },
+        {
           "field": "tag",
           "op": "anyOf",
           "values": [
             "OCZEKUJE-NA-ODPOWIEDZ"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "DO-STARTU"
           ]
         },
         {
@@ -116,10 +178,38 @@
       "scope": "outside",
       "filters": [
         {
-          "field": "points",
+          "field": "status",
+          "op": "isNot",
+          "values": [
+            "6"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "KONCEPCJA"
+          ]
+        },
+        {
+          "field": "kind",
+          "op": "isNot",
+          "values": [
+            "parent"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "DO-STARTU"
+          ]
+        },
+        {
+          "field": "ready",
           "op": "is",
           "values": [
-            "\u0000"
+            "no"
           ],
           "or": "g5"
         },
@@ -133,13 +223,6 @@
             "D"
           ],
           "or": "g5"
-        },
-        {
-          "field": "tag",
-          "op": "anyOf",
-          "values": [
-            "DO-STARTU"
-          ]
         }
       ],
       "onlyMine": false,
@@ -155,10 +238,24 @@
       "scope": "outside",
       "filters": [
         {
-          "field": "points",
+          "field": "status",
           "op": "isNot",
           "values": [
-            "\u0000"
+            "6"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "KONCEPCJA"
+          ]
+        },
+        {
+          "field": "kind",
+          "op": "isNot",
+          "values": [
+            "parent"
           ]
         },
         {
@@ -166,6 +263,13 @@
           "op": "anyOf",
           "values": [
             "DO-STARTU"
+          ]
+        },
+        {
+          "field": "ready",
+          "op": "is",
+          "values": [
+            "yes"
           ]
         },
         {
@@ -211,7 +315,7 @@
     {
       "id": "tmv52nkm67",
       "name": "Odłożone",
-      "scope": "all",
+      "scope": "outside",
       "filters": [
         {
           "field": "status",
@@ -234,6 +338,13 @@
       "scope": "all",
       "filters": [
         {
+          "field": "status",
+          "op": "isNot",
+          "values": [
+            "6"
+          ]
+        },
+        {
           "field": "tag",
           "op": "anyOf",
           "values": [
@@ -254,6 +365,20 @@
       "scope": "outside",
       "filters": [
         {
+          "field": "status",
+          "op": "isNot",
+          "values": [
+            "6"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "KONCEPCJA"
+          ]
+        },
+        {
           "field": "kind",
           "op": "is",
           "values": [
@@ -273,6 +398,13 @@
       "name": "Ważne",
       "scope": "all",
       "filters": [
+        {
+          "field": "status",
+          "op": "isNot",
+          "values": [
+            "6"
+          ]
+        },
         {
           "field": "priority",
           "op": "is",

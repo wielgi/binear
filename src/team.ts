@@ -13,6 +13,8 @@
  *      · `budget`   — jej zadania zjadają budżet SP w planowaniu (kierownik zwykle nie),
  *      · statystyki — zawsze liczą wszystkich: zadanie zrobione przez kierownika jest wynikiem zespołu,
  *        nawet jeśli jego godzin nie wliczamy do mocy,
+ *    plus `manager` — kierownik: jego zadania nigdy nie zjadaja budzetu, maja wlasny pasek w planowaniu,
+ *    a przy wejsciu do sprintu nie oddaje ich dzialowi IT (to samo, co BX_CAPACITY_EXCLUDE_IDS w .env),
  *  - dzien roboczy to 8–16 (jak w odliczaniu do konca sprintu), 1 godzina = 1 punkt na etat.
  */
 import { WORK_END_HOUR, WORK_START_HOUR } from './sprintClock';
@@ -28,13 +30,17 @@ export interface TeamMember {
   capacity?: boolean;
   /** Czy zadania osoby zjadaja budzet SP w planowaniu. Brak wartosci = tak. */
   budget?: boolean;
+  /** Kierownik zespolu — jak wpis w BX_CAPACITY_EXCLUDE_IDS. Brak wartosci = nie. */
+  manager?: boolean;
 }
 
 /** Role do podpowiedzi w formularzu — pole jest dowolne, to tylko skrot. */
 export const ROLE_SUGGESTIONS = ['Programista', 'Kierownik IT', 'Tester', 'Analityk', 'Projektant'] as const;
 
 export const countsCapacity = (m: Pick<TeamMember, 'capacity'>): boolean => m.capacity !== false;
-export const takesBudget = (m: Pick<TeamMember, 'budget'>): boolean => m.budget !== false;
+export const isManager = (m: Pick<TeamMember, 'manager'>): boolean => m.manager === true;
+/** Kierownik nigdy nie zjada budzetu — przelacznik budzetu nic u niego nie zmienia. */
+export const takesBudget = (m: Pick<TeamMember, 'budget' | 'manager'>): boolean => !isManager(m) && m.budget !== false;
 
 export interface TeamConfig {
   members: TeamMember[];
@@ -95,9 +101,27 @@ export function fteOnDay(team: TeamConfig, d: Date): number {
   return team.members.reduce((n, m) => n + (countsCapacity(m) && isPresent(team, m.id, d) ? m.fte : 0), 0);
 }
 
-/** Id osob, ktorych zadania NIE zjadaja budzetu SP (zespol niepusty), albo `null`, gdy zespol jest pusty. */
-export function budgetExcludedIds(team: TeamConfig): number[] | null {
-  return team.members.length ? team.members.filter((m) => !takesBudget(m)).map((m) => m.id) : null;
+/**
+ * Id osob, ktorych zadania NIE zjadaja budzetu SP — kierownicy i osoby z wylaczonym budzetem.
+ *
+ * `fromEnv` to BX_CAPACITY_EXCLUDE_IDS. Liczy sie, dopoki zespol nie ma zaznaczonego kierownika: pusty
+ * zespol albo dodani sami programisci nie moga po cichu wpuscic kierownika z .env do budzetu (i do
+ * przekazania jego zadan dzialowi IT przy wejsciu do sprintu). Kierownik zaznaczony w zespole zastepuje .env.
+ */
+export function budgetExcludedIds(team: TeamConfig, fromEnv: readonly number[] = []): number[] {
+  if (!team.members.length) return [...fromEnv];
+  const out = new Set(team.members.filter((m) => !takesBudget(m)).map((m) => m.id));
+  if (!team.members.some(isManager)) for (const id of fromEnv) out.add(id);
+  return [...out];
+}
+
+/**
+ * Kierownicy: osobny pasek w planowaniu, zadania zostaja u nich przy wejsciu do sprintu. Zaznaczeni w zespole,
+ * a dopoki nikt nie jest zaznaczony — BX_CAPACITY_EXCLUDE_IDS. Wylaczony „Budżet" NIE robi z nikogo kierownika.
+ */
+export function managerIds(team: TeamConfig, fromEnv: readonly number[] = []): number[] {
+  const ticked = team.members.filter(isManager).map((m) => m.id);
+  return ticked.length ? ticked : [...fromEnv];
 }
 
 /** Moc JEDNEJ osoby (godziny = SP) w przedziale od–do; 0, gdy nie liczy sie do mocy albo jej nie ma. */
@@ -168,40 +192,123 @@ export function setMember(team: TeamConfig, id: number, patch: Partial<Omit<Team
   return { ...team, members: team.members.map((m) => (m.id === id ? { ...m, ...patch } : m)) };
 }
 
-/* ---------- zapis w przegladarce ---------- */
+/* ---------- zapis: plik na serwerze (wspolny), kopia w przegladarce ---------- */
 
+/* Kopia per projekt; `binear.team.v1` bez projektu to zapis sprzed pliku na serwerze — przenosimy go raz. */
 const STORAGE_KEY = 'binear.team.v1';
+const storageKey = (groupId: number | null) => (groupId === null ? STORAGE_KEY : `${STORAGE_KEY}:${groupId}`);
 
-/** Wczytuje konfiguracje; przy bledzie lub zepsutych danych pusty zespol (wtedy liczy stary sposob). */
-export function loadTeam(): TeamConfig {
+/** Czysci zapisany zespol (z serwera albo z przegladarki); przy zepsutych danych pusty zespol. */
+export function parseTeam(raw: unknown): TeamConfig {
+  if (!raw || typeof raw !== 'object') return EMPTY_TEAM;
+  const p = raw as Partial<TeamConfig>;
+  const members = (Array.isArray(p.members) ? p.members : [])
+    .filter((m) => m && Number.isFinite(m.id) && typeof m.name === 'string')
+    .map((m) => ({
+      id: Number(m.id),
+      name: m.name,
+      fte: Number.isFinite(m.fte) && m.fte > 0 ? Math.min(1, m.fte) : 1,
+      ...(typeof m.role === 'string' && m.role.trim() ? { role: m.role.trim().slice(0, 40) } : {}),
+      ...(m.capacity === false ? { capacity: false } : {}),
+      ...(m.budget === false ? { budget: false } : {}),
+      ...(m.manager === true ? { manager: true } : {}),
+    }));
+  const off: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(p.off ?? {})) {
+    if (Array.isArray(v)) off[k] = v.filter((x) => typeof x === 'string');
+  }
+  return { members, off };
+}
+
+function readStored(key: string): TeamConfig | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return EMPTY_TEAM;
-    const p = JSON.parse(raw) as Partial<TeamConfig>;
-    const members = (Array.isArray(p.members) ? p.members : [])
-      .filter((m) => m && Number.isFinite(m.id) && typeof m.name === 'string')
-      .map((m) => ({
-        id: Number(m.id),
-        name: m.name,
-        fte: Number.isFinite(m.fte) && m.fte > 0 ? Math.min(1, m.fte) : 1,
-        ...(typeof m.role === 'string' && m.role.trim() ? { role: m.role.trim().slice(0, 40) } : {}),
-        ...(m.capacity === false ? { capacity: false } : {}),
-        ...(m.budget === false ? { budget: false } : {}),
-      }));
-    const off: Record<string, string[]> = {};
-    for (const [k, v] of Object.entries(p.off ?? {})) {
-      if (Array.isArray(v)) off[k] = v.filter((x) => typeof x === 'string');
-    }
-    return { members, off };
+    const raw = localStorage.getItem(key);
+    return raw ? parseTeam(JSON.parse(raw)) : null;
   } catch {
-    return EMPTY_TEAM;
+    return null;
   }
 }
 
-export function saveTeam(team: TeamConfig): void {
+/**
+ * Kopia z przegladarki: pokazujemy ja od razu, zanim odpowie serwer, i gdy serwer nie odpowiada.
+ * Zrodlem prawdy jest plik na serwerze (fetchTeam / pushTeam). Bez kopii projektu — stary zapis bez projektu.
+ */
+export function loadTeam(groupId: number | null = null, legacy = false): TeamConfig {
+  // Stary zapis bez projektu nalezal do projektu domyslnego — tylko tam (`legacy`) moze sluzyc za zapas.
+  return readStored(storageKey(groupId)) ?? (legacy ? readStored(STORAGE_KEY) : null) ?? EMPTY_TEAM;
+}
+
+/*
+ * Zespol zmieniony w przegladarce, ktorego serwer jeszcze nie przyjal (zapis sie nie udal). Dopoki znacznik jest,
+ * odczyt z serwera nie moze nadpisac kopii z przegladarki — zamiast tego ponawiamy zapis.
+ */
+const unsavedKey = (groupId: number) => `${STORAGE_KEY}.unsaved:${groupId}`;
+
+export function isTeamUnsaved(groupId: number): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(team));
+    return localStorage.getItem(unsavedKey(groupId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markTeamUnsaved(groupId: number, unsaved: boolean): void {
+  try {
+    if (unsaved) localStorage.setItem(unsavedKey(groupId), '1');
+    else localStorage.removeItem(unsavedKey(groupId));
+  } catch {
+    /* nic */
+  }
+}
+
+export function saveTeam(groupId: number | null, team: TeamConfig): void {
+  try {
+    localStorage.setItem(storageKey(groupId), JSON.stringify(team));
   } catch {
     /* Brak miejsca albo zablokowany zapis — konfiguracja zyje do konca sesji. */
   }
+}
+
+/** Zespol zapisany jeszcze tylko w przegladarce (sprzed pliku na serwerze) — do jednorazowego przeniesienia. */
+export function takeLegacyTeam(): TeamConfig | null {
+  const t = readStored(STORAGE_KEY);
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* nic */
+  }
+  return t && t.members.length ? t : null;
+}
+
+/** Zespol projektu z serwera; `null` = serwer go jeszcze nie ma. Rzuca, gdy serwer nie odpowiada. */
+export async function fetchTeam(groupId: number): Promise<TeamConfig | null> {
+  const r = await fetch(`/api/team/${groupId}`);
+  if (!r.ok) throw new Error(`zespół: HTTP ${r.status}`);
+  const { team } = (await r.json()) as { team: unknown };
+  return team ? parseTeam(team) : null;
+}
+
+/**
+ * Zapis na serwer. Gdy serwer nie odpowiada (siec), zostaje znacznik `isTeamUnsaved` i zapis idzie przy nastepnym
+ * odczycie. Odmowa serwera (HTTP) znacznik zdejmuje — ponawianie nic by nie dalo, a kopia z przegladarki
+ * nadpisywalaby potem zmiany innych bez konca.
+ */
+export async function pushTeam(groupId: number, team: TeamConfig): Promise<void> {
+  const body = JSON.stringify(team);
+  let r: Response;
+  try {
+    r = await fetch(`/api/team/${groupId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body,
+      // Zapis tuz przed zamknieciem karty tez ma dojsc. Przegladarka odrzuca keepalive powyzej 64 KB — wiekszy
+      // zespol (dlugi grafik) idzie zwyklym zapytaniem.
+      keepalive: body.length < 60_000,
+    });
+  } catch (e) {
+    markTeamUnsaved(groupId, true);
+    throw e;
+  }
+  markTeamUnsaved(groupId, false);
+  if (!r.ok) throw new Error(`zespół: HTTP ${r.status}`);
 }

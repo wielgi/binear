@@ -52,7 +52,9 @@ async function localVersion(): Promise<{ sha: string; repo: string; branch: stri
     const json = await res.json();
     const sha = String(json?.sha ?? '');
     const repo = String(json?.repo ?? '');
-    return sha && repo ? { sha, repo, branch: String(json?.branch || 'master') } : null;
+    const branch = String(json?.branch ?? '');
+    // Bez galezi na GitHubie (lokalna galaz bez upstreamu) nie ma z czym porownac.
+    return sha && repo && branch ? { sha, repo, branch } : null;
   } catch {
     return null;
   }

@@ -95,6 +95,17 @@ describe('summarizeSprint', () => {
     expect(d.depts[0].topics[0].totals.points).toBe(8);
   });
 
+  it('dziadek jest folderem takze wtedy, gdy rodzic jest poza sprintem', () => {
+    const d = summarizeSprint(
+      [t(1, { storyPoints: 5, title: 'Temat' }), t(2, { parentId: 1, sprintId: null }), t(3, { parentId: 2, storyPoints: 3 })],
+      70,
+      WORK,
+      nazwa,
+    );
+    expect(d.totals.count).toBe(1);
+    expect(d.totals.points).toBe(3);
+    expect(d.depts[0].topics[0]).toMatchObject({ rootId: 1, title: 'Temat' });
+  });
   it('dzialy posortowane po SP malejaco; zadanie bez epika ma wlasny dzial', () => {
     const d = summarizeSprint(
       [t(1, { epicId: 2, storyPoints: 3 }), t(2, { epicId: 1, storyPoints: 9 }), t(3, { epicId: null, storyPoints: 1 })],

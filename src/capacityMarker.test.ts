@@ -29,15 +29,23 @@ describe('capacityState', () => {
 describe('weekWindow', () => {
   const start = new Date(2026, 9, 12, 10, 30); // poniedzialek
   it('przed startem liczy od poniedzialku 8:00, do piatku 16:00', () => {
-    const w = weekWindow(start, new Date(2026, 9, 12, 7));
+    const w = weekWindow(start, new Date(2026, 9, 12, 7))!;
     expect(w.from).toEqual(new Date(2026, 9, 12, 8));
     expect(w.to).toEqual(new Date(2026, 9, 16, 16));
   });
   it('w trakcie tygodnia liczy od teraz', () => {
     const now = new Date(2026, 9, 14, 12);
-    expect(weekWindow(start, now).from).toEqual(now);
+    expect(weekWindow(start, now)?.from).toEqual(now);
   });
   it('start w srodku tygodnia nadal bierze poniedzialek tego tygodnia', () => {
-    expect(weekWindow(new Date(2026, 9, 14), new Date(2026, 9, 12, 7)).to).toEqual(new Date(2026, 9, 16, 16));
+    expect(weekWindow(new Date(2026, 9, 14), new Date(2026, 9, 12, 7))?.to).toEqual(new Date(2026, 9, 16, 16));
+  });
+  it('poniedzialek 00:00 oddany jako niedziela 23:00 to nadal TEN tydzien, nie poprzedni', () => {
+    expect(weekWindow(new Date(2026, 9, 11, 23), new Date(2026, 9, 13, 12))?.to).toEqual(new Date(2026, 9, 16, 16));
+  });
+  it('po piatku 16:00 (weekend, poniedzialek przed zamknieciem) okna nie ma — bez ostrzezen', () => {
+    expect(weekWindow(start, new Date(2026, 9, 16, 16))).toBeNull();
+    expect(weekWindow(start, new Date(2026, 9, 18, 12))).toBeNull();
+    expect(weekWindow(start, new Date(2026, 9, 19, 8, 30))).toBeNull();
   });
 });

@@ -137,9 +137,10 @@ export function migratePlanSort(saved: PlanSortLevel[] | undefined): PlanSortLev
   if (!saved) return undefined;
   if (STARE_DOMYSLNE.some((s) => takSamo(saved, s))) return PLAN_SORT_DOMYSLNY;
   /* Wlasny stos: poziom „strategia" (tag STRATEGIA juz nic nie znaczy) zamieniamy na „pula" w tym samym miejscu. */
-  return saved.some((l) => l.by === 'strategia')
-    ? saved.map((l) => (l.by === 'strategia' ? { ...l, by: 'pula' } : l))
-    : saved;
+  if (!saved.some((l) => l.by === 'strategia')) return saved;
+  // Bez dubla: stos, ktory ma juz „pula", traci tylko „strategia".
+  const hasPula = saved.some((l) => l.by === 'pula');
+  return saved.flatMap((l) => (l.by !== 'strategia' ? [l] : hasPula ? [] : [{ ...l, by: 'pula' as const }]));
 }
 
 /**

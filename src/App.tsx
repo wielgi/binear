@@ -195,6 +195,9 @@ import { groupedKeys, matchGrouped, moveCondition, normalizeGroups, refreshGroup
 import {
   groupedTiles,
   groupTotals,
+  emptyConfig,
+  hasSavedTiles,
+  loadDefaultTiles,
   loadTiles,
   sameView,
   saveTiles,
@@ -206,19 +209,34 @@ import {
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
-import { useAnsweredTasks, useCounterHistory } from './CounterHistory';
+import { useAnsweredTasks, useChatFacts, useCounterHistory } from './CounterHistory';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
 import { TeamModal } from './TeamModal';
 import { ManageModal } from './ManageModal';
 import { teamFirst } from './peopleOrder';
-import { budgetExcludedIds, loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
-import { ownerOnEnteringSprint, type ItContext } from './planAssign';
+import {
+  budgetExcludedIds,
+  fetchTeam,
+  managerIds,
+  isTeamUnsaved,
+  loadTeam,
+  pushTeam,
+  saveTeam,
+  takeLegacyTeam,
+  teamHoursBetween,
+  type TeamConfig,
+} from './team';
+import { entersFromRegister, ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
 import {
   foldersOf,
+  MISSING_LABEL,
   paybackRank,
+  readiness,
+  type ChatFacts,
   type DaySnapshot,
+  type Missing,
 } from './counters';
 import { CommandPalette, type Command } from './CommandPalette';
 import { applyTheme, loadTheme, watchSystemTheme, THEMES, type Theme } from './theme';
@@ -231,10 +249,13 @@ import {
   KeyboardSensor,
   MouseSensor,
   TouchSensor,
+  closestCenter,
+  pointerWithin,
   useDraggable,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
@@ -316,7 +337,9 @@ type FilterField =
   | 'deadline'
   | 'observer'
   | 'answered'
-  | 'kind';
+  | 'kind'
+  | 'ready'
+  | 'missing';
 
 /**
  * Operatory jak w Linearze. Wymiary jednowartosciowe (osoba/priorytet/status/etap —
@@ -363,6 +386,9 @@ const FILTER_FIELDS: { field: FilterField; label: string; icon: ReactNode; divid
   { field: 'points', label: 'Story points', icon: <HashIcon /> },
   { field: 'answered', label: 'Odpowiedź w czacie', icon: <CommentIcon /> },
   { field: 'kind', label: 'Rodzaj zadania', icon: <ParentIcon /> },
+  // gotowosc do startu — te same zasady co dawny kafelek „Gotowe do startu" (patrz `readiness`)
+  { field: 'ready', label: 'Gotowość do startu', icon: <CheckIcon />, divider: true },
+  { field: 'missing', label: 'Brakuje', icon: <CloseIcon /> },
 ];
 
 const FILTER_LABEL = Object.fromEntries(FILTER_FIELDS.map((f) => [f.field, f.label])) as Record<
@@ -375,7 +401,7 @@ const FILTER_LABEL = Object.fromEntries(FILTER_FIELDS.map((f) => [f.field, f.lab
  * Wymiary, w ktorych ZADANIE ma wiele wartosci naraz — stad operatory zbiorowe
  * (dowolny z / wszystkie z / zaden z) zamiast "to / to nie".
  */
-const MULTI_FIELDS = new Set<FilterField>(['tag', 'observer']);
+const MULTI_FIELDS = new Set<FilterField>(['tag', 'observer', 'missing']);
 
 /**
  * Pseudo-wartosc filtra tagu „Bez tagów" — zadanie bez zadnego tagu. Znak NUL nie
@@ -546,7 +572,6 @@ interface Settings {
   scope: Scope;
   onlyMine: boolean;
   withUnassigned: boolean;
-  showDone: boolean;
   /*
    * Filtry WIDOKU PLANOWANIA — wlasne, nie te z panelu.
    *
@@ -659,7 +684,6 @@ const DEFAULT_SETTINGS: Settings = {
   scope: 'sprint',
   onlyMine: true,
   withUnassigned: false,
-  showDone: false,
   planDone: false,
   planReview: true,
   /* Domyslna kolejnosc waznosci: plomien (awaria) najpierw, potem pula (CIAGLOSC, RDZEN, DZIAL), tag „Wysoki",
@@ -752,10 +776,23 @@ function loadViews(): SavedView[] {
     if (!Array.isArray(arr)) return [];
     // Widoki sprzed pola `query` (i innych) — domykamy braki, zeby apply/fingerprint
     // nie trafialy na undefined.
-    return arr.map((v) => ({ ...v, query: v.query ?? '' }));
+    return arr.map((v) => migrateShowDone({ ...v, query: v.query ?? '' }));
   } catch {
     return [];
   }
+}
+
+/** Wszystkie statusy Bitriksa (1 nowe … 5 zakonczone, 6 odlozone, 7 odrzucone) — „pokaz wszystko, takze zakonczone". */
+const ALL_STATUSES = ['1', '2', '3', '4', '5', '6', '7'];
+
+/*
+ * Przelacznik „Pokaż zakończone" zniknal: zakonczone pokazuje teraz filtr statusu. Widok zapisany z wlaczonym
+ * przelacznikiem dostaje wiec warunek „Status to jedno z: wszystkie" — pokazuje to samo co kiedys (otwarte
+ * i zakonczone), zamiast po cichu chowac zakonczone.
+ */
+function migrateShowDone(v: SavedView): SavedView {
+  if (!v.showDone || touchesStatus(v.filters)) return v;
+  return { ...v, filters: [...v.filters, { id: `c${v.id}done`, field: 'status', op: 'is', values: ALL_STATUSES }] };
 }
 
 /** Porownywalny odcisk widoku — bez `id`/`name`, z filtrami bez ulotnych id warunkow. */
@@ -769,7 +806,7 @@ function viewFingerprint(v: Omit<SavedView, 'id' | 'name'>): string {
     scope: v.scope,
     onlyMine: v.onlyMine,
     withUnassigned: v.withUnassigned,
-    showDone: v.showDone,
+    // `showDone` nie wchodzi: wynika z filtrow (status), a stary zapisany `true` nie pasowal juz do niczego.
     showEmpty: v.showEmpty,
     /*
      * `viewMode` CELOWO nie wchodzi do odcisku. Widok zapisany opisuje, CO jest
@@ -1203,7 +1240,9 @@ function useBitrixData() {
 
   /* Ponowienie po limicie zapytan — jeden oczekujacy timer, nie kolejka. */
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadRef = useRef<(silent?: boolean) => void>(() => {});
+  const loadRef = useRef<(silent?: boolean) => Promise<void> | void>(() => {});
+  /* Kto czeka na dane pobrane PO swoim zapisie, a ladowanie juz trwalo (`reloadFresh`). */
+  const freshWaitersRef = useRef<(() => void)[]>([]);
 
   /**
    * `silent` = odswiezenie w tle (sonda zmian, powrot do karty). Nie zapala
@@ -1497,6 +1536,10 @@ function useBitrixData() {
       if (!silent) setError(e instanceof Error ? e.message : String(e));
     } finally {
       busyRef.current = false;
+      // Ladowanie, ktore trwalo w chwili zapisu, moglo pobrac stan sprzed niego — czekajacym dajemy jeszcze jedno.
+      // Przy limicie zapytan czekaja dalej: ponowienie samo jest swiezym ladowaniem, a drugie zapytanie teraz dostaloby 503.
+      const waiting = retrying ? [] : freshWaitersRef.current.splice(0);
+      if (waiting.length) void Promise.resolve(loadRef.current(true)).finally(() => waiting.forEach((w) => w()));
       /* Przy ponowieniu spinner ZOSTAJE zapalony — to wciaz to samo ladowanie,
          tylko dluzsze. Zgaszenie go pokazaloby pusty widok jako gotowy. */
       if (!silent && !retrying) setLoading(false);
@@ -1810,6 +1853,12 @@ function useBitrixData() {
     toasts,
     newIds,
     reload: load,
+    /*
+     * Odswiezenie po wlasnym zapisie: konczy sie dopiero na danych pobranych PO nim. Ciche `reload(true)` w trakcie
+     * innego ladowania nic nie robi, wiec okno Tagi i epiki odblokowywalo sie na starej liscie zadan.
+     */
+    reloadFresh: (): Promise<void> =>
+      busyRef.current ? new Promise<void>((done) => freshWaitersRef.current.push(done)) : Promise.resolve(load(true)),
     mutate,
     refreshTask,
     /** Kiedy ostatnio cokolwiek zrobiles — panel zadania nie pyta Bitriksa, gdy nikt nie pracuje. */
@@ -2106,8 +2155,10 @@ function matchQuery(list: Task[], query: string, opisy?: Map<number, string> | n
 interface FilterCtx {
   answered: ReadonlySet<number> | null;
   folders: ReadonlySet<number>;
+  /** Rozpoznania i wiadomosci WARTOŚĆ z czatow — do „Gotowość" i „Brakuje"; `null` = jeszcze czytamy. */
+  chat: ChatFacts | null;
 }
-const NO_FILTER_CTX: FilterCtx = { answered: null, folders: new Set<number>() };
+const NO_FILTER_CTX: FilterCtx = { answered: null, folders: new Set<number>(), chat: null };
 
 function matchFilters(
   t: Task,
@@ -2133,9 +2184,35 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>, 
     return c.op === 'isNot' ? !inSet : inSet;
   }
 
+  /*
+   * Gotowosc do startu i jej braki — `readiness` z counters.ts. Gdy rozstrzyga czat, a czaty jeszcze sie
+   * czytaja, zadanie nie pasuje ani do „gotowe", ani do „niegotowe" (kafelek pokazuje wtedy „…").
+   */
+  if (c.field === 'ready') {
+    const r = readiness(t, ctx.chat);
+    if (r.ready === null) return false;
+    const inSet = c.values.includes(r.ready ? 'yes' : 'no');
+    return c.op === 'isNot' ? !inSet : inSet;
+  }
+
+  if (c.field === 'missing') {
+    const { missing } = readiness(t, ctx.chat);
+    const has = (v: string) => missing.includes(v as Missing);
+    switch (c.op) {
+      case 'allOf':
+        return c.values.every(has);
+      case 'noneOf':
+        return !c.values.some(has);
+      default: // anyOf
+        return c.values.some(has);
+    }
+  }
+
   if (c.field === 'tag') {
-    // „Bez tagów" (NO_TAGS) pasuje do zadania z pusta lista tagow; reszta jak zwykle.
-    const has = (v: string) => (v === NO_TAGS ? t.tags.length === 0 : t.tags.includes(v));
+    // „Bez tagów" (NO_TAGS) pasuje do zadania z pusta lista tagow. Wielkosc liter bez znaczenia, jak w Bitriksie
+    // (BUG i bug to jeden tag) — inaczej kafelek „Ważne" gubil zadania z tagiem pisanym malymi literami.
+    const has = (v: string) =>
+      v === NO_TAGS ? t.tags.length === 0 : t.tags.some((x) => x.toUpperCase() === v.toUpperCase());
     switch (c.op) {
       case 'allOf':
         return c.values.every(has);
@@ -2872,6 +2949,16 @@ function ScopePicker({
  * polaczyc LUB). Jeden element jest naraz zrodlem i celem; klik w przyciski wewnatrz dziala, bo
  * czujnik rusza dopiero po przesunieciu o kilka pikseli.
  */
+/*
+ * Cel upuszczenia chipa: ten pod kursorem, z pominieciem samego przeciaganego. Domyslne „najwieksze pokrycie"
+ * wybieralo przeciagany chip (jego pierwotne miejsce zawsze sie pokrywa), wiec sasiadow nie dalo sie zamienic.
+ * Puszczenie poza chipami nic nie zmienia. Klawiatura (bez kursora) — najblizszy srodkiem.
+ */
+const chipCollision: CollisionDetection = (args) => {
+  const others = { ...args, droppableContainers: args.droppableContainers.filter((c) => c.id !== args.active.id) };
+  return args.pointerCoordinates ? pointerWithin(others) : closestCenter(others);
+};
+
 function DraggableChip({ id, className, children }: { id: string; className: string; children: ReactNode }) {
   const drag = useDraggable({ id: `chip:${id}` });
   const drop = useDroppable({ id: `chip:${id}` });
@@ -2892,8 +2979,12 @@ function DraggableChip({ id, className, children }: { id: string; className: str
 }
 
 /** Czy zestaw filtrow ma niepusty warunek po statusie — wtedy zakonczone nie sa wstepnie ukrywane. */
-function touchesStatus(conds: readonly { field: string; values: readonly string[] }[]): boolean {
-  return conds.some((c) => c.field === 'status' && c.values.length > 0);
+/**
+ * Czy warunki WPROST prosza o zakonczone zadania: „Status to …" z zamknietym statusem. Samo dotkniecie
+ * statusu nie wystarcza — „Status to nie Odłożone" odslanialo cala historie zakonczonych zadan.
+ */
+function touchesStatus(conds: readonly { field: string; op: string; values: readonly string[] }[]): boolean {
+  return conds.some((c) => c.field === 'status' && c.op !== 'isNot' && c.values.some((v) => CLOSED_STATUSES.has(v)));
 }
 
 function ScrollX({
@@ -3190,7 +3281,8 @@ function Tag({ name, onPick }: { name: string; onPick?: (name: string) => void }
   const body = (
     <>
       <span className="tag-dot" style={{ background: tagHue(name) }} />
-      {name}
+      {/* Wlasny element: wielokropek dziala tylko na nim, nie na golym tekscie w pigulce (flex). */}
+      <span className="tag-name">{name}</span>
     </>
   );
   /*
@@ -3673,7 +3765,8 @@ function TaskRow({
       )}
 
       {/* Story pointy scruma — dociagane w tle, wiec pojawiaja sie chwile po liscie. */}
-      {!(progress && progress.points > 0) && task.storyPoints != null && (
+      {/* Rodzic z wlasnymi SP pokazuje je obok sumy podzadan — wczesniej suma je zaslaniala. */}
+      {task.storyPoints != null && (!(progress && progress.points > 0) || task.storyPoints > 0) && (
         <HoverNote label="Story points" value={task.storyPoints} className="row-sp">
           {task.storyPoints}
         </HoverNote>
@@ -7190,10 +7283,10 @@ function ViewMenu({
   };
 }) {
   const Control = DisplaySelect;
-  /* 372, nie 300: czwarta zakladka („Planowanie") nie miescila sie obok ikony
-     i podpis wchodzil na sasiedni. Szerszy panel daje tez oddech wierszom
-     „etykieta + kontrolka" ponizej. */
-  const width = 372;
+  /* 440, nie 300: zakladki widoku („Planowanie", a od piatej takze „Podsumowanie") nie
+     miescily sie obok ikon i podpis wchodzil na sasiedni. Szerszy panel daje tez oddech
+     wierszom „etykieta + kontrolka" ponizej. */
+  const width = 440;
   const height = 510;
   const rowClass = 'ds-row';
   // Tablica to zawsze kanban po etapach — grupowanie i podgrupowanie jej nie dotycza,
@@ -8581,6 +8674,7 @@ export default function App() {
     toasts,
     newIds,
     reload,
+    reloadFresh,
     mutate,
     refreshTask,
     activeAtRef,
@@ -9074,6 +9168,19 @@ export default function App() {
    * (kazdego). Sciagamy raz, przy starcie, i tylko do wzmianek.
    */
   const [directory, setDirectory] = useState<Employee[]>([]);
+  /*
+   * Kandydaci do zespolu: aktywni pracownicy z calej firmy (spis pracownikow), a nie tylko osoby z zadaniami —
+   * nowej osoby bez zadan nie dalo sie dodac. Bez konta-zaslepki „Nieprzypisane" (dodana dokladala 40 h falszywej
+   * mocy). Zanim spis dojdzie, zostaja osoby z zadan.
+   */
+  const teamCandidates = useMemo(() => {
+    const itDeps = new Set(config?.itDepartments ?? []);
+    const itUsers = new Set(config?.itUsers ?? []);
+    const src = directory.length
+      ? directory.filter((e) => e.active).map((e) => ({ id: e.id, name: e.name, it: itUsers.has(e.id) || e.departments.some((d) => itDeps.has(d)) }))
+      : people.map((p) => ({ id: p.id, name: p.name, it: itUsers.has(p.id) }));
+    return src.filter((p) => !isUnassigned(p.id));
+  }, [directory, people, config?.itDepartments, config?.itUsers]);
   useEffect(() => {
     let alive = true;
     void fetchEmployees()
@@ -9183,22 +9290,115 @@ export default function App() {
     () => stages.filter((s) => sprintId !== null && s.sprintId === sprintId && s.type === 'NEW'),
     [stages, sprintId],
   );
-  /* Etapy „W toku" aktywnego sprintu — do podsumowania sprintu. */
+  /* Etapy „W toku" (wszystkich sprintow) — do podsumowania sprintu i do planowania (praca w toku nie zjada mocy). */
   const workStageIds = useMemo(() => new Set(stages.filter((s) => s.type === 'WORK').map((s) => s.id)), [stages]);
   const waitingStageIds = useMemo(() => new Set(waitingStages.map((s) => s.id)), [waitingStages]);
   const waitingStageNames = useMemo(() => new Set(waitingStages.map((s) => s.name)), [waitingStages]);
-  /* Zespol i grafik tygodniowy (zapis w przegladarce). Pusty zespol = moce liczone po staremu. */
-  const [team, setTeamState] = useState<TeamConfig>(loadTeam);
+  /*
+   * Zespol i grafik tygodniowy. Pusty zespol = moce liczone po staremu.
+   * Zrodlo prawdy to plik na serwerze (/api/team), wspolny dla wszystkich i osobny dla projektu; kopia
+   * w przegladarce daje start bez czekania i dziala, gdy serwer nie odpowiada. Swiezy zespol z serwera
+   * przy zmianie projektu i przy kazdym otwarciu okna (ktos inny mogl go zmienic). Zapis z opoznieniem,
+   * zeby pisanie roli nie strzelalo zapisem na kazda litere.
+   */
+  /* Projekt domyslny z .env — tylko do niego nalezal stary zespol zapisany bez projektu. */
+  const defaultGroup = config ? Number(config.groupId) : null;
+  const [team, setTeamState] = useState<TeamConfig>(() => loadTeam(groupId, groupId !== null && groupId === defaultGroup));
   const [teamOpen, setTeamOpen] = useState(false);
   const teamIds = useMemo(() => new Set(team.members.map((m) => m.id)), [team]);
   const [manageOpen, setManageOpen] = useState<null | 'tags' | 'epics'>(null);
-  const setTeam = useCallback((next: TeamConfig) => {
-    setTeamState(next);
-    saveTeam(next);
+  const teamPushRef = useRef<{ timer: number; flush: () => Promise<void> } | null>(null);
+  /* Licznik zmian zespolu: odczyt z serwera, ktory ruszyl przed zmiana, nie moze jej potem nadpisac. */
+  const teamEditRef = useRef(0);
+  const flushTeam = useCallback((): Promise<void> => {
+    const p = teamPushRef.current;
+    if (!p) return Promise.resolve();
+    window.clearTimeout(p.timer);
+    teamPushRef.current = null;
+    return p.flush();
   }, []);
+  const setTeam = useCallback(
+    (next: TeamConfig) => {
+      teamEditRef.current++;
+      setTeamState(next);
+      if (groupId === null) return;
+      saveTeam(groupId, next);
+      const g = groupId;
+      if (teamPushRef.current) window.clearTimeout(teamPushRef.current.timer);
+      const flush = () =>
+        pushTeam(g, next).catch(() => toast('Nie zapisano zespołu na serwerze — zmiany są tylko w tej przeglądarce.'));
+      teamPushRef.current = { timer: window.setTimeout(() => void flushTeam(), 600), flush };
+    },
+    [groupId, toast, flushTeam],
+  );
+  useEffect(() => {
+    const onHide = () => void flushTeam();
+    window.addEventListener('pagehide', onHide);
+    return () => window.removeEventListener('pagehide', onHide);
+  }, [flushTeam]);
+  /* Kazde otwarcie okna zespolu podbija licznik — wtedy czytamy swiezy zespol (zamkniecie nie). */
+  const [teamOpenTick, setTeamOpenTick] = useState(0);
+  useEffect(() => {
+    if (teamOpen) setTeamOpenTick((n) => n + 1);
+  }, [teamOpen]);
+  const teamGroupRef = useRef(groupId);
+  useEffect(() => {
+    if (groupId === null) return;
+    let stop = false;
+    const isDefault = groupId === defaultGroup;
+    // Inny projekt: od razu jego kopia z przegladarki, potem serwer.
+    if (teamGroupRef.current !== groupId) {
+      teamGroupRef.current = groupId;
+      setTeamState(loadTeam(groupId, isDefault));
+    }
+    // Licznik przed zapisem zaleglej zmiany: zmiana zrobiona w trakcie tego zapisu tez musi wstrzymac odczyt.
+    const edit = teamEditRef.current;
+    // Najpierw dopisz to, co jeszcze czeka na zapis — inaczej odczyt oddalby stan sprzed zmiany.
+    void flushTeam()
+      .then(async () => {
+        /*
+         * Kopia z przegladarki, ktorej serwer nie przyjal: ponawiamy zapis zamiast ja nadpisac. Dopiero udany
+         * zapis zdejmuje znacznik — do tego czasu zostaje to, co uzytkownik zmienil.
+         */
+        if (isTeamUnsaved(groupId)) {
+          await pushTeam(groupId, loadTeam(groupId));
+          return undefined;
+        }
+        return fetchTeam(groupId);
+      })
+      .then((remote) => {
+        // Zmiana w trakcie odczytu (takze juz wyslana) jest nowsza niz to, co oddal serwer.
+        if (stop || remote === undefined || teamEditRef.current !== edit) return;
+        if (remote) {
+          setTeamState(remote);
+          saveTeam(groupId, remote);
+          // Serwer ma juz zespol projektu domyslnego: stary zapis z przegladarki jest niepotrzebny.
+          if (isDefault) takeLegacyTeam();
+          return;
+        }
+        // Serwer jeszcze nie ma zespolu projektu domyslnego: przenosimy ten sprzed zmiany (byl tylko w przegladarce).
+        if (!isDefault) return;
+        const legacy = takeLegacyTeam();
+        if (!legacy) return;
+        setTeamState(legacy);
+        saveTeam(groupId, legacy);
+        void pushTeam(groupId, legacy).catch(() => {});
+      })
+      .catch(() => {
+        /* Serwer nie odpowiada — zostaje kopia z przegladarki. */
+      });
+    return () => {
+      stop = true;
+    };
+  }, [groupId, defaultGroup, teamOpenTick, flushTeam]);
   /* Osoby, ktorych zadania nie zjadaja budzetu SP: ustawienie „Budzet" w zespole, a bez zespolu stara konfiguracja. */
   const capacityExcluded = useMemo(
-    () => budgetExcludedIds(team) ?? config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED,
+    () => budgetExcludedIds(team, config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED),
+    [team, config?.capacityExcludeIds],
+  );
+  /* Kierownicy (pasek w planowaniu, przekazanie IT) — wezsze niz `capacityExcluded`, ktore obejmuje tez wylaczony budzet. */
+  const managers = useMemo(
+    () => managerIds(team, config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED),
     [team, config?.capacityExcludeIds],
   );
   const teamCapacity = useMemo(() => {
@@ -9216,7 +9416,7 @@ export default function App() {
       return h > 0 ? ({ total: h, source: 'grafik' } as const) : ({ total: null, source: null } as const);
     }
     const hours = workHoursBetween(from, sprintWorkEnd(end));
-    return hours > 0 ? ({ total: hours * (config?.capacityDevs ?? 4), source: 'konfiguracja' } as const) : ({ total: null, source: null } as const);
+    return hours > 0 ? ({ total: hours * (config?.capacityDevs ?? 3.5), source: 'konfiguracja' } as const) : ({ total: null, source: null } as const);
   }, [activeSprint?.dateStart, activeSprint?.dateEnd, config?.capacityDevs, team]);
   const capacity = useMemo(
     () =>
@@ -9241,7 +9441,7 @@ export default function App() {
    * przelacznikow i filtrow — bo odpowiadaja na pytanie „ile tego jest", a nie „ile
    * widze". Klikniecie karty podmienia liste na dokladnie te zadania, ktore liczy.
    */
-  const answered = useAnsweredTasks(tasks, {
+  const { answered, complete: answeredComplete } = useAnsweredTasks(tasks, {
     closed: CLOSED_STATUSES,
     itDepartments: config?.itDepartments ?? [],
     itUsers: config?.itUsers ?? [],
@@ -9257,11 +9457,49 @@ export default function App() {
     setTilesCfgState(next);
     saveTiles(next);
   }, []);
+  /*
+   * Bez zadnych kafelkow w tej przegladarce (pierwsze uruchomienie, przejscie z wbudowanych licznikow)
+   * wczytujemy domyslny zestaw IT sami — pusty pasek wygladal jak awaria. Tylko gdy nic nie bylo zapisane:
+   * pasek wyczyszczony swiadomie („Wyczyść wszystko") zostaje pusty, z przyciskiem „Wczytaj domyślne kafelki".
+   */
+  useEffect(() => {
+    if (hasSavedTiles()) return;
+    void loadDefaultTiles(emptyConfig()).then((next) => {
+      if (next && !hasSavedTiles()) setTilesCfg(next);
+    });
+  }, [setTilesCfg]);
   const [tilesOpen, setTilesOpen] = useState<null | 'new' | 'manage'>(null);
   /* Warunki paska <-> zapisywalne (bez id). */
   const toTileFilters = (f: Filters) =>
     f.map((c) => ({ field: c.field, op: c.op, values: c.values, ...(c.or ? { or: c.or } : {}) }));
-  const filterCtx = useMemo<FilterCtx>(() => ({ answered, folders }), [answered, folders]);
+  /*
+   * Czaty do „Gotowość"/„Brakuje" czytamy tylko wtedy, gdy ktorys warunek paska albo kafelka tych pol uzywa —
+   * to kilkadziesiat zapytan co odswiezenie, zbednych, gdy nikt o gotowosc nie pyta.
+   */
+  const usesReadiness = useMemo(
+    () => [...filters, ...tilesCfg.tiles.flatMap((t) => t.filters)].some((c) => c.field === 'ready' || c.field === 'missing'),
+    [filters, tilesCfg.tiles],
+  );
+  const { facts: chatFacts, complete: chatComplete } = useChatFacts(tasks, { closed: CLOSED_STATUSES, groupId, enabled: metaReady && usesReadiness });
+  const filterCtx = useMemo<FilterCtx>(() => ({ answered, folders, chat: chatFacts }), [answered, folders, chatFacts]);
+  /*
+   * Kafelki, ktorych liczba jeszcze nie jest pewna: SP nie doszly (metaReady), odpowiedzi w czatach albo fakty
+   * do gotowosci jeszcze sie czytaja. Pokazujemy je jako „…" i NIE zapisujemy do historii — inaczej liczba
+   * z polowy ladowania stawala sie punktem odniesienia dla jutrzejszych strzalek.
+   */
+  const pendingTiles = useMemo(() => {
+    const out = new Set<string>();
+    for (const tile of tilesCfg.tiles) {
+      const f = tile.filters.map((c) => c.field);
+      if (
+        !metaReady ||
+        (f.includes('answered') && !answeredComplete) ||
+        ((f.includes('ready') || f.includes('missing')) && !chatComplete)
+      )
+        out.add(tile.id);
+    }
+    return out;
+  }, [tilesCfg.tiles, metaReady, answeredComplete, chatComplete]);
   const tileValues = useMemo(() => {
     const m = new Map<string, TileNumbers>();
     const childrenOf = groupChildren(tasks);
@@ -9303,16 +9541,17 @@ export default function App() {
     const byGroup = new Map<string, CustomTile[]>();
     for (const t of tilesCfg.tiles) {
       const v = tileValues.get(t.id);
-      if (v) s[`t:${t.id}`] = shownValue(t, v);
+      if (v && !pendingTiles.has(t.id)) s[`t:${t.id}`] = shownValue(t, v);
       byGroup.set(t.group, [...(byGroup.get(t.group) ?? []), t]);
     }
     for (const [gid, list] of byGroup) {
+      if (list.some((t) => pendingTiles.has(t.id))) continue; // suma grupy niepewna, dopoki ktorys kafelek liczy
       const total = groupTotals(list, tileValues);
       s[`g:${gid}`] = total.count;
       s[`gs:${gid}`] = total.points;
     }
     return s;
-  }, [tileValues, tilesCfg.tiles]);
+  }, [tileValues, tilesCfg.tiles, pendingTiles]);
   const counterPrev = useCounterHistory(groupId, counterSnap);
   const activeTileId = useMemo(
     () =>
@@ -9326,11 +9565,21 @@ export default function App() {
       )?.id ?? null,
     [tilesCfg.tiles, scopePref, filters, onlyMine, showDone],
   );
+  /* Zakres i „Tylko moje" sprzed klikniecia kafelka — ponowny klik wraca do nich, a nie zostaje w zakresie kafelka. */
+  const beforeTileRef = useRef<{ scope: Scope; onlyMine: boolean } | null>(null);
   const pickTile = (tile: CustomTile) => {
     if (activeTileId === tile.id) {
       setFilters(EMPTY_FILTERS); // ponowny klik: czyscimy filtry
+      const before = beforeTileRef.current;
+      if (before) {
+        setScope(before.scope);
+        setOnlyMine(before.onlyMine);
+      }
+      beforeTileRef.current = null;
       return;
     }
+    // Przeskok z kafelka na kafelek zachowuje stan sprzed pierwszego.
+    if (activeTileId === null) beforeTileRef.current = { scope: scopePref, onlyMine };
     setScope(tile.scope);
     setOnlyMine(tile.onlyMine);
     setFilters(refreshGroups(tile.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })) as Filters);
@@ -9454,6 +9703,8 @@ export default function App() {
       if (field === 'epic')
         return value === '0' ? 'Bez epika' : (epicNames.get(Number(value))?.name ?? `#${value}`);
       if (field === 'answered') return value === 'yes' ? 'Tak — ktoś odpowiedział' : 'Nie';
+      if (field === 'ready') return value === 'yes' ? 'Gotowe' : 'Niekompletne';
+      if (field === 'missing') return MISSING_LABEL[value as Missing] ?? value;
       if (field === 'kind')
         return value === 'parent' ? 'Nadrzędne (z otwartym podzadaniem)' : value === 'child' ? 'Podzadanie' : 'Zwykłe';
       if (field === 'tag' && value === NO_TAGS) return 'Bez tagów';
@@ -9678,6 +9929,12 @@ export default function App() {
         { value: 'yes', label: 'Tak — ktoś odpowiedział po naszych pytaniach' },
         { value: 'no', label: 'Nie' },
       ];
+    if (field === 'ready')
+      return [
+        { value: 'yes', label: 'Gotowe — pula, SP i wartość (albo rozpoznanie)' },
+        { value: 'no', label: 'Niekompletne — czegoś brakuje' },
+      ];
+    if (field === 'missing') return (Object.keys(MISSING_LABEL) as Missing[]).map((k) => ({ value: k, label: MISSING_LABEL[k] }));
     if (field === 'kind')
       return [
         { value: 'parent', label: 'Nadrzędne (z otwartym podzadaniem)' },
@@ -9962,7 +10219,6 @@ export default function App() {
       scope: scopePref,
       onlyMine,
       withUnassigned,
-      showDone,
       planDone,
       planReview,
       planSort,
@@ -9990,7 +10246,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -10233,9 +10489,12 @@ export default function App() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // Paleta ma pierwszenstwo i dziala takze w polach tekstowych.
+      // Paleta ma pierwszenstwo i dziala takze w polach tekstowych — ale nie nad oknem (kafelki, zespol,
+      // tagi i epiki): otwierala sie POD nim, niewidoczna.
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        // Bez palety, ale tez bez skrotu przegladarki (Ctrl+K = pasek wyszukiwania) — wyrzucal z aplikacji.
         e.preventDefault();
+        if (tilesOpen || teamOpen || manageOpen) return;
         setPaletteOpen((v) => !v);
         return;
       }
@@ -10276,6 +10535,14 @@ export default function App() {
         return;
       }
       if (picker) return; // popover ma wlasna obsluge klawiatury
+      // Okna (kafelki, zespol, tagi i epiki) przykrywaja liste: jej skroty nie moga dzialac pod spodem.
+      // Kafelki maja wlasna klawiature; pozostale zamyka Esc.
+      if (tilesOpen) return;
+      if (teamOpen || manageOpen) {
+        // Okno tagow i epikow samo obsluguje Esc (nie zamyka sie w trakcie zapisu ani spod pola edycji).
+        if (e.key === 'Escape' && teamOpen && !e.defaultPrevented) setTeamOpen(false);
+        return;
+      }
       if (menu || viewMenu) {
         if (e.key === 'Escape') {
           setMenu(null);
@@ -10443,6 +10710,9 @@ export default function App() {
     views,
     applyView,
     viewMode,
+    tilesOpen,
+    teamOpen,
+    manageOpen,
   ]);
 
   const applyStage = useCallback(
@@ -10595,7 +10865,7 @@ export default function App() {
   const onChipDragEnd = useCallback((e: DragEndEvent) => {
     const from = String(e.active.id).replace(/^chip:/, '');
     const to = e.over ? String(e.over.id).replace(/^chip:/, '') : '';
-    if (to && from !== to) setFilters((f) => moveCondition(f, from, to));
+    if (to && from !== to) setFilters((f) => moveCondition(f, from, to, (c) => c.values.length > 0));
   }, []);
 
   const onDragStart = useCallback((e: DragStartEvent) => setDraggingId(parseDrag(e.active.id)), []);
@@ -10743,11 +11013,6 @@ export default function App() {
    * Kolejny sprint do planowania: najwczesniejszy ze statusem `planned`.
    * Sprinty przychodza posortowane po dacie startu, wiec wystarczy pierwszy.
    */
-  /* Etapy „W toku" aktywnego sprintu — zadania w nich nie wchodza do mocy w widoku planowania. */
-  const etapyWToku = useMemo(
-    () => new Set(stages.filter((s) => s.type === 'WORK').map((s) => s.id)),
-    [stages],
-  );
   const nextSprint = useMemo(
     () => sprints.find((sp) => sp.status === 'planned') ?? null,
     [sprints],
@@ -10800,7 +11065,7 @@ export default function App() {
             me,
             itUsers: config?.itUsers ?? NO_IDS,
             itDepartments: config?.itDepartments ?? NO_IDS,
-            kierownicy: capacityExcluded,
+            kierownicy: managers,
             unassignedId: UNASSIGNED_ID,
             departmentsOf: new Map(directory.map((e) => [e.id, e.departments])),
           }
@@ -10817,11 +11082,20 @@ export default function App() {
         list.map(async (id) => {
           const t = tasks.find((x) => x.id === id);
           const nowy = itCtx && t ? ownerOnEnteringSprint(t, t.sprintId, sprintId, itCtx) : null;
+          /* Kolumna wejsciowa tylko z rejestru; aktywny → nastepny nie cofa etapu (patrz `entersFromRegister`). */
+          const zRejestru = entersFromRegister(t?.sprintId ?? null, sprintId);
           const wSprincie = await mutate(
             id,
-            { sprintId, stageId: stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null },
-            /* Do sprintu — przez kolumne wejsciowa (karta + numer IT-NNN); do rejestru — sama przynaleznosc. */
-            () => (sprintId === null ? moveToSprint(id, backlogId ?? 0) : moveToSprintViaEntry(id, sprintId)),
+            {
+              sprintId,
+              stageId: zRejestru ? (stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null) : null,
+            },
+            () =>
+              sprintId === null
+                ? moveToSprint(id, backlogId ?? 0)
+                : zRejestru
+                  ? moveToSprintViaEntry(id, sprintId)
+                  : moveToSprint(id, sprintId),
             'sprint',
           );
           if (wSprincie) oznacz(id);
@@ -10904,16 +11178,16 @@ export default function App() {
    * Bez zadan kierownika: planowanie mierzy do tego limitu sam zespol, wiec
    * punkty kierownika w odniesieniu zawyzalyby wolne miejsce o jego udzial.
    */
-  const kierownicy = capacityExcluded;
+  const kierownicy = managers;
   const lastDone = useMemo(() => {
     const done = [...sprints].reverse().find((sp) => sp.status === 'completed');
     if (!done) return null;
     const points = sumaDoLimitu(
       tasks.filter((t) => t.sprintId === done.id),
-      kierownicy,
+      capacityExcluded,
     );
     return points > 0 ? { name: done.name, points } : null;
-  }, [sprints, tasks, kierownicy]);
+  }, [sprints, tasks, capacityExcluded]);
 
   /*
    * WLASNA baza planowania: te same filtry i wyszukiwanie co lista, ale BEZ
@@ -11836,9 +12110,14 @@ export default function App() {
               values={tileValues}
               prev={counterPrev}
               activeId={activeTileId}
+              pending={pendingTiles}
               onPick={pickTile}
-              onAdd={() => setTilesOpen('new')}
               onManage={() => setTilesOpen('manage')}
+              onDefaults={() =>
+                void loadDefaultTiles(tilesCfg).then((next) =>
+                  next ? setTilesCfg(next) : toast('Nie udało się wczytać domyślnych kafelków.'),
+                )
+              }
             />
           </>
         )}
@@ -11953,7 +12232,7 @@ export default function App() {
           {/* Chipy filtrow (przewijane POZIOMO), a TUZ ZA NIMI „+ Filtr" — dodawanie
               dopisuje kolejny chip na koncu, wiec przycisk stoi tam, gdzie pojawi sie efekt. */}
           {anyFilter(filters) && (
-            <DndContext sensors={sensors} onDragEnd={onChipDragEnd}>
+            <DndContext sensors={sensors} collisionDetection={chipCollision} onDragEnd={onChipDragEnd}>
             <ScrollX onSpare={onChipsSpare}>
               {filters
                 .filter((c) => c.values.length)
@@ -12111,7 +12390,7 @@ export default function App() {
             rejestrTasks={planTasks}
             activeSprint={activeSprint}
             nextSprint={nextSprint}
-            etapyWToku={etapyWToku}
+            etapyWToku={workStageIds}
             team={team}
             onOpenTeam={() => setTeamOpen(true)}
             onCreateSprint={nastepnySprint && me !== null ? zalozSprint : undefined}
@@ -12144,6 +12423,7 @@ export default function App() {
             sort={planSort}
             dodane={planDodane}
             kierownicy={kierownicy}
+            pozaBudzetem={capacityExcluded}
             sortFields={PLAN_SORTS}
             onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}
             /*
@@ -12198,7 +12478,7 @@ export default function App() {
             epicOf={epicOf}
             subCounts={childStats}
             relatedIds={relatedIds}
-            headExtra={(s) => (capacityShown && waitingStageIds.has(s.id) ? <CapacityChip cap={capacityShown} /> : null)}
+            headExtra={(s) => (capacityShown && waitingStageIds.has(s.id) ? <CapacityChip cap={capacityShown} compact /> : null)}
             pending={pending}
             activeId={flat[cursor]?.id ?? null}
             openId={openId}
@@ -12770,19 +13050,47 @@ export default function App() {
           epics={epics}
           groupId={groupId}
           initialTab={manageOpen}
-          onChanged={() => void reload(true)}
+          onChanged={reloadFresh}
           onClose={() => setManageOpen(null)}
         />
       )}
 
       {teamOpen && (
-        <TeamModal team={team} people={people} now={now} onChange={setTeam} onClose={() => setTeamOpen(false)} />
+        <TeamModal team={team} people={teamCandidates} now={now} onChange={setTeam} onClose={() => setTeamOpen(false)} />
       )}
       {tilesOpen && (
         <TilesModal
           cfg={tilesCfg}
           current={{ scope: scopePref, filters: toTileFilters(filters), onlyMine, showDone }}
           startNew={tilesOpen === 'new'}
+          views={views.map((v) => ({
+            id: v.id,
+            name: v.name,
+            view: { scope: v.scope, filters: toTileFilters(v.filters), onlyMine: v.onlyMine, showDone: v.showDone },
+          }))}
+          describeFilter={(c) => {
+            const f = c.field as FilterField;
+            const what =
+              c.op === 'between'
+                ? rangeLabel(f, c.values)
+                : `${opLabel(c.op as FilterOp, c.values.length > 1)} ${c.values.map((v) => filterValueLabel(f, v)).join(', ')}`;
+            return `${FILTER_LABEL[f] ?? c.field} ${what}`;
+          }}
+          onSaveAsView={(name, v) =>
+            setViews((vs) => [
+              ...vs,
+              {
+                id: `v${Date.now()}`,
+                name,
+                ...viewSnapshot,
+                query: '',
+                scope: v.scope,
+                onlyMine: v.onlyMine,
+                showDone: v.showDone,
+                filters: refreshGroups(v.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })) as Filters,
+              },
+            ])
+          }
           onChange={setTilesCfg}
           onClose={() => setTilesOpen(null)}
         />

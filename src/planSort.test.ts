@@ -360,3 +360,14 @@ describe('domyslna kolejnosc planowania: plomien, macierz A-D, zwrot, mniejsze S
     ).toEqual(PLAN_SORT_DOMYSLNY);
   });
 });
+
+describe('migratePlanSort — strategia przy istniejacej puli', () => {
+  it('wlasny stos z „pula" i „strategia" traci tylko „strategia" (bez dubla)', () => {
+    const wlasny = [
+      { by: 'pula', dir: 'asc' },
+      { by: 'strategia', dir: 'asc' },
+      { by: 'sp', dir: 'desc' },
+    ] as const;
+    expect(migratePlanSort([...wlasny])?.map((l) => l.by)).toEqual(['pula', 'sp']);
+  });
+});

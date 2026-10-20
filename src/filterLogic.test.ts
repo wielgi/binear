@@ -77,10 +77,30 @@ describe('moveCondition', () => {
     expect(r.map((c) => c.id)).toEqual(['b', 'c', 'a']);
     expect(moveCondition([mk('a', true), mk('b', true), mk('c', true)], 'c', 'a').map((c) => c.id)).toEqual(['c', 'a', 'b']);
   });
-  it('wyjmuje przenoszony chip z grupy LUB i zdejmuje nawias z jednym warunkiem', () => {
+  it('wyjmuje chip z grupy LUB, gdy wyladuje poza nia, i zdejmuje nawias z jednym warunkiem', () => {
     const r = moveCondition([mk('a', true, 'x'), mk('b', true, 'x'), mk('c', true)], 'a', 'c');
     expect(r.map((c) => c.id)).toEqual(['b', 'c', 'a']);
     expect(r.every((c) => !c.or)).toBe(true);
+  });
+  it('przestawianie w obrebie grupy zostawia LUB', () => {
+    const r = moveCondition([mk('a', true, 'x'), mk('b', true, 'x'), mk('c', true)], 'b', 'a');
+    expect(r.map((c) => c.id)).toEqual(['b', 'a', 'c']);
+    expect(r.map((c) => c.or)).toEqual(['x', 'x', undefined]);
+  });
+  it('chip upuszczony w srodek grupy do niej dolacza, zamiast ja rozcinac', () => {
+    const r = moveCondition([mk('a', true, 'x'), mk('b', true, 'x'), mk('c', true, 'x'), mk('d', true)], 'd', 'b');
+    expect(r.map((c) => c.id)).toEqual(['a', 'd', 'b', 'c']);
+    expect(r.every((c) => c.or === 'x')).toBe(true);
+  });
+  it('chip obok cudzej grupy (na jej brzegu) laczy sie ORAZ', () => {
+    const r = moveCondition([mk('a', true), mk('b', true, 'x'), mk('c', true, 'x')], 'a', 'c');
+    expect(r.map((c) => c.id)).toEqual(['b', 'c', 'a']);
+    expect(r.map((c) => c.or)).toEqual(['x', 'x', undefined]);
+  });
+  it('sasiadow liczy tylko wsrod widocznych chipow', () => {
+    const l = [mk('a', true, 'x'), mk('e', true), mk('b', true, 'x'), mk('d', true)];
+    const r = moveCondition(l, 'd', 'b', (c) => c.id !== 'e');
+    expect(r.find((c) => c.id === 'd')?.or).toBe('x');
   });
   it('bez zmian, gdy to samo miejsce albo nieznane id', () => {
     const l = [mk('a', true), mk('b', true)];
