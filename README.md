@@ -162,7 +162,7 @@ undelivered tasks to the next sprint and the picture is gone):
 
 The row of cards under the header is made of **tiles**. A tile is a **saved view**: a scope (active sprint /
 outside / all), the filters from the filter bar and the *only mine* switch, plus how it looks — name, colour
-(8 swatches or any colour), one of 48 icons, and what it counts (**tasks** or the **sum of SP**, the other number
+(8 swatches or any colour), one of 56 icons, and what it counts (**tasks** or the **sum of SP**, the other number
 shown smaller). Tiles sit in **groups**; a group caption shows the sum of its tiles and the change against the
 previous day, and a group can hide its caption.
 
@@ -211,8 +211,8 @@ exactly — each task outside the sprint is in one of them:
 | **Do wywiadu** | outside the sprint, neither `DO-STARTU` nor `OCZEKUJE-NA-ODPOWIEDZ` (new tasks, or tagged only `BUG`, `Wysoki`…) |
 | **Czeka na odpowiedź** | `OCZEKUJE-NA-ODPOWIEDZ` without `DO-STARTU`, nobody outside IT answered yet |
 | **Do analizy odpowiedzi** | the same tag, and someone outside IT answered with substance after our last questions |
-| **Do wyceny** | `DO-STARTU`, **Gotowość: not ready** |
-| **Gotowe do startu** | `DO-STARTU`, **Gotowość: ready** — can be pulled into a sprint |
+| **Do wyceny** | `DO-STARTU` without story points **or** without a matrix tag `A`–`D` |
+| **Gotowe do startu** | `DO-STARTU` with story points **and** a matrix tag `A`–`D` — can be pulled into a sprint |
 | **Sprint** | the active sprint's remaining work (without *Wdrożone*, *Pull Request* and *Do zatwierdzenia*) |
 | **Ważne** *(own group, no caption)* | open tasks with the **flame** **or** the `BUG` tag, in the sprint or outside it, deferred excluded |
 | **Odłożone** | deferred tasks (status 6) outside the sprint |
@@ -221,11 +221,11 @@ exactly — each task outside the sprint is in one of them:
 
 The two-tags case is in the filters too: a task with both `DO-STARTU` and `OCZEKUJE-NA-ODPOWIEDZ` counts as
 `DO-STARTU`. Checked against the old built-in counters on live data: every tile gives the same number, except
-**Sprint**, which used to count every task of the sprint, done ones included. One deliberate change in
-the rules: a task tagged with two pools at once now waits in **Do wyceny** (missing: fix the pools); the old
-counters guessed one pool and could count it as ready.
+**Sprint**, which used to count every task of the sprint, done ones included, and **Do wyceny** / **Gotowe do
+startu**, which now follow the Eisenhower matrix (`A`–`D`) instead of the pools.
 
-**What "ready" means.** A `DO-STARTU` task is ready to start when it has a **pool**, an
+**What "ready" means (the *Gotowość* and *Brakuje* filter fields).** The default tiles no longer use it, but
+the fields stay for your own tiles and views. A `DO-STARTU` task is ready to start when it has a **pool**, an
 **estimate**, and the value that its pool asks for:
 
 - **a pool** — exactly one of `CIAGLOSC` (continuity), `RDZEN` (core) or `DZIAL` (department).
@@ -261,21 +261,17 @@ completeness a chat decides: tasks up to 4 h without a complete set of tags
 Chats are read only while some filter or tile uses *Gotowość* or *Brakuje*. While they load, those tiles show
 `…` rather than a wrong number, and if chats can't be read at all (no `im` scope) they stay on `…`.
 
-Missing any of the above (pool included) puts the task on **Do wyceny**, not **Gotowe do startu**.
+Missing any of the above (pool included) makes the task *not ready*.
 
-**Planning: sort order.** The default stack is, in this order: the **Bitrix priority (flame)**,
-the **pool**, **payback ascending**, the `Wysoki` tag, and story points descending.
+**Planning: sort order.** The default stack follows the Eisenhower matrix, in this order: the **Bitrix
+priority (flame)**, the **matrix tag** `A` → `B` → `C` → `D` (no tag last), **payback ascending**, and story points
+ascending (smaller first, no estimate last).
 
-- The flame means an outage (the company can't work), so nothing overtakes it — not even a pool.
-- The **pool** goes next, in the order `CIAGLOSC` → `RDZEN` → `DZIAL` → no pool, so one pool is
-  worked through before the next.
-- Within a pool **payback** comes first — `ZWROT-3`, `ZWROT-6`, `ZWROT-12`, `ZWROT-12+`, with `WYMOG`
-  first (nearest deadline first) and tasks without a payback tag last. `Wysoki` only breaks ties within the
-  same payback, so a `Wysoki` task with `ZWROT-12+` never jumps over a `ZWROT-3` one. `RDZEN` tasks usually
-  have no payback, so there `Wysoki` and story points (or the manual order) decide.
-- Story points descending break what is left.
+- The flame means an outage (the company can't work), so nothing overtakes it.
+- Payback: `ZWROT-3`, `ZWROT-6`, `ZWROT-12`, `ZWROT-12+`, with `WYMOG` first (nearest deadline first) and tasks
+  without a payback tag last.
 
-Every level is a sort level (**Pula**, **Tag Wysoki**, **Okres zwrotu**…) you can reorder,
+Every level is a sort level (**Macierz (A–D)**, **Pula**, **Tag Wysoki**, **Okres zwrotu**…) you can reorder,
 reverse or drop from the sort menu. Sorting hides nothing: the register still shows every
 `DO-STARTU` task, also those with no pool or payback worked out yet.
 

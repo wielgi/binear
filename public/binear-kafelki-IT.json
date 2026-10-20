@@ -206,10 +206,10 @@
           ]
         },
         {
-          "field": "ready",
+          "field": "points",
           "op": "is",
           "values": [
-            "no"
+            "\u0000"
           ],
           "or": "g5"
         },
@@ -266,10 +266,10 @@
           ]
         },
         {
-          "field": "ready",
-          "op": "is",
+          "field": "points",
+          "op": "isNot",
           "values": [
-            "yes"
+            "\u0000"
           ]
         },
         {

@@ -96,7 +96,7 @@ function Swatches({ value, onPick }: { value: string; onPick: (k: string) => voi
 
 /**
  * Wybor ikony: w formularzu jeden kwadrat z biezaca ikona w kolorze kafelka, a cala siatka dopiero po
- * kliknieciu — 48 ikon na stale zajmowalo pol okna i przytlaczalo reszte formularza.
+ * kliknieciu — 56 ikon na stale zajmowalo pol okna i przytlaczalo reszte formularza.
  */
 function Icons({ value, color, onPick }: { value: string; color: string; onPick: (k: string) => void }) {
   /* Pozycja okienka liczona z przycisku: okno kafelkow przewija sie i przycina tresc (overflow), wiec okienko

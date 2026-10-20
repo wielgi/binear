@@ -142,6 +142,8 @@ export const TILE_ICON_PICKER = [
   'link', 'clip', 'pin', 'search', 'refresh', 'person', 'users', 'eye', 'smile', 'heart', 'star', 'flame', 'bug',
   'alert', 'zap', 'bell', 'lock', 'shield', 'bulb', 'dollar', 'cart', 'gift', 'box', 'truck', 'warehouse', 'mail',
   'phone', 'globe', 'cpu', 'wrench', 'camera', 'board', 'columns', 'chart',
+  // dla zadan malo waznych, do odlozenia albo do usuniecia
+  'trash', 'xCircle', 'ban', 'archive', 'arrowDown', 'moon', 'eyeOff', 'pause',
 ] as const;
 
 /** Kolor kafelka: klucz z palety albo dowolny kolor w zapisie #rrggbb (wybrany z pickera). */
