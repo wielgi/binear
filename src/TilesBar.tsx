@@ -1,9 +1,8 @@
-import { useLayoutEffect, useRef, type CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 
 import { Delta } from './CounterHistory';
 import type { DaySnapshot } from './counters';
 import { colorCss, groupTotals, shownValue, type CustomTile, type TileGroup, type TileNumbers } from './customTiles';
-import { PenIcon } from './icons';
 import { zadan } from './plural';
 import { TILE_ICON_NODES } from './tileIcons';
 
@@ -14,7 +13,8 @@ export const tileColorCss = colorCss;
  * Wlasne kafelki uzytkownika: grupy z podpisami, w nich kafelki z liczba zadan albo suma SP. Klik
  * stosuje zapisany widok (zakres + filtry); ponowny klik czysci filtry. Podpis grupy pokazuje, jak w zestawie
  * IT, SUME kafelkow (zadania i SP) z roznica wzgledem poprzedniego dnia. Wyglad bierzemy z tych samych klas
- * co wbudowane liczniki, zeby oba rzedy wygladaly jak jedna rodzina.
+ * co wbudowane liczniki, zeby oba rzedy wygladaly jak jedna rodzina. Edycja kafelkow jest w oknie „Ustawienia"
+ * (zakladka „Kafelki").
  */
 export function TilesBar({
   groups,
@@ -23,7 +23,7 @@ export function TilesBar({
   activeId,
   pending,
   onPick,
-  onManage,
+  wrap,
   onDefaults,
 }: {
   groups: { group: TileGroup; tiles: CustomTile[] }[];
@@ -34,32 +34,13 @@ export function TilesBar({
   /** Kafelki, ktorych liczba jeszcze sie liczy (SP albo czaty nie doszly) — „…" zamiast liczby, bez strzalki. */
   pending: ReadonlySet<string>;
   onPick: (tile: CustomTile) => void;
-  onManage: () => void;
+  /** Zawijanie w kolejne rzedy zamiast przewijania w poziomie. */
+  wrap: boolean;
   /** Wczytuje domyslny zestaw kafelkow; przycisk tylko przy pustym pasku. */
   onDefaults: () => void;
 }) {
-  /*
-   * Olowek to kwadrat o wysokosci kafelkow, a ta zalezy od tresci (strzalka „od wczoraj" dodaje
-   * linie). CSS nie umie wziac szerokosci z wysokosci tak, zeby pasek ja uwzglednil, wiec mierzymy rzad, w ktorym
-   * stoi olowek (ma wysokosc kafelkow), i ustawiamy bok kwadratu. Bok nie zmienia wysokosci rzedu — bez petli.
-   */
-  const pen = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
-    const el = pen.current;
-    const row = el?.parentElement;
-    if (!el || !row) return;
-    const fit = () => {
-      const side = `${Math.round(row.offsetHeight)}px`;
-      el.style.width = side;
-      el.style.height = side;
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(row);
-    return () => ro.disconnect();
-  }, []);
   return (
-    <div className="counters counters-custom" role="toolbar" aria-label="Moje kafelki">
+    <div className={`counters counters-custom${wrap ? ' counters-wrap' : ''}`} role="toolbar" aria-label="Moje kafelki">
       {groups.map(({ group, tiles }) => {
         const total = groupTotals(tiles, values);
         const groupPending = tiles.some((t) => pending.has(t.id));
@@ -139,28 +120,6 @@ export function TilesBar({
           </div>
         </div>
       )}
-      <div className="counters-group counters-tools counters-tools-edit">
-        {/* Przy kafelkach niewidoczny odpowiednik podpisu grupy: olowek staje na wysokosci kafelkow, a nie od linii
-            podpisow (wygladal wtedy na wyzszy od nich). Na pustym pasku podpisow nie ma, wiec i odstepu nie trzeba. */}
-        {groups.length > 0 && (
-          <span className="counters-cap counters-cap-total counters-cap-static counters-cap-ghost" aria-hidden>
-            <span className="counters-cap-text">&nbsp;</span>
-            <span className="counters-cap-count">0</span>
-            <span className="counters-cap-sp">0 SP</span>
-          </span>
-        )}
-        <div className="counters-group-row counters-tools-row">
-          <button
-            ref={pen}
-            className="counter counter-add counter-icon-only"
-            onClick={onManage}
-            title="Kafelki: dodaj bieżący widok, kolejność, grupy, kolory, eksport i import"
-            aria-label="Edytuj kafelki"
-          >
-            <PenIcon />
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

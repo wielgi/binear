@@ -119,6 +119,7 @@ import {
   PenIcon,
   EyeIcon,
   CalendarIcon,
+  SlidersIcon,
   TagIcon,
   LayersIcon,
   HashIcon,
@@ -163,6 +164,7 @@ import {
   UNASSIGNED_ID,
   UNASSIGNED_LABEL,
 } from './taskView';
+import { EnvPane } from './EnvSettings';
 import { Picker, type Anchor, type Option } from './Picker';
 import {
   describe as describeAction,
@@ -190,7 +192,7 @@ import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { SprintSummary } from './SprintSummary';
 import { TilesBar } from './TilesBar';
-import { TilesModal } from './TilesModal';
+import { TilesPane } from './TilesPane';
 import { groupedKeys, matchGrouped, moveCondition, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
 import {
   groupedTiles,
@@ -212,8 +214,10 @@ import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } f
 import { useAnsweredTasks, useChatFacts, useCounterHistory } from './CounterHistory';
 import { CapacityChip, useNow } from './CapacityChip';
 import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
-import { TeamModal } from './TeamModal';
-import { ManageModal } from './ManageModal';
+import { TeamPane } from './TeamPane';
+import { ManagePane } from './ManagePane';
+import { SETTINGS_TABS, SettingsModal, type SettingsTab } from './SettingsModal';
+import { AskDialog } from './AskDialog';
 import { teamFirst } from './peopleOrder';
 import {
   budgetExcludedIds,
@@ -651,6 +655,8 @@ interface Settings {
   showEmpty: boolean;
   /** Karty licznikow pod naglowkiem (patrz `CountersBar`). */
   showCounters: boolean;
+  /** Pasek kafelkow zawija sie w kolejne rzedy zamiast przewijac w poziomie (Ustawienia → Kafelki). */
+  tilesWrap?: boolean;
   /**
    * PUSTE kategorie (kolumny/grupy), ktore mimo braku zadan maja byc widoczne —
    * po NAZWIE, bo te same etapy maja rozne id w kazdym sprincie (patrz stageOrder).
@@ -7175,6 +7181,18 @@ function DisplaySelect({
   const [open, setOpen] = useState(false);
   const label = options.find((o) => o.value === value)?.label ?? '—';
   let lastSection = '';
+  /* Esc zamyka SAMA liste — przechwycony, zanim dojdzie do panelu Opcji albo okna ustawien (zamknelyby sie cale). */
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open]);
 
   return (
     <div className="ds-wrap">
@@ -7245,15 +7263,8 @@ function ViewMenu({
     scope: Scope;
     mine: boolean;
     unassigned: boolean;
-    /** Wariant kolorowania grup listy — do porownania na zywo. */
-    tint: ListTint;
-    deadline: DeadlineLook;
     empty: boolean;
-    counters: boolean;
-    /** Kafelki do wyboru w panelu olowka — klucz, podpis, czy widoczny. */
     filtersOn: boolean;
-    theme: Theme;
-    font: Font;
   };
   activeSprintName: string | null;
   /** Zakresy, ktore maja sens w tym projekcie — bez sprintu zostaje sam "Wszystkie". */
@@ -7270,16 +7281,12 @@ function ViewMenu({
     scope: (s: Scope) => void;
     mine: () => void;
     unassigned: () => void;
-    tint: (v: ListTint) => void;
-    deadline: (v: DeadlineLook) => void;
     empty: () => void;
-    counters: () => void;
     toggleColumn: (name: string) => void;
     clearFilters: () => void;
     reload: () => void;
+    settings: () => void;
     palette: () => void;
-    theme: (t: Theme) => void;
-    font: (f: Font) => void;
   };
 }) {
   const Control = DisplaySelect;
@@ -7287,20 +7294,24 @@ function ViewMenu({
      miescily sie obok ikon i podpis wchodzil na sasiedni. Szerszy panel daje tez oddech
      wierszom „etykieta + kontrolka" ponizej. */
   const width = 440;
-  const height = 510;
+  /* Wysokosc z pomiaru (zalezy od widoku i od tego, czy sa „Puste grupy") — tylko po to, by panel nie wyjechal
+     pod dolna krawedz ekranu. 510 to start przed pierwszym pomiarem; pomiar jest przed malowaniem, bez skoku. */
+  const panel = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(510);
+  useLayoutEffect(() => {
+    const h = panel.current?.offsetHeight;
+    if (h && h !== height) setHeight(h);
+  });
   const rowClass = 'ds-row';
   // Tablica to zawsze kanban po etapach — grupowanie i podgrupowanie jej nie dotycza,
   // wiec na tablicy oba wiersze sa wyszarzone i nieklikalne (patrz .ds-row-off).
   // Wykresy i planowanie, tak jak tablica, nie maja czego grupowac — kazdy z nich
   // ma wlasny, staly podzial. Stad warunek "cokolwiek poza lista".
   const boardMode = state.view !== 'list';
-  /* Planowanie ma wlasne filtry i wlasny podzial — czesc wierszy panelu go nie dotyczy. */
-  const planMode = state.view === 'planning';
   const groupRow = `${rowClass}${boardMode ? ' ds-row-off' : ''}`;
 
   // Panel „Kolumny/Grupy" wyskakuje jako OSOBNY panel obok (panel w panelu), nie sekcja.
   const [colsOpen, setColsOpen] = useState(false);
-  const [permsOpen, setPermsOpen] = useState(false);
   // Nazwa mowi, po co ten panel jest: trzymac PUSTE kategorie widoczne mimo braku zadan.
   const colTitle = boardMode
     ? 'Puste kolumny'
@@ -7326,7 +7337,7 @@ function ViewMenu({
   return (
     <>
       <div className="picker-backdrop" onClick={onClose} onContextMenu={(e) => e.preventDefault()} />
-      <div className="menu view-menu" style={{ left, top, width }}>
+      <div ref={panel} className="menu view-menu" style={{ left, top, width }}>
         {/* Zakladki widoku */}
         <div className="ds-tabs" role="tablist">
           <button
@@ -7438,69 +7449,10 @@ function ViewMenu({
           />
         </div>
 
-        <div className={rowClass}>
-          <span className="ds-label">Motyw</span>
-          <Control
-            value={state.theme}
-            options={THEMES.map((t) => ({ value: t.value, label: t.label, section: t.section }))}
-            onPick={(v) => on.theme(v as Theme)}
-          />
-        </div>
-
-        {/* Kolor grup listy — trzy warianty obok siebie, zeby dalo sie je porownac
-            na zywo zamiast wybierac z opisu. */}
-        <div className={rowClass}>
-          <span className="ds-label">Kolor grup</span>
-          <Control
-            value={state.tint}
-            options={LIST_TINTS.map((t) => ({ value: t.key, label: t.label }))}
-            onPick={(v) => on.tint(v as ListTint)}
-          />
-        </div>
-
-        {/* Termin w wierszu — dwa warianty, tak samo do porownania na zywo. */}
-        <div className={rowClass}>
-          <span className="ds-label">Termin</span>
-          <Control
-            value={state.deadline}
-            options={DEADLINE_LOOKS.map((d) => ({ value: d.key, label: d.label }))}
-            onPick={(v) => on.deadline(v as DeadlineLook)}
-          />
-        </div>
-
-        <div className={rowClass}>
-          <span className="ds-label">Czcionka</span>
-          <Control
-            value={state.font}
-            options={FONTS.map((f) => ({ value: f.value, label: f.label, hint: f.hint }))}
-            onPick={(v) => on.font(v as Font)}
-          />
-        </div>
-
         <div className="menu-sep" />
 
         {check('Tylko moje', state.mine, on.mine)}
         {check('+ nieprzypisane', state.unassigned, on.unassigned, !state.mine)}
-        {/*
-          W planowaniu ten przelacznik nie dziala — ten widok ma wlasny odsiew,
-          w swoim menu „Opcje" (osobno zakonczone, osobno oddane do akceptacji,
-          bo w Bitriksie to status 5 i 4, a nie jedno). Wygaszamy go tutaj,
-          zamiast zostawiac przycisk, ktory nic nie robi.
-        */}
-        {/* Liczniki sa tylko nad lista i tablica — w planowaniu nie ma ich czym chowac. */}
-        <div className={`ds-check ds-check-row${planMode ? ' ds-check-off' : ''}`}>
-          <label htmlFor="ds-show-counters" className="ds-check-row-label">
-            Pokaż kafelki
-          </label>
-          <input
-            id="ds-show-counters"
-            type="checkbox"
-            checked={state.counters}
-            disabled={planMode}
-            onChange={on.counters}
-          />
-        </div>
-
         <div className="menu-sep" />
         {/* „Kolumny/Grupy" otwiera OSOBNY panel obok — w dolnej sekcji, obok akcji. */}
         {columns.length > 0 && (
@@ -7532,20 +7484,12 @@ function ViewMenu({
           <kbd>{MOD}</kbd>
           <kbd>K</kbd>
         </button>
-        {/* Co ten webhook potrafi — przydatne po podmianie tokenu na inny portal. */}
-        <button
-          className={`menu-item${permsOpen ? ' menu-item-on' : ''}`}
-          onClick={() => setPermsOpen((o) => !o)}
-        >
+        {/* Srodowisko, zespol, tagi i epiki, uprawnienia webhooka — jedno okno z zakladkami. */}
+        <button className="menu-item" onClick={() => { onClose(); on.settings(); }}>
           <span className="menu-check" />
-          <span className="menu-label">Uprawnienia webhooka</span>
-          <span className="menu-flyarrow">
-            <ChevronIcon open={permsOpen} />
-          </span>
+          <span className="menu-label">Ustawienia</span>
         </button>
       </div>
-
-      {permsOpen && <PermsFlyout left={flyLeft} top={top} width={flyW} />}
 
       {/* Panel w panelu — osobny, obok menu widoku; checkbox na kazda kolumne/grupe. */}
       {colsOpen && columns.length > 0 && (
@@ -7582,6 +7526,99 @@ function ViewMenu({
   );
 }
 
+/* Stale zbiory zakladek z niezapisanymi zmianami — ta sama referencja miedzy renderami. */
+const NO_UNSAVED: ReadonlySet<SettingsTab> = new Set();
+const ENV_UNSAVED: ReadonlySet<SettingsTab> = new Set(['env']);
+
+/** Pasek kafelkow na liscie: schowany, jeden przewijany rzad albo zawijany (Ustawienia: Kafelki i Wyglad). */
+type TileBar = 'off' | 'row' | 'wrap';
+const TILE_BARS: { value: TileBar; label: string }[] = [
+  { value: 'row', label: 'Jeden rząd, przewijany' },
+  { value: 'wrap', label: 'Zawijany w kolejne rzędy' },
+  { value: 'off', label: 'Ukryty' },
+];
+
+/**
+ * Zakladka „Wyglad" okna ustawien: wszystko, co zmienia wyglad w tej przegladarce (a nie biezacy widok — ten
+ * zostaje w panelu Opcji). Kolor grup i termin mozna porownac na zywo — okno nie zaslania calej listy.
+ */
+function LookPane({
+  theme,
+  font,
+  tint,
+  deadline,
+  bar,
+  on,
+}: {
+  theme: Theme;
+  font: Font;
+  tint: ListTint;
+  deadline: DeadlineLook;
+  /** Pasek kafelkow — ten sam przelacznik co w zakladce „Kafelki" (wyglad listy, wiec jest i tu). */
+  bar: TileBar;
+  on: {
+    theme: (t: Theme) => void;
+    font: (f: Font) => void;
+    tint: (t: ListTint) => void;
+    deadline: (d: DeadlineLook) => void;
+    bar: (b: TileBar) => void;
+  };
+}) {
+  const row = (label: string, hint: string, control: ReactNode) => (
+    <div className="env-row">
+      <span className="env-label">{label}</span>
+      <span className="env-control">{control}</span>
+      <span className="env-hint">{hint}</span>
+    </div>
+  );
+  return (
+    <div className="look-pane">
+      <div className="ds-colhint">Zapisane tylko w tej przeglądarce.</div>
+      {row(
+        'Motyw',
+        'Jasny, ciemny albo za systemem.',
+        <DisplaySelect
+          value={theme}
+          options={THEMES.map((t) => ({ value: t.value, label: t.label, section: t.section }))}
+          onPick={(v) => on.theme(v as Theme)}
+        />,
+      )}
+      {row(
+        'Czcionka',
+        'Krój całej aplikacji.',
+        <DisplaySelect
+          value={font}
+          options={FONTS.map((f) => ({ value: f.value, label: f.label, hint: f.hint }))}
+          onPick={(v) => on.font(v as Font)}
+        />,
+      )}
+      {row(
+        'Kolor grup',
+        'Jak lista barwi nagłówki grup.',
+        <DisplaySelect
+          value={tint}
+          options={LIST_TINTS.map((t) => ({ value: t.key, label: t.label }))}
+          onPick={(v) => on.tint(v as ListTint)}
+        />,
+      )}
+      {row(
+        'Termin',
+        'Jak wiersz pokazuje termin zadania.',
+        <DisplaySelect
+          value={deadline}
+          options={DEADLINE_LOOKS.map((d) => ({ value: d.key, label: d.label }))}
+          onPick={(v) => on.deadline(v as DeadlineLook)}
+        />,
+      )}
+      {row(
+        'Pasek kafelków',
+        'Gdy kafelki się nie mieszczą: przewijany rząd albo kolejne rzędy. To samo co w zakładce Kafelki.',
+        <DisplaySelect value={bar} options={TILE_BARS} onPick={(v) => on.bar(v as TileBar)} />,
+      )}
+    </div>
+  );
+}
+
 /**
  * „Uprawnienia webhooka" — co ten token potrafi, a czego nie.
  *
@@ -7592,7 +7629,7 @@ function ViewMenu({
  * Sondy ida BEZ PARAMETROW, wiec niczego nie zapisuja — nawet te przy metodach
  * kasujacych. Patrz `probeMethod`.
  */
-function PermsFlyout({ left, top, width }: { left: number; top: number; width: number }) {
+function PermsPane() {
   /* Klucz to POZYCJA na liscie, nie nazwa metody: `timeman.status` wystepuje
      trzy razy, za kazdym razem z innym pytaniem. */
   const [wyniki, setWyniki] = useState<Record<number, { stan: ProbeStan; opis: string }>>({});
@@ -7661,8 +7698,7 @@ function PermsFlyout({ left, top, width }: { left: number; top: number; width: n
   const zrobione = Object.keys(wyniki).length;
 
   return (
-    <div className="menu perms-flyout" style={{ left, top, width: width + 120 }}>
-      <div className="ds-colhead">Uprawnienia webhooka</div>
+    <div className="perms-pane">
       <div className="ds-colhint">
         Sprawdza, co ten token potrafi. Nic nie zapisuje — wołamy wyłącznie odczyty, a resztę
         bez parametrów. „Osiągalna” znaczy tylko tyle, że metoda istnieje; dopiero „działa —
@@ -8895,6 +8931,13 @@ export default function App() {
   );
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
   const [showCounters, setShowCounters] = useState(saved.showCounters ?? true);
+  const [tilesWrap, setTilesWrap] = useState(saved.tilesWrap ?? false);
+  /* Jeden stan paska dla obu zakladek ustawien (Kafelki i Wyglad) — zmiana w jednej od razu widac w drugiej. */
+  const tileBar: TileBar = showCounters ? (tilesWrap ? 'wrap' : 'row') : 'off';
+  const setTileBar = useCallback((b: TileBar) => {
+    setShowCounters(b !== 'off');
+    if (b !== 'off') setTilesWrap(b === 'wrap');
+  }, []);
   const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
@@ -9304,9 +9347,21 @@ export default function App() {
   /* Projekt domyslny z .env — tylko do niego nalezal stary zespol zapisany bez projektu. */
   const defaultGroup = config ? Number(config.groupId) : null;
   const [team, setTeamState] = useState<TeamConfig>(() => loadTeam(groupId, groupId !== null && groupId === defaultGroup));
-  const [teamOpen, setTeamOpen] = useState(false);
+  /* Okno „Ustawienia" i jego zakladka; `locked` = zapis tagow i epikow w toku (okno sie wtedy nie zamyka). */
+  const [settings, setSettings] = useState<SettingsTab | null>(null);
+  const [settingsLocked, setSettingsLocked] = useState(false);
+  /* Ostatnio otwarta zakladka — przycisk w naglowku i Opcje wracaja do niej (zespol nie jest juz osobnym przyciskiem). */
+  const lastSettingsRef = useRef<SettingsTab>('tiles');
+  const openSettings = useCallback((tab?: SettingsTab) => setSettings(tab ?? lastSettingsRef.current), []);
+  useEffect(() => {
+    if (settings) lastSettingsRef.current = settings;
+  }, [settings]);
+  /* Niezapisany formularz „Srodowiska": zamkniecie okna najpierw pyta, czy odrzucic zmiany. */
+  const [envDirty, setEnvDirty] = useState(false);
+  const [askDiscard, setAskDiscard] = useState(false);
+  const closeSettings = useCallback(() => (envDirty ? setAskDiscard(true) : setSettings(null)), [envDirty]);
+  const teamOpen = settings === 'team';
   const teamIds = useMemo(() => new Set(team.members.map((m) => m.id)), [team]);
-  const [manageOpen, setManageOpen] = useState<null | 'tags' | 'epics'>(null);
   const teamPushRef = useRef<{ timer: number; flush: () => Promise<void> } | null>(null);
   /* Licznik zmian zespolu: odczyt z serwera, ktory ruszyl przed zmiana, nie moze jej potem nadpisac. */
   const teamEditRef = useRef(0);
@@ -9336,7 +9391,7 @@ export default function App() {
     window.addEventListener('pagehide', onHide);
     return () => window.removeEventListener('pagehide', onHide);
   }, [flushTeam]);
-  /* Kazde otwarcie okna zespolu podbija licznik — wtedy czytamy swiezy zespol (zamkniecie nie). */
+  /* Kazde otwarcie zakladki zespolu podbija licznik — wtedy czytamy swiezy zespol (zamkniecie nie). */
   const [teamOpenTick, setTeamOpenTick] = useState(0);
   useEffect(() => {
     if (teamOpen) setTeamOpenTick((n) => n + 1);
@@ -9468,7 +9523,6 @@ export default function App() {
       if (next && !hasSavedTiles()) setTilesCfg(next);
     });
   }, [setTilesCfg]);
-  const [tilesOpen, setTilesOpen] = useState<null | 'new' | 'manage'>(null);
   /* Warunki paska <-> zapisywalne (bez id). */
   const toTileFilters = (f: Filters) =>
     f.map((c) => ({ field: c.field, op: c.op, values: c.values, ...(c.or ? { or: c.or } : {}) }));
@@ -10236,6 +10290,7 @@ export default function App() {
       szukajWOpisach: wOpisach,
       showEmpty,
       showCounters,
+      tilesWrap,
       shownEmpty,
       detailWidth,
       collapsed: [...collapsed],
@@ -10246,7 +10301,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, tilesWrap, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -10494,7 +10549,7 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         // Bez palety, ale tez bez skrotu przegladarki (Ctrl+K = pasek wyszukiwania) — wyrzucal z aplikacji.
         e.preventDefault();
-        if (tilesOpen || teamOpen || manageOpen) return;
+        if (settings) return;
         setPaletteOpen((v) => !v);
         return;
       }
@@ -10535,14 +10590,9 @@ export default function App() {
         return;
       }
       if (picker) return; // popover ma wlasna obsluge klawiatury
-      // Okna (kafelki, zespol, tagi i epiki) przykrywaja liste: jej skroty nie moga dzialac pod spodem.
-      // Kafelki maja wlasna klawiature; pozostale zamyka Esc.
-      if (tilesOpen) return;
-      if (teamOpen || manageOpen) {
-        // Okno tagow i epikow samo obsluguje Esc (nie zamyka sie w trakcie zapisu ani spod pola edycji).
-        if (e.key === 'Escape' && teamOpen && !e.defaultPrevented) setTeamOpen(false);
-        return;
-      }
+      // Okno ustawien przykrywa liste: jej skroty nie moga dzialac pod spodem. Esc obsluguje samo okno
+      // (nie zamyka sie w trakcie zapisu ani spod pola edycji; w kafelkach pierwszy Esc odznacza kafelek).
+      if (settings) return;
       if (menu || viewMenu) {
         if (e.key === 'Escape') {
           setMenu(null);
@@ -10710,9 +10760,7 @@ export default function App() {
     views,
     applyView,
     viewMode,
-    tilesOpen,
-    teamOpen,
-    manageOpen,
+    settings,
   ]);
 
   const applyStage = useCallback(
@@ -11435,6 +11483,13 @@ export default function App() {
         label: 'Podsumowanie sprintu (jak na radzie)',
         run: () => setViewMode('summary'),
       },
+      ...SETTINGS_TABS.map((t) => ({
+        id: `settings-${t.key}`,
+        section: 'Ustawienia',
+        label: t.label,
+        hint: t.hint,
+        run: () => openSettings(t.key),
+      })),
       ...scopes.map((s) => ({
         id: `scope-${s.key}`,
         section: 'Zakres',
@@ -11552,6 +11607,7 @@ export default function App() {
     patchSort,
     reload,
     openPicker,
+    openSettings,
     theme,
     font,
   ]);
@@ -12074,13 +12130,13 @@ export default function App() {
           </button>
           {/* Skroty byly kiedys wypisane w panelu bocznym. Po jego usunieciu zostal
               sam klawisz "?", ktory trzeba znac — stad jawny przycisk. */}
-          <button className="icon-btn header-team" onClick={() => setTeamOpen(true)} title="Zespół i grafik: role, moc, budżet SP, urlopy">
-            <PersonIcon />
-            <span>Zespół</span>
-          </button>
-          <button className="icon-btn header-team" onClick={() => setManageOpen('tags')} title="Zarządzanie tagami i epikami projektu">
-            <TagIcon />
-            <span>Tagi i epiki</span>
+          <button
+            className="icon-btn header-team"
+            onClick={() => openSettings()}
+            title="Ustawienia: kafelki, środowisko, zespół i grafik, tagi i epiki, uprawnienia webhooka"
+          >
+            <SlidersIcon />
+            <span>Ustawienia</span>
           </button>
           <button
             className="icon-btn"
@@ -12112,7 +12168,7 @@ export default function App() {
               activeId={activeTileId}
               pending={pendingTiles}
               onPick={pickTile}
-              onManage={() => setTilesOpen('manage')}
+              wrap={tilesWrap}
               onDefaults={() =>
                 void loadDefaultTiles(tilesCfg).then((next) =>
                   next ? setTilesCfg(next) : toast('Nie udało się wczytać domyślnych kafelków.'),
@@ -12356,7 +12412,7 @@ export default function App() {
             groupId={groupId}
             people={people}
             team={team}
-            onOpenTeam={() => setTeamOpen(true)}
+            onOpenTeam={() => openSettings('team')}
           />
         ) : viewMode === 'summary' ? (
           <SprintSummary
@@ -12392,7 +12448,7 @@ export default function App() {
             nextSprint={nextSprint}
             etapyWToku={workStageIds}
             team={team}
-            onOpenTeam={() => setTeamOpen(true)}
+            onOpenTeam={() => openSettings('team')}
             onCreateSprint={nastepnySprint && me !== null ? zalozSprint : undefined}
             lastDone={lastDone}
             people={people}
@@ -12975,13 +13031,8 @@ export default function App() {
             scope,
             mine: onlyMine,
             unassigned: withUnassigned,
-            tint: listTint,
-            deadline: deadlineLook,
             empty: showEmpty,
-            counters: showCounters,
             filtersOn: anyFilter(filters),
-            theme,
-            font,
           }}
           activeSprintName={activeSprint?.name ?? null}
           scopes={scopes}
@@ -13004,16 +13055,12 @@ export default function App() {
             scope: setScope,
             mine: () => setOnlyMine((v) => !v),
             unassigned: () => setWithUnassigned((v) => !v),
-            tint: setListTint,
-            deadline: setDeadlineLook,
             empty: () => setShowEmpty((v) => !v),
-            counters: () => setShowCounters((v) => !v),
             toggleColumn,
             clearFilters: () => setFilters(EMPTY_FILTERS),
             reload: () => void reload(),
+            settings: () => openSettings(),
             palette: () => setPaletteOpen(true),
-            theme: setTheme,
-            font: setFont,
           }}
         />
       )}
@@ -13044,55 +13091,98 @@ export default function App() {
           }}
         />
       )}
-      {manageOpen && (
-        <ManageModal
-          tasks={tasks}
-          epics={epics}
-          groupId={groupId}
-          initialTab={manageOpen}
-          onChanged={reloadFresh}
-          onClose={() => setManageOpen(null)}
+      {settings && (
+        <SettingsModal
+          tab={settings}
+          locked={settingsLocked || askDiscard}
+          unsaved={envDirty ? ENV_UNSAVED : NO_UNSAVED}
+          onTab={setSettings}
+          onClose={closeSettings}
+          panes={{
+            env: () => (
+              <EnvPane
+                directory={directory}
+                projects={projects}
+                hasTeam={team.members.length > 0}
+                onDirty={setEnvDirty}
+                onSaved={() => void reload()}
+              />
+            ),
+            team: () => <TeamPane team={team} people={teamCandidates} now={now} onChange={setTeam} />,
+            manage: () => (
+              <ManagePane tasks={tasks} epics={epics} groupId={groupId} initialTab="tags" onChanged={reloadFresh} onBusy={setSettingsLocked} />
+            ),
+            perms: () => <PermsPane />,
+            look: () => (
+              <LookPane
+                theme={theme}
+                font={font}
+                tint={listTint}
+                deadline={deadlineLook}
+                bar={tileBar}
+                on={{ theme: setTheme, font: setFont, tint: setListTint, deadline: setDeadlineLook, bar: setTileBar }}
+              />
+            ),
+            tiles: () => (
+              <TilesPane
+                cfg={tilesCfg}
+                current={{ scope: scopePref, filters: toTileFilters(filters), onlyMine, showDone }}
+                active={settings === 'tiles'}
+                bar={tileBar}
+                barOptions={TILE_BARS}
+                onBar={(b) => setTileBar(b as TileBar)}
+                views={views.map((v) => ({
+                  id: v.id,
+                  name: v.name,
+                  view: { scope: v.scope, filters: toTileFilters(v.filters), onlyMine: v.onlyMine, showDone: v.showDone },
+                }))}
+                describeFilter={(c) => {
+                  const f = c.field as FilterField;
+                  const what =
+                    c.op === 'between'
+                      ? rangeLabel(f, c.values)
+                      : `${opLabel(c.op as FilterOp, c.values.length > 1)} ${c.values.map((v) => filterValueLabel(f, v)).join(', ')}`;
+                  return `${FILTER_LABEL[f] ?? c.field} ${what}`;
+                }}
+                onSaveAsView={(name, v) =>
+                  setViews((vs) => [
+                    ...vs,
+                    {
+                      id: `v${Date.now()}`,
+                      name,
+                      ...viewSnapshot,
+                      query: '',
+                      scope: v.scope,
+                      onlyMine: v.onlyMine,
+                      showDone: v.showDone,
+                      filters: refreshGroups(v.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })) as Filters,
+                    },
+                  ])
+                }
+                onChange={setTilesCfg}
+                onClose={closeSettings}
+              />
+            ),
+          }}
         />
       )}
-
-      {teamOpen && (
-        <TeamModal team={team} people={teamCandidates} now={now} onChange={setTeam} onClose={() => setTeamOpen(false)} />
-      )}
-      {tilesOpen && (
-        <TilesModal
-          cfg={tilesCfg}
-          current={{ scope: scopePref, filters: toTileFilters(filters), onlyMine, showDone }}
-          startNew={tilesOpen === 'new'}
-          views={views.map((v) => ({
-            id: v.id,
-            name: v.name,
-            view: { scope: v.scope, filters: toTileFilters(v.filters), onlyMine: v.onlyMine, showDone: v.showDone },
-          }))}
-          describeFilter={(c) => {
-            const f = c.field as FilterField;
-            const what =
-              c.op === 'between'
-                ? rangeLabel(f, c.values)
-                : `${opLabel(c.op as FilterOp, c.values.length > 1)} ${c.values.map((v) => filterValueLabel(f, v)).join(', ')}`;
-            return `${FILTER_LABEL[f] ?? c.field} ${what}`;
-          }}
-          onSaveAsView={(name, v) =>
-            setViews((vs) => [
-              ...vs,
+      {askDiscard && (
+        <AskDialog
+          ask={{
+            title: 'Odrzucić niezapisane zmiany?',
+            body: 'W zakładce Środowisko są zmiany, których nie zapisano.',
+            actions: [
               {
-                id: `v${Date.now()}`,
-                name,
-                ...viewSnapshot,
-                query: '',
-                scope: v.scope,
-                onlyMine: v.onlyMine,
-                showDone: v.showDone,
-                filters: refreshGroups(v.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })) as Filters,
+                label: 'Odrzuć i zamknij',
+                kind: 'danger',
+                run: () => {
+                  setEnvDirty(false);
+                  setSettings(null);
+                },
               },
-            ])
-          }
-          onChange={setTilesCfg}
-          onClose={() => setTilesOpen(null)}
+            ],
+          }}
+          onClose={() => setAskDiscard(false)}
         />
       )}
       {gapPrompt && (

@@ -619,6 +619,18 @@ export function TagIcon() {
   );
 }
 
+/** Ustawienia — trzy suwaki (okno „Ustawienia"). */
+export function SlidersIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <path d="M2.5 4.5H13.5M2.5 8H13.5M2.5 11.5H13.5" />
+      <circle cx="10" cy="4.5" r="1.5" fill="var(--bg-panel)" />
+      <circle cx="5.5" cy="8" r="1.5" fill="var(--bg-panel)" />
+      <circle cx="9" cy="11.5" r="1.5" fill="var(--bg-panel)" />
+    </svg>
+  );
+}
+
 /** Epik — warstwy, czyli zadania zebrane pod jednym tematem. */
 export function LayersIcon() {
   return (
