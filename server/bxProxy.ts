@@ -228,31 +228,115 @@ function findPdfBrowser(custom: string | undefined): string | null {
   return candidates.find((p): p is string => Boolean(p) && existsSync(p as string)) ?? null;
 }
 
+/**
+ * Ustawienia z .env, ktore mozna zmienic z aplikacji (Opcje → Ustawienia srodowiska). Tylko te — BITRIX_WEBHOOK
+ * (jedyny sekret) i sciezki plikow nigdy tu nie wejda.
+ */
+export const ENV_KEYS = [
+  'BX_GROUP_ID',
+  'BX_UNASSIGNED_ID',
+  'BX_IT_DEPARTMENTS',
+  'BX_IT_USERS',
+  'BX_CAPACITY_DEVS',
+  'BX_CAPACITY_EXCLUDE_IDS',
+] as const;
+export type EnvKey = (typeof ENV_KEYS)[number];
+
+const ID_LIST = new Set<EnvKey>(['BX_IT_DEPARTMENTS', 'BX_IT_USERS', 'BX_CAPACITY_EXCLUDE_IDS']);
+
+/**
+ * Sprawdza i ujednolica zmiane z aplikacji: `{ klucz: wartosc }` → wartosci gotowe do .env albo opis bledu.
+ * Listy id bez spacji i powtorzen, liczba programistow z kropka. Nic poza cyframi, przecinkiem i kropka nie
+ * przechodzi, wiec do pliku nie trafi ani nowa linia, ani `#`, ani cudzy klucz.
+ */
+export function validateEnvUpdate(body: unknown): { values: Partial<Record<EnvKey, string>> } | { error: string } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'zle dane' };
+  const values: Partial<Record<EnvKey, string>> = {};
+  for (const [key, raw] of Object.entries(body as Record<string, unknown>)) {
+    if (!(ENV_KEYS as readonly string[]).includes(key)) return { error: `nieznane ustawienie ${key}` };
+    if (typeof raw !== 'string') return { error: `${key}: zly typ` };
+    const v = raw.trim();
+    const k = key as EnvKey;
+    if (ID_LIST.has(k)) {
+      const ids = v ? v.split(',').map((x) => x.trim()) : [];
+      if (ids.some((x) => !/^[1-9]\d{0,9}$/.test(x))) return { error: `${key}: tylko numery po przecinku` };
+      values[k] = [...new Set(ids)].join(',');
+    } else if (k === 'BX_CAPACITY_DEVS') {
+      const n = Number(v.replace(',', '.'));
+      if (!/^\d{1,3}([.,]\d{1,2})?$/.test(v) || !(n > 0 && n <= 100)) return { error: `${key}: liczba od 0,01 do 100` };
+      values[k] = String(n);
+    } else {
+      if (!/^[1-9]\d{0,9}$/.test(v)) return { error: `${key}: numer` };
+      values[k] = v;
+    }
+  }
+  return { values };
+}
+
+/**
+ * Nowa tresc .env: zmienione klucze dostaja nowa wartosc w swojej linii (komentarze i reszta pliku zostaja jak
+ * byly), brakujace dochodza na koncu. Konce linii jak w pliku (CRLF na Windowsie).
+ */
+export function rewriteEnv(text: string, values: Partial<Record<EnvKey, string>>): string {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.length ? text.split(/\r?\n/) : [];
+  const left = new Map(Object.entries(values));
+  const out = lines.map((line) => {
+    const key = line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=/)?.[1];
+    if (!key || !left.has(key)) return line;
+    const v = left.get(key)!;
+    left.delete(key);
+    return `${key}=${v}`;
+  });
+  // Plik konczyl sie nowa linia — ostatni element to pusty napis; nowe klucze wchodza przed nim.
+  const tail = out.length && out[out.length - 1] === '' ? out.pop() : undefined;
+  for (const [k, v] of left) out.push(`${k}=${v}`);
+  if (tail !== undefined || !text.length) out.push('');
+  return out.join(eol);
+}
+
 export function bxProxy(mode: string): Plugin {
-  const env = loadEnv(mode, process.cwd(), '');
+  let env = loadEnv(mode, process.cwd(), '');
   const webhook = (env.BITRIX_WEBHOOK || '').replace(/\/+$/, '');
-  const groupId = env.BX_GROUP_ID || '451';
+  let groupId = env.BX_GROUP_ID || '451';
   // Konto-zaslepka "Nieprzypisane" — patrz .env.example. Domyslnie 251 (Klaudiusz Koder).
-  const unassignedId = Number(env.BX_UNASSIGNED_ID) || 251;
+  let unassignedId = Number(env.BX_UNASSIGNED_ID) || 251;
   // Dzialy IT (np. "79,81") — licznik odpowiedzi w czacie. Patrz .env.example.
-  const itDepartments = (env.BX_IT_DEPARTMENTS || '')
+  let itDepartments = (env.BX_IT_DEPARTMENTS || '')
     .split(',')
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
   // Konta liczone jako IT niezaleznie od dzialu — np. konto, z ktorego automat zadaje pytania.
-  const itUsers = (env.BX_IT_USERS || '')
+  let itUsers = (env.BX_IT_USERS || '')
     .split(',')
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
   // Odliczanie do konca sprintu: ilu programistow liczymy (1 godzina = 1 SP na osobe; moze byc ulamek — pol etatu to 0,5)
   // i czyje zadania nie wchodza do limitu. Patrz .env.example.
   // Przecinek tez: „3,5" (tak liczbe pokazuje aplikacja) dawalo NaN i po cichu domyslne 3.5.
-  const devsRaw = Number(String(env.BX_CAPACITY_DEVS ?? '').trim().replace(',', '.'));
-  const capacityDevs = Number.isFinite(devsRaw) && devsRaw > 0 ? devsRaw : 3.5;
-  const capacityExcludeIds = (env.BX_CAPACITY_EXCLUDE_IDS || '')
+  let devsRaw = Number(String(env.BX_CAPACITY_DEVS ?? '').trim().replace(',', '.'));
+  let capacityDevs = Number.isFinite(devsRaw) && devsRaw > 0 ? devsRaw : 3.5;
+  let capacityExcludeIds = (env.BX_CAPACITY_EXCLUDE_IDS || '')
     .split(',')
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
+
+  /* Po zapisie z aplikacji: te same reguly co przy starcie, bez restartu serwera. */
+  const applyEnv = () => {
+    env = loadEnv(mode, process.cwd(), '');
+    groupId = env.BX_GROUP_ID || '451';
+    unassignedId = Number(env.BX_UNASSIGNED_ID) || 251;
+    const ids = (v: string | undefined) =>
+      (v || '')
+        .split(',')
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0);
+    itDepartments = ids(env.BX_IT_DEPARTMENTS);
+    itUsers = ids(env.BX_IT_USERS);
+    devsRaw = Number(String(env.BX_CAPACITY_DEVS ?? '').trim().replace(',', '.'));
+    capacityDevs = Number.isFinite(devsRaw) && devsRaw > 0 ? devsRaw : 3.5;
+    capacityExcludeIds = ids(env.BX_CAPACITY_EXCLUDE_IDS);
+  };
 
   return {
     name: 'bitrix-proxy',
@@ -382,6 +466,74 @@ export function bxProxy(mode: string): Plugin {
           res.end(e instanceof Error ? e.message : 'blad generowania PDF');
         } finally {
           pdfWaiting--;
+        }
+      });
+
+      /*
+       * Ustawienia srodowiska (Opcje → Ustawienia srodowiska): GET oddaje obecne wartosci z ENV_KEYS, PUT zapisuje je
+       * do .env (tylko te linie, komentarze zostaja) i od razu wczytuje na nowo. Zapis tylko z tej samej strony.
+       * `shadowed` = klucze, ktorych wartosc i tak przychodzi skad indziej (.env.local, zmienna systemowa) —
+       * zapis w .env ich nie zmieni i aplikacja musi to powiedziec, zamiast udawac, ze zadzialalo.
+       */
+      const envFile = resolve(process.cwd(), '.env');
+      // Wartosci, ktore NAPRAWDE obowiazuja — pusty klucz w .env pokazujemy jako domyslny, nie jako „nic".
+      const envValues = () => ({
+        ...Object.fromEntries(ENV_KEYS.map((k) => [k, env[k] ?? ''])),
+        BX_GROUP_ID: groupId,
+        BX_UNASSIGNED_ID: String(unassignedId),
+        BX_CAPACITY_DEVS: String(capacityDevs),
+      });
+      let envWrite = Promise.resolve();
+      server.middlewares.use('/api/env', async (req, res) => {
+        res.setHeader('content-type', 'application/json');
+        if (req.method === 'GET') {
+          res.end(JSON.stringify({ values: envValues() }));
+          return;
+        }
+        if (req.method !== 'PUT') {
+          res.statusCode = 405;
+          res.end('{"error":"tylko GET i PUT"}');
+          return;
+        }
+        if (!sameOrigin(req)) {
+          res.statusCode = 403;
+          res.end('{"error":"zapis tylko z aplikacji"}');
+          return;
+        }
+        let parsed: ReturnType<typeof validateEnvUpdate>;
+        try {
+          parsed = validateEnvUpdate(JSON.parse(await readBody(req, 16 * 1024)));
+        } catch {
+          parsed = { error: 'zle dane' };
+        }
+        if ('error' in parsed) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: parsed.error }));
+          return;
+        }
+        const values = parsed.values;
+        const job = envWrite.then(async () => {
+          let text = '';
+          try {
+            text = await readFile(envFile, 'utf8');
+          } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+          }
+          const tmp = `${envFile}.${process.pid}.tmp`;
+          await writeFile(tmp, rewriteEnv(text, values), 'utf8');
+          await rename(tmp, envFile);
+          applyEnv();
+        });
+        envWrite = job.catch(() => {});
+        try {
+          await job;
+          const shadowed = Object.entries(values)
+            .filter(([k, v]) => (env[k] ?? '') !== v)
+            .map(([k]) => k);
+          res.end(JSON.stringify({ values: envValues(), shadowed }));
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e instanceof Error ? e.message : 'blad zapisu' }));
         }
       });
 

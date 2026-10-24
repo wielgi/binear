@@ -2578,3 +2578,45 @@ export async function fetchConfig(): Promise<AppConfig> {
   const res = await fetch('/api/config');
   return res.json();
 }
+
+/** Dzial firmy (do wyboru dzialow IT w ustawieniach srodowiska). */
+export interface Department {
+  id: number;
+  name: string;
+}
+
+/** Wszystkie dzialy portalu. Rzuca, gdy webhook nie widzi struktury firmy (brak zakresu `department`). */
+export async function fetchDepartments(): Promise<Department[]> {
+  const raw: any[] = [];
+  for (let start = 0, page = 0; page < 20; page++) {
+    const chunk = (await call<any[]>('department.get', { start })) ?? [];
+    raw.push(...chunk);
+    if (chunk.length < 50) break;
+    start += 50;
+  }
+  return raw
+    .map((d) => ({ id: Number(d.ID), name: str(d.NAME) || `#${d.ID}` }))
+    .filter((d) => d.id > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+}
+
+/** Ustawienia z .env zmieniane z aplikacji — klucze jak w .env.example. Patrz `/api/env` w server/bxProxy.ts. */
+export type EnvValues = Record<string, string>;
+
+export async function fetchEnv(): Promise<EnvValues> {
+  const r = await fetch('/api/env');
+  if (!r.ok) throw new Error(`ustawienia: HTTP ${r.status}`);
+  return ((await r.json()) as { values: EnvValues }).values;
+}
+
+/** Zapis do .env; `shadowed` = klucze, ktorych wartosc i tak bierze sie skad indziej (.env.local, system). */
+export async function saveEnv(values: EnvValues): Promise<{ values: EnvValues; shadowed: string[] }> {
+  const r = await fetch('/api/env', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(values),
+  });
+  const body = (await r.json().catch(() => ({}))) as { values?: EnvValues; shadowed?: string[]; error?: string };
+  if (!r.ok || !body.values) throw new Error(body.error ?? `ustawienia: HTTP ${r.status}`);
+  return { values: body.values, shadowed: body.shadowed ?? [] };
+}
