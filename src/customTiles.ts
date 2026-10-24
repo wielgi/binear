@@ -336,6 +336,12 @@ export function moveToGroup(cfg: TilesConfig, id: string, groupId: string): Tile
 export const addGroup = (cfg: TilesConfig, name: string): TilesConfig =>
   name.trim() ? { ...cfg, groups: [...cfg.groups, { id: newId('g'), name: name.trim().slice(0, 40) }] } : cfg;
 
+/** Nowa grupa z podpisem na koncu paska; zwraca konfiguracje i id grupy (pusta nazwa = „Grupa"). */
+export function createGroup(cfg: TilesConfig, name: string): { cfg: TilesConfig; id: string } {
+  const id = newId('g');
+  return { cfg: { ...cfg, groups: [...cfg.groups, { id, name: name.trim().slice(0, 40) || 'Grupa' }] }, id };
+}
+
 /** Nowa grupa bez podpisu ("Luzem") dla kafelka, ktory ma stac osobno; zwraca konfiguracje i id grupy. */
 export function ensureLooseGroup(cfg: TilesConfig): { cfg: TilesConfig; id: string } {
   const id = newId('g');
@@ -367,6 +373,23 @@ export function moveGroup(cfg: TilesConfig, id: string, dir: -1 | 1): TilesConfi
 /** Usuwa grupe razem z jej kafelkami; zwraca tez, ile kafelkow poszlo. */
 export function removeGroup(cfg: TilesConfig, id: string): TilesConfig {
   return { ...cfg, groups: cfg.groups.filter((g) => g.id !== id), tiles: cfg.tiles.filter((t) => t.group !== id) };
+}
+
+/**
+ * Usuwa grupe, ale nie jej kafelki: kazdy staje osobno (wlasna grupa bez podpisu) w miejscu, gdzie stala grupa,
+ * w tej samej kolejnosci.
+ */
+export function ungroup(cfg: TilesConfig, id: string): TilesConfig {
+  const at = cfg.groups.findIndex((g) => g.id === id);
+  if (at < 0) return cfg;
+  const own = cfg.tiles.filter((t) => t.group === id);
+  const loose = own.map((): TileGroup => ({ id: newId('g'), name: LOOSE_GROUP_NAME, hideCaption: true }));
+  const moved = new Map(own.map((t, i) => [t.id, loose[i].id]));
+  return {
+    ...cfg,
+    groups: [...cfg.groups.slice(0, at), ...loose, ...cfg.groups.slice(at + 1)],
+    tiles: cfg.tiles.map((t) => (moved.has(t.id) ? { ...t, group: moved.get(t.id)! } : t)),
+  };
 }
 
 /** Czy aktualny stan listy to dokladnie widok tego kafelka — do podswietlenia kafelka. */

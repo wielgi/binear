@@ -27,15 +27,15 @@ export function replaceTag(tags: readonly string[], from: string, to: string | n
 /**
  * Zarzadzanie tagami i epikami projektu w jednym miejscu. Tag w Bitriksie to tylko nazwa przy zadaniu
  * (nie ma slownika), wiec zmiana nazwy, scalenie i usuniecie to hurtowa zmiana zadan, ktore go maja.
- * Epik ma w Bitriksie osobne metody (dodaj / zmien / usun).
+ * Epik ma w Bitriksie osobne metody (dodaj / zmien / usun). Zakladka okna „Ustawienia" (SettingsModal).
  */
-export function ManageModal({
+export function ManagePane({
   tasks,
   epics,
   groupId,
   initialTab,
   onChanged,
-  onClose,
+  onBusy,
 }: {
   tasks: Task[];
   epics: Epic[];
@@ -43,7 +43,8 @@ export function ManageModal({
   initialTab: Tab;
   /** Po zmianie trzeba przeladowac dane z Bitriksa; okno czeka na koniec, zanim pozwoli na nastepna zmiane. */
   onChanged: () => Promise<unknown> | void;
-  onClose: () => void;
+  /** W trakcie zapisu okno nie daje sie zamknac ani przelaczyc na inna zakladke — postep i blad zniknelyby z oczu. */
+  onBusy: (busy: boolean) => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [busy, setBusy] = useState<string | null>(null);
@@ -51,17 +52,13 @@ export function ManageModal({
   const [ask, setAsk] = useState<AskState | null>(null);
 
   /*
-   * Esc zamyka okno — ale nie w trakcie zapisu (zmiana leci dalej, a znikneloby okno z postepem i bledem)
-   * i nie wtedy, gdy klawisz zalatwil juz ktos blizej (pole zmiany nazwy, dialog z pytaniem).
+   * Zapis w toku albo otwarte pytanie: okno nie zamyka sie (takze Esc) i nie przelacza zakladki — zmiana leci dalej,
+   * a zniknelby postep i blad. Esc z pola zmiany nazwy zalatwia samo pole (defaultPrevented).
    */
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || busy || ask) return;
-      onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [busy, ask, onClose]);
+    onBusy(Boolean(busy) || Boolean(ask));
+  }, [busy, ask, onBusy]);
+  useEffect(() => () => onBusy(false), [onBusy]);
 
   /*
    * Jedna zmiana naraz, a okno odblokowuje sie dopiero po odswiezeniu danych — takze po bledzie, bo czesc
@@ -88,38 +85,28 @@ export function ManageModal({
     }
   };
 
-  return createPortal(
+  return (
     <>
-      <div className="picker-backdrop modal-scrim" onClick={(e) => !busy && e.detail < 2 && onClose()} />
-      <div className="team-modal tiles-modal manage-modal" role="dialog" aria-label="Tagi i epiki">
-        <header className="team-head">
-          <h2>Tagi i epiki</h2>
-          <button className="btn" onClick={onClose} disabled={Boolean(busy)}>
-            Zamknij
-          </button>
-        </header>
-
-        <div className="ds-tabs" role="tablist">
-          <button role="tab" aria-selected={tab === 'tags'} className={`ds-tab${tab === 'tags' ? ' ds-tab-on' : ''}`} onClick={() => setTab('tags')}>
-            Tagi
-          </button>
-          <button role="tab" aria-selected={tab === 'epics'} className={`ds-tab${tab === 'epics' ? ' ds-tab-on' : ''}`} onClick={() => setTab('epics')}>
-            Epiki
-          </button>
-        </div>
-
-        {busy && <p className="team-hint">{busy}</p>}
-        {msg && <p className="team-hint manage-error">{msg}</p>}
-
-        {tab === 'tags' ? (
-          <TagsPane tasks={tasks} busy={Boolean(busy)} run={run} ask={setAsk} />
-        ) : (
-          <EpicsPane tasks={tasks} epics={epics} groupId={groupId} busy={Boolean(busy)} run={run} ask={setAsk} />
-        )}
+      <div className="ds-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === 'tags'} className={`ds-tab${tab === 'tags' ? ' ds-tab-on' : ''}`} onClick={() => setTab('tags')}>
+          Tagi
+        </button>
+        <button role="tab" aria-selected={tab === 'epics'} className={`ds-tab${tab === 'epics' ? ' ds-tab-on' : ''}`} onClick={() => setTab('epics')}>
+          Epiki
+        </button>
       </div>
-      {ask && <AskDialog ask={ask} onClose={() => setAsk(null)} />}
-    </>,
-    document.body,
+
+      {busy && <p className="team-hint">{busy}</p>}
+      {msg && <p className="team-hint manage-error">{msg}</p>}
+
+      {tab === 'tags' ? (
+        <TagsPane tasks={tasks} busy={Boolean(busy)} run={run} ask={setAsk} />
+      ) : (
+        <EpicsPane tasks={tasks} epics={epics} groupId={groupId} busy={Boolean(busy)} run={run} ask={setAsk} />
+      )}
+      {/* Okno ustawien ma transform — dialog z position: fixed musi wyjsc do body, inaczej staje wzgledem okna. */}
+      {ask && createPortal(<AskDialog ask={ask} onClose={() => setAsk(null)} />, document.body)}
+    </>
   );
 }
 

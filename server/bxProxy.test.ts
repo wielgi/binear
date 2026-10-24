@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { batchViolation, parseTeams, sameOrigin, withCsp } from './bxProxy';
+import { batchViolation, parseTeams, rewriteEnv, sameOrigin, validateEnvUpdate, withCsp } from './bxProxy';
 
 const req = (headers: Record<string, string>) => ({ headers });
 
@@ -70,5 +70,40 @@ describe('withCsp', () => {
 
   it('<header> to nie <head> — bez <head> nie ma PDF', () => {
     expect(withCsp('<html><body><header>x</header></body></html>', 'localhost:5181')).toBeNull();
+  });
+});
+
+describe('validateEnvUpdate', () => {
+  it('ujednolica listy id i liczbe programistow', () => {
+    expect(validateEnvUpdate({ BX_IT_USERS: ' 251, 303 ,251', BX_CAPACITY_DEVS: '3,5', BX_IT_DEPARTMENTS: '' })).toEqual({
+      values: { BX_IT_USERS: '251,303', BX_CAPACITY_DEVS: '3.5', BX_IT_DEPARTMENTS: '' },
+    });
+  });
+  it('odrzuca sekret, cudze klucze i wszystko, co nie jest numerem', () => {
+    expect(validateEnvUpdate({ BITRIX_WEBHOOK: 'x' })).toHaveProperty('error');
+    expect(validateEnvUpdate({ BX_TEAM_FILE: '/etc/passwd' })).toHaveProperty('error');
+    expect(validateEnvUpdate({ BX_IT_USERS: '251\nBITRIX_WEBHOOK=x' })).toHaveProperty('error');
+    expect(validateEnvUpdate({ BX_GROUP_ID: '451 # x' })).toHaveProperty('error');
+    expect(validateEnvUpdate({ BX_GROUP_ID: '' })).toHaveProperty('error');
+    expect(validateEnvUpdate({ BX_CAPACITY_DEVS: '0' })).toHaveProperty('error');
+    expect(validateEnvUpdate({ BX_UNASSIGNED_ID: 251 })).toHaveProperty('error');
+    expect(validateEnvUpdate(['BX_GROUP_ID'])).toHaveProperty('error');
+  });
+});
+
+describe('rewriteEnv', () => {
+  const file = '# webhook\nBITRIX_WEBHOOK=https://x/rest/1/t/\n\n# projekt\nBX_GROUP_ID=451\nBX_IT_USERS=251\n';
+  it('zmienia tylko swoje linie, komentarze i sekret zostaja', () => {
+    expect(rewriteEnv(file, { BX_GROUP_ID: '452' })).toBe(file.replace('BX_GROUP_ID=451', 'BX_GROUP_ID=452'));
+  });
+  it('brakujacy klucz dochodzi na koncu, przed koncowa nowa linia', () => {
+    expect(rewriteEnv(file, { BX_CAPACITY_DEVS: '4' })).toBe(file + 'BX_CAPACITY_DEVS=4\n');
+  });
+  it('zachowuje CRLF i dziala na pustym pliku', () => {
+    expect(rewriteEnv('BX_GROUP_ID=1\r\nX=2\r\n', { BX_GROUP_ID: '3' })).toBe('BX_GROUP_ID=3\r\nX=2\r\n');
+    expect(rewriteEnv('', { BX_GROUP_ID: '3' })).toBe('BX_GROUP_ID=3\n');
+  });
+  it('linia z export i spacjami tez jest rozpoznana', () => {
+    expect(rewriteEnv('export BX_IT_USERS = 1\n', { BX_IT_USERS: '2' })).toBe('BX_IT_USERS=2\n');
   });
 });
