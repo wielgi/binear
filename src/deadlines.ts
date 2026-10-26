@@ -46,7 +46,7 @@ export function calendarDays(from: Date, to: Date): number {
 }
 
 export function isHardDeadline(tags: readonly string[]): boolean {
-  return tags.some((t) => t.toUpperCase() === HARD_DEADLINE_TAG);
+  return tags.some((t) => t.trim().toUpperCase() === HARD_DEADLINE_TAG);
 }
 
 /** Pasek terminu: pełny przy 30 dniach i więcej, pusty w dniu terminu i po nim. */

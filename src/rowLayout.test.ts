@@ -48,6 +48,15 @@ describe('moveElement', () => {
     expect(hiddenElements(l)).toEqual(['more']);
   });
 
+  it('w tej samej strefie upuszczony na dalszym elemencie staje tuz przed nim', () => {
+    // title (1) upuszczony na tags (4): przed tags, nie za nim.
+    const l = moveElement(DEFAULT_ROW_LAYOUT, 'title', { line: 0, zone: 'left', index: 4 });
+    expect(l.lines[0].left.slice(0, 5)).toEqual(['parent', 'epic', 'matrix', 'title', 'tags']);
+    // W lewo bez zmian: tags (4) na epic (2).
+    const back = moveElement(DEFAULT_ROW_LAYOUT, 'tags', { line: 0, zone: 'left', index: 2 });
+    expect(back.lines[0].left.slice(0, 5)).toEqual(['parent', 'title', 'tags', 'epic', 'matrix']);
+  });
+
   it('tytulu nie da sie ukryc', () => {
     expect(moveElement(DEFAULT_ROW_LAYOUT, 'title', { line: null, zone: 'left' })).toBe(DEFAULT_ROW_LAYOUT);
   });

@@ -118,7 +118,11 @@ export function moveElement(layout: RowLayout, el: RowElement, to: RowTarget): R
   if (to.line !== null) {
     const zone = lines[to.line]?.[to.zone];
     if (!zone) return layout;
-    const at = to.index === undefined ? zone.length : Math.max(0, Math.min(to.index, zone.length));
+    /* `to.index` liczy konfigurator na strefie PRZED wyjeciem elementu: w tej samej strefie, przy przesunieciu
+       w prawo, wyjecie przesuwa cel o jedno miejsce w lewo — bez poprawki element ladowal o jedno za daleko. */
+    const from = layout.lines[to.line]?.[to.zone].indexOf(el) ?? -1;
+    const index = to.index !== undefined && from >= 0 && from < to.index ? to.index - 1 : to.index;
+    const at = index === undefined ? zone.length : Math.max(0, Math.min(index, zone.length));
     zone.splice(at, 0, el);
   }
   return { lines };

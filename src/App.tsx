@@ -3503,7 +3503,8 @@ function DueHover({
     <HoverNote
       label="Termin"
       value={shortDate(deadline)}
-      note={due.distance}
+      /* Sam „za 5 dni" nie tlumaczy, czemu pasek jest zolty, a nie zielony — karta mowi to wprost. */
+      note={level ? `${due.distance} · ${LEVEL_OPIS[level]}` : due.distance}
       noteColor={
         level
           ? LEVEL_COLOR[level]
@@ -3518,6 +3519,13 @@ function DueHover({
     </HoverNote>
   );
 }
+
+/** Co znaczy kolor terminu — te same slowa co etykiety w zakladce „Terminy" planowania. */
+const LEVEL_OPIS: Record<DeadlineLevel, string> = {
+  red: 'musi wejść w obecnym sprincie',
+  yellow: 'musi wejść w następnym sprincie',
+  green: 'może poczekać dłużej niż następny sprint',
+};
 
 /** Koniec obecnego sprintu (poniedzialek nastepnej rady) — od niego zalezy kolor paska terminu. */
 const DeadlineCouncilCtx = createContext<Date | null>(null);
@@ -3549,15 +3557,10 @@ function useDeadlineLevel(task: Pick<Task, 'deadline' | 'storyPoints' | 'tags' |
  */
 function DueBar({ level, days }: { level: DeadlineLevel; days: number }) {
   const { fill } = deadlineBar(days);
-  const tytul: Record<typeof level, string> = {
-    red: 'Musi wejść w obecnym sprincie',
-    yellow: 'Musi wejść w następnym sprincie',
-    green: 'Nie musi wejść ani w tym, ani w następnym sprincie',
-  };
+  /* Bez `title`: co znaczy kolor, mowi karta terminu pod kursorem (DueHover) — dwa dymki naraz to szum. */
   return (
     <span
       className="due-bar"
-      title={tytul[level]}
       style={{ ['--due-color' as string]: LEVEL_COLOR[level] }}
       aria-hidden
     >
@@ -10246,6 +10249,7 @@ export default function App() {
      * Pozycja zadania w procesie. Zadanie poza sprintem nie ma etapu — laduje na
      * koncu, bo "jeszcze nigdzie nie doszlo" jest dalej niz kazda kolumna.
      */
+    const deadlineRanks = new WeakMap<Task, number>();
     const stageRank = (t: Task): number => {
       if (!t.stageId) return Number.MAX_SAFE_INTEGER;
       const name = stageNames.get(t.stageId);
@@ -10257,11 +10261,17 @@ export default function App() {
       stageRank,
       me,
       paybackRank,
-      /* Ten sam poziom co kolor paska: czerwony 0, zolty 1, reszta 2 (praca oddana nie ma pilnosci). */
+      /* Ten sam poziom co kolor paska: czerwony 0, zolty 1, reszta 2 (praca oddana nie ma pilnosci).
+         Raz na zadanie, nie przy kazdym porownaniu — deadlineLevel liczy godziny robocze dzien po dniu,
+         a sortowanie porownuje kazde zadanie wiele razy. Klucz to obiekt zadania: zmienione zadanie jest
+         nowym obiektem, wiec dostaje swiezy poziom. */
       deadlineRank: (t) => {
-        if (!t.deadline || oddane(t.status)) return 2;
-        const level = deadlineLevel(t, councilEnd);
-        return level === 'red' ? 0 : level === 'yellow' ? 1 : 2;
+        const known = deadlineRanks.get(t);
+        if (known !== undefined) return known;
+        const level = !t.deadline || oddane(t.status) ? null : deadlineLevel(t, councilEnd);
+        const rank = level === 'red' ? 0 : level === 'yellow' ? 1 : 2;
+        deadlineRanks.set(t, rank);
+        return rank;
       },
     });
   }, [planSort, me, stageNames, stageOrder, councilEnd]);

@@ -36,7 +36,8 @@ import { teamHoursBetween, type TeamConfig } from './team';
 import { BarsIcon, CheckIcon, ChevronIcon, GripIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { tagsForWidth } from './taskView';
-import { compareDeadlines, deadlineVerdict, type DeadlineVerdict } from './deadlines';
+import { compareDeadlines, deadlineLevel, deadlineVerdict, LEVEL_COLOR, type DeadlineVerdict } from './deadlines';
+import { TAG_DO_STARTU } from './counters';
 
 /** Termin, ktory nie moze czekac do nastepnej rady, i taki, ktory nie moze czekac do kolejnej. */
 type PoziomTerminu = 'teraz' | 'nastepny';
@@ -1008,20 +1009,16 @@ export function Planning({
     const poziomy = new Map<number, PoziomTerminu>();
     if (!cel || !rada) return { lista: [] as Task[], werdykty, poziomy, wSprincie: 0, pilne: 0 };
     const teraz_ = new Date();
-    /* Rada po nastepnej: zadanie, ktore zmiesci sie jeszcze po niej, moze poczekac. */
-    const radaPo = new Date(rada.getFullYear(), rada.getMonth(), rada.getDate() + 7, rada.getHours());
     const wybrane: { task: Task; v: DeadlineVerdict; p: PoziomTerminu }[] = [];
     let wSprincie = 0;
     for (const t of tasks) {
       /* Tylko to, co da sie wziac do sprintu: zadanie bez DO-STARTU nie jest gotowe i na liscie by tylko lezalo. */
-      if (!plannable(t) || !t.tags.some((g) => g.toUpperCase() === 'DO-STARTU')) continue;
+      if (!plannable(t) || !t.tags.some((g) => g.trim().toUpperCase() === TAG_DO_STARTU)) continue;
       const v = deadlineVerdict(t, rada, teraz_);
       if (!v) continue;
-      const p: PoziomTerminu | null = v.mustEnter
-        ? 'teraz'
-        : deadlineVerdict(t, radaPo, teraz_)?.mustEnter
-          ? 'nastepny'
-          : null;
+      /* Ta sama regula co kolor paska w wierszu (deadlineLevel) — jedno zrodlo czerwonego i zoltego. */
+      const level = deadlineLevel(t, rada, teraz_);
+      const p: PoziomTerminu | null = level === 'red' ? 'teraz' : level === 'yellow' ? 'nastepny' : null;
       if (!p) continue;
       if (t.sprintId === cel.id || (activeSprint && t.sprintId === activeSprint.id)) {
         if (p === 'teraz') wSprincie++;
@@ -1051,7 +1048,8 @@ export function Planning({
       return (
         <div className="plan-termin-note">
           <span
-            className={`plan-termin-chip ${terminy.poziomy.get(t.id) === 'teraz' ? 'is-red' : 'is-yellow'}`}
+            className="plan-termin-chip is-level"
+            style={{ ['--level' as string]: LEVEL_COLOR[terminy.poziomy.get(t.id) === 'teraz' ? 'red' : 'yellow'] } as React.CSSProperties}
           >
             {terminy.poziomy.get(t.id) === 'teraz' ? 'musi wejść w obecnym sprincie' : 'musi wejść w następnym sprincie'}
           </span>
@@ -1060,7 +1058,7 @@ export function Planning({
             title={
               v.hard
                 ? 'Termin potwierdzony jako nieprzekraczalny (tag TERMIN-TWARDY)'
-                : 'Termin jeszcze nie zweryfikowany w audycie — twardy czy „chcę do piątku"?'
+                : 'Termin jeszcze nie zweryfikowany w audycie — twardy czy „chcę do piątku"? Potwierdzony dostaje tag TERMIN-TWARDY.'
             }
           >
             {v.hard ? 'termin twardy' : 'termin niezweryfikowany'}

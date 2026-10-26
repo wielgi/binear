@@ -3890,7 +3890,9 @@ img.avatar {
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 30;
+  /* Pod tlem popoverow (20) i samymi popoverami (21): picker otwarty z panelu (status, osoba, tagi)
+     musi stanac NAD szuflada, a nie pod nia. Nad lista i paskiem narzedzi (najwyzej 3) i tak jest. */
+  z-index: 19;
   box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
   animation: detail-in 140ms ease-out;
 }
@@ -10347,13 +10349,9 @@ a.mention:hover {
   margin-left: 4px;
 }
 
-.plan-termin-chip.is-red {
-  color: hsl(5 70% 50%);
-  font-weight: var(--w-semibold);
-}
-
-.plan-termin-chip.is-yellow {
-  color: hsl(42 92% 48%);
+.plan-termin-chip.is-level {
+  /* Kolor poziomu przychodzi z LEVEL_COLOR (deadlines.ts) — ten sam co pasek i data w wierszu. */
+  color: var(--level);
   font-weight: var(--w-semibold);
 }
 
