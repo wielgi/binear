@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import {
   addLine,
@@ -21,16 +20,9 @@ const LABEL = new Map(ROW_ELEMENTS.map((e) => [e.id, e.label]));
 /**
  * Konfigurator karty zadania na liscie: elementy przeciaga sie miedzy lewa i prawa strona
  * kazdej linii albo do „Ukrytych". Zmiana dziala od razu — lista pod spodem pokazuje efekt na zywo.
+ * Sekcja „Karta zadania" w zakladce „Wyglad" okna „Ustawienia" (LookPane w App).
  */
-export function RowLayoutModal({
-  layout,
-  onChange,
-  onClose,
-}: {
-  layout: RowLayout;
-  onChange: (next: RowLayout) => void;
-  onClose: () => void;
-}) {
+export function RowLayoutPane({ layout, onChange }: { layout: RowLayout; onChange: (next: RowLayout) => void }) {
   /* Strefa, nad ktora wisi przeciagany element — tylko do podswietlenia. */
   const [over, setOver] = useState<string | null>(null);
 
@@ -82,61 +74,51 @@ export function RowLayoutModal({
 
   const ukryte = hiddenElements(layout);
 
-  return createPortal(
+  return (
     <>
-      <div className="picker-backdrop" onClick={onClose} />
-      <div className="team-modal team-modal-wide rl-modal" role="dialog" aria-label="Karta zadania">
-        <header className="team-head">
-          <h2>Karta zadania na liście</h2>
-          <button className="btn" onClick={onClose}>
-            Zamknij
-          </button>
-        </header>
-        <p className="rl-hint">
-          Przeciągnij elementy między lewą i prawą stroną linii albo do ukrytych. Upuszczony na innym elemencie staje
-          przed nim. Zmiany widać od razu na liście.
-        </p>
+      <p className="rl-hint">
+        Przeciągnij elementy między lewą i prawą stroną linii albo do ukrytych. Upuszczony na innym elemencie staje
+        przed nim. Zmiany widać od razu na liście.
+      </p>
 
-        {layout.lines.map((_, line) => (
-          <div key={line} className="rl-line">
-            <span className="rl-line-nr">{line + 1}</span>
-            {zone(line, 'left')}
-            {zone(line, 'right')}
-            <button
-              className="btn rl-line-del"
-              disabled={layout.lines.length <= 1}
-              onClick={() => onChange(removeLine(layout, line))}
-              title="Usuń linię — jej elementy trafią do ukrytych"
-            >
-              Usuń
-            </button>
-          </div>
-        ))}
-
-        <div className="rl-actions">
-          <button className="btn" disabled={layout.lines.length >= MAX_LINES} onClick={() => onChange(addLine(layout))}>
-            Dodaj linię
-          </button>
-          <button className="btn" onClick={() => onChange(DEFAULT_ROW_LAYOUT)}>
-            Przywróć domyślny
+      {layout.lines.map((_, line) => (
+        <div key={line} className="rl-line">
+          <span className="rl-line-nr">{line + 1}</span>
+          {zone(line, 'left')}
+          {zone(line, 'right')}
+          <button
+            className="btn rl-line-del"
+            disabled={layout.lines.length <= 1}
+            onClick={() => onChange(removeLine(layout, line))}
+            title="Usuń linię — jej elementy trafią do ukrytych"
+          >
+            Usuń
           </button>
         </div>
+      ))}
 
-        <div className="rl-pool-head">Ukryte</div>
-        <div
-          className={`rl-zone rl-pool${over === 'pool' ? ' rl-zone-over' : ''}`}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setOver('pool');
-          }}
-          onDragLeave={() => setOver((o) => (o === 'pool' ? null : o))}
-          onDrop={(e) => drop(e, { line: null, zone: 'left' })}
-        >
-          {ukryte.length === 0 && <span className="rl-empty">przeciągnij tu, żeby ukryć</span>}
-          {ukryte.map((id) => chip(id, { line: null, zone: 'left' }))}
-        </div>
+      <div className="rl-actions">
+        <button className="btn" disabled={layout.lines.length >= MAX_LINES} onClick={() => onChange(addLine(layout))}>
+          Dodaj linię
+        </button>
+        <button className="btn" onClick={() => onChange(DEFAULT_ROW_LAYOUT)}>
+          Przywróć domyślny
+        </button>
       </div>
-    </>,
-    document.body,
+
+      <div className="rl-pool-head">Ukryte</div>
+      <div
+        className={`rl-zone rl-pool${over === 'pool' ? ' rl-zone-over' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver('pool');
+        }}
+        onDragLeave={() => setOver((o) => (o === 'pool' ? null : o))}
+        onDrop={(e) => drop(e, { line: null, zone: 'left' })}
+      >
+        {ukryte.length === 0 && <span className="rl-empty">przeciągnij tu, żeby ukryć</span>}
+        {ukryte.map((id) => chip(id, { line: null, zone: 'left' }))}
+      </div>
+    </>
   );
 }

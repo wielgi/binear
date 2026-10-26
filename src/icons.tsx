@@ -231,18 +231,6 @@ export function ChevronIcon({ open }: { open: boolean }) {
 }
 
 /** Ikona grupowania — trzy poziome bloki o roznej dlugosci. */
-/** Suwaki — ustawienia widoku. */
-export function SlidersIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-      <path d="M2 4h7M13 4h1M2 12h1M7 12h7M2 8h3M9 8h5" />
-      <circle cx="11" cy="4" r="1.6" />
-      <circle cx="5" cy="12" r="1.6" />
-      <circle cx="7" cy="8" r="1.6" />
-    </svg>
-  );
-}
-
 export function GroupIcon() {
   return (
     <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden>
@@ -627,6 +615,18 @@ export function TagIcon() {
     <svg {...GLYPH} aria-hidden>
       <path d="M8.2 2.4H13.6V7.8L7.9 13.5 2.5 8.1z" />
       <circle cx="10.8" cy="5.2" r="1" />
+    </svg>
+  );
+}
+
+/** Ustawienia — trzy suwaki (okno „Ustawienia"). */
+export function SlidersIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <path d="M2.5 4.5H13.5M2.5 8H13.5M2.5 11.5H13.5" />
+      <circle cx="10" cy="4.5" r="1.5" fill="var(--bg-panel)" />
+      <circle cx="5.5" cy="8" r="1.5" fill="var(--bg-panel)" />
+      <circle cx="9" cy="11.5" r="1.5" fill="var(--bg-panel)" />
     </svg>
   );
 }

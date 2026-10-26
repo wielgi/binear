@@ -4,6 +4,7 @@ import {
   addGroup,
   addTile,
   colorCss,
+  createGroup,
   detachTile,
   emptyConfig,
   exportConfig,
@@ -18,6 +19,7 @@ import {
   removeGroup,
   removeTile,
   setGroupCaption,
+  ungroup,
   renameGroup,
   sameView,
   shownValue,
@@ -116,6 +118,28 @@ describe('edycja', () => {
     c = removeGroup(c, a);
     expect(c.groups.map((g) => g.id)).toEqual([b]);
     expect(c.tiles).toEqual([]);
+  });
+
+  it('createGroup oddaje id nowej grupy; pusta nazwa to „Grupa"', () => {
+    const { cfg, id } = createGroup(addGroup(emptyConfig(), 'A'), '  Nowa  ');
+    expect(cfg.groups.map((g) => g.name)).toEqual(['A', 'Nowa']);
+    expect(cfg.groups[1].id).toBe(id);
+    expect(createGroup(emptyConfig(), ' ').cfg.groups[0].name).toBe('Grupa');
+  });
+
+  it('ungroup: grupa znika, jej kafelki staja osobno w jej miejscu, reszta bez zmian', () => {
+    let c = addGroup(addGroup(addGroup(emptyConfig(), 'A'), 'B'), 'C');
+    const [a, b, cc] = c.groups.map((g) => g.id);
+    c = addTile(addTile(addTile(c, tile('x', { group: b })), tile('y', { group: b })), tile('z', { group: a }));
+    c = ungroup(c, b);
+    expect(c.tiles.map((t) => t.id)).toEqual(['x', 'y', 'z']);
+    expect(c.groups.map((g) => g.id)[0]).toBe(a);
+    expect(c.groups.map((g) => g.id)[3]).toBe(cc);
+    const [gx, gy] = [c.tiles[0].group, c.tiles[1].group];
+    expect(c.groups.slice(1, 3).map((g) => g.id)).toEqual([gx, gy]);
+    expect(c.groups[1]).toMatchObject({ hideCaption: true });
+    expect(c.tiles[2].group).toBe(a);
+    expect(ungroup(c, 'brak')).toBe(c);
   });
 
   it('updateTile nie zmienia id; removeTile usuwa', () => {

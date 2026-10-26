@@ -111,20 +111,20 @@ also a palette section with usage counts.
 
 ## Tags & epics
 
-The **Tagi i epiki** window (header) renames, merges and deletes tags across the project, and adds, renames,
+The **Tagi i epiki** tab of **Ustawienia** renames, merges and deletes tags across the project, and adds, renames,
 recolours and deletes epics. Bitrix has no tag dictionary — a tag is just a name on a task — so a tag change
 rewrites every task that has it:
 
 - only **open** tasks change; closed ones keep their tags (the dialog says how many);
 - each task's tags are **read from Bitrix right before** it is written, so a list that is a few minutes old,
   or a change made in Bitrix meanwhile, can't bring an old tag back or drop someone else's;
-- every rename, merge and delete asks first (a merge can't be split again); the window stays blocked until
+- every rename, merge and delete asks first (a merge can't be split again); the window (close and tab switch) stays blocked until
   the data has reloaded, and if something fails halfway it says how many tasks were already changed;
 - an epic's colour is saved once, when the colour picker closes.
 
 ## Team
 
-The **Zespół** window (header, or *Zespół i grafik* in Charts) holds who is on the team, on what FTE and on which
+The **Zespół i grafik** tab of **Ustawienia** (also opened by *Zespół i grafik* in Charts and planning) holds who is on the team, on what FTE and on which
 days — capacity comes from it instead of `BX_CAPACITY_DEVS`. Per person:
 
 - **Kierownik** — the manager: their tasks are outside the SP budget, get their own bar in planning and stay
@@ -170,19 +170,28 @@ Click a tile to apply its view, click it again to clear the filters; filters you
 narrow it. A tile still counting (story points or chats not loaded yet) shows `…` and writes nothing to the
 history.
 
-**Editing.** The pencil at the end of the row (pinned to the right edge) opens the tile editor: the same strip of
+**Editing.** The tile editor is the **Kafelki** tab of **Ustawienia** (header button): the same strip of
 tiles on top, the selected tile or group below, laid out like the view panel (label on the left, control on the
 right). In the editor:
 
 - **drag** a tile to reorder it, also into another group — or onto the **+** at the end (or pick **Osobno** under *Grupa*) to take it out of its group (it gets its own caption-less group);
+  a tile that stands alone shows **Osobno** selected (dashed, in the accent colour — it is no group's name);
+- **groups**: *Grupa* in a tile's form — new or existing — has **+ Nowa grupa**, which turns into a name field
+  right there (Enter creates; for a new tile the group is created only together with the tile); a group left
+  without tiles shows a "drag a tile here" slot;
+  the **×** next to a group's name (on hover or when selected) deletes it and asks whether its tiles go with it
+  or stay on the bar on their own;
 - **+** at the end of the strip (or `N`) saves the **current view** as a new tile;
 - keyboard: `←` `→` select, `Shift`+`←` `→` move, `↑` from a tile to its group, `↓` back, `Del` delete,
-  `Esc` deselect / close;
+  `Esc` deselect, a second `Esc` closes the window;
 - **Wczytaj domyślne kafelki** loads the IT set below from the repo (`public/binear-kafelki-IT.json`);
   on an empty row the same button stands in the row itself;
 - **Eksportuj / Importuj** move a set as a JSON file; with tiles already there, binear asks whether to
   **replace** them or **add** the new ones next to them;
 - **Wyczyść wszystko** removes every tile and group (after asking).
+- **Pasek** shows or hides the bar on the list and chooses what happens when the tiles don't fit: one row that
+  scrolls sideways (default) or wrapped onto further rows; remembered in this browser with the other view settings.
+  The same switch is in **Wygląd** (*Pasek kafelków*) — one setting, so both always show the same value.
 
 Deleting, clearing and importing ask in the app's own dialog. The configuration lives in this browser
 (`localStorage`, key `binear.tiles.v1`).
@@ -318,7 +327,7 @@ the tooltip. Numbers are rounded to whole values; the colour is computed from th
   `BX_CAPACITY_DEVS` in full-time equivalents, fractions allowed (default 3.5: three full-time
   developers plus one half-time).
 - **Team and weekly schedule.** Instead of a fixed number of developers you can describe the team in
-  the app: planning view → **Options → Team and schedule…**. Pick people, set each one's FTE (1, 0.75,
+  the app: **Ustawienia → Zespół i grafik** (or the team link in the planning view). Pick people, set each one's FTE (1, 0.75,
   0.5, 0.25) and untick the days someone is away (everyone is present Mon–Fri by default, so only
   exceptions are stored). Capacity = FTE × 8 h per ticked working day; with a team entered it replaces
   `BX_CAPACITY_DEVS` in the countdown chip and, when the SP-per-sprint field is empty, becomes the
@@ -548,6 +557,26 @@ tiebreaker *under* the chosen sort, so it never overrides the order you picked (
 no toggle for it). The palette's **Sort by** section reverses direction when you pick
 the same axis again, like a table header.
 
+### Settings
+
+All configuration lives in one **Ustawienia** window — the *Ustawienia* button in the header, or the bottom of
+the view panel. Tabs on the left: **Wygląd** (theme, font, group
+colouring, deadline look, task panel as a drawer or a column, and the *Karta zadania* section: which elements a
+list row shows, left or right, in how many lines — this browser only; the view panel keeps only what shapes the
+current view), **Kafelki** (see *Tiles*; stored in this browser only), **Środowisko**, **Zespół i grafik** (see *Team*), **Tagi i epiki** (see
+*Tags & epics*) and **Uprawnienia webhooka** (what the token can do — read-only probes). A tab, once opened,
+stays mounted while the window is open, so switching tabs doesn't lose an unsaved form or the chosen week.
+
+**Środowisko** holds the
+non-secret `.env` values: default project (`BX_GROUP_ID`), the *Unassigned* account (`BX_UNASSIGNED_ID`),
+IT departments and extra IT accounts (`BX_IT_DEPARTMENTS`, `BX_IT_USERS`), developers in FTE
+(`BX_CAPACITY_DEVS`) and who stays outside the SP limit (`BX_CAPACITY_EXCLUDE_IDS`). People and departments
+are picked by name; if the webhook can't read the company structure (`department` scope), departments are
+typed as numbers. **Zapisz** rewrites only those lines in `.env` (comments and everything else stay) through
+`/api/env` and the server re-reads them at once — no restart. Only same-origin requests can save, and only
+these keys with digit-only values pass. A key also set in `.env.local` or the system environment wins over
+`.env`; the panel says so instead of pretending it saved. `BITRIX_WEBHOOK` is never shown or editable.
+
 ## Two context menus
 
 Right-click gives **different** things in two places:
@@ -575,7 +604,8 @@ Also: `@media (hover: none)` pins `⋯` (no hover on touch), and
 
 ## Colors and themes
 
-The color layer is CSS variables in `styles.css`; a theme overrides **only those** —
+The theme (and the font, group colouring, deadline look and task panel) is picked in **Ustawienia → Wygląd** or the command
+palette. The color layer is CSS variables in `styles.css`; a theme overrides **only those** —
 spacing, weights and sizes are shared, so switching themes moves neither layout nor
 density. The choice lands on `<html>` as `data-theme`; "System" mirrors
 `prefers-color-scheme` and follows the OS mid-session. `binear.theme.v1` is separate

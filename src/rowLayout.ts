@@ -2,7 +2,7 @@
  * Uklad wiersza zadania na liscie — konfigurator karty.
  *
  * Wiersz to jedna albo kilka LINII, a kazda linia ma strefe lewa i prawa. Elementy ustawia sie
- * przeciaganiem w konfiguratorze (RowLayoutModal): co po lewej, co po prawej, w jakiej kolejnosci
+ * przeciaganiem w konfiguratorze (RowLayoutPane, Ustawienia → Wyglad): co po lewej, co po prawej, w jakiej kolejnosci
  * i w ktorej linii. Element, ktorego nie ma w zadnej linii, jest ukryty.
  *
  * Stale zostaja: zaznaczenie (checkbox), znak waznosci, przycisk podzadan, etap/status i numer

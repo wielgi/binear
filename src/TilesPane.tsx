@@ -5,7 +5,7 @@ import { AskDialog, type AskState } from './AskDialog';
 import { kafelkow, pl } from './plural';
 
 import {
-  addGroup,
+  createGroup,
   addTile,
   DEFAULT_COLOR,
   DEFAULT_ICON,
@@ -26,6 +26,7 @@ import {
   removeTile,
   renameGroup,
   setGroupCaption,
+  ungroup,
   TILE_COLORS,
   TILE_ICON_PICKER,
   updateTile,
@@ -190,14 +191,23 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** Wybor jednej z kilku opcji — te same segmenty co zakres listy. */
-function Segments({ value, options, onPick }: { value: string; options: { value: string; label: string }[]; onPick: (v: string) => void }) {
+function Segments({
+  value,
+  options,
+  onPick,
+}: {
+  value: string;
+  /** `cls` — dodatkowa klasa segmentu (np. „Osobno", ktore nie jest grupa i ma wygladac inaczej). */
+  options: { value: string; label: string; cls?: string }[];
+  onPick: (v: string) => void;
+}) {
   return (
     <span className="segments tile-segments">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
-          className={`segment${o.value === value ? ' segment-active' : ''}`}
+          className={`segment${o.value === value ? ' segment-active' : ''}${o.cls ? ` ${o.cls}` : ''}`}
           aria-pressed={o.value === value}
           onClick={() => onPick(o.value)}
         >
@@ -205,6 +215,86 @@ function Segments({ value, options, onPick }: { value: string; options: { value:
         </button>
       ))}
     </span>
+  );
+}
+
+/**
+ * Wybor grupy kafelka: istniejace grupy, „Osobno" i „+ Nowa grupa". Nowa grupa dostaje nazwe od razu, w polu
+ * w miejscu przycisku (Enter tworzy, Esc rezygnuje) — bez osobnego pola obok, ktore latwo bylo przeoczyc.
+ * `pending` = nazwa nowej grupy, ktora powstanie dopiero z kafelkiem (formularz nowego kafelka).
+ */
+function GroupPicker({
+  value,
+  options,
+  pending,
+  onPick,
+  onCreate,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  pending?: string;
+  onPick: (v: string) => void;
+  onCreate: (name: string) => void;
+}) {
+  const [naming, setNaming] = useState(false);
+  const [draft, setDraft] = useState('');
+  const done = () => {
+    setNaming(false);
+    setDraft('');
+  };
+  const commit = () => {
+    if (!draft.trim()) return;
+    onCreate(draft.trim());
+    done();
+  };
+  return (
+    <>
+      <Segments
+        value={naming ? '' : value}
+        options={[
+          ...options,
+          ...(pending ? [{ value: NEW_GROUP, label: `${pending} (nowa)` }] : []),
+          // Nie grupa, tylko jej brak — osobny wyglad, zeby nie wziac go za nazwe grupy.
+          { value: LOOSE, label: 'Osobno', cls: 'segment-loose' },
+        ]}
+        onPick={(v) => {
+          done();
+          onPick(v);
+        }}
+      />
+      {naming ? (
+        <span className="tile-new-group-form">
+          <input
+            className="picker-input tile-new-group"
+            placeholder="Nazwa nowej grupy"
+            value={draft}
+            maxLength={40}
+            autoFocus
+            aria-label="Nazwa nowej grupy"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+              } else if (e.key === 'Escape') {
+                // Tylko pole — okno kafelkow zostaje otwarte (jego Esc zdejmuje fokus z pola).
+                done();
+              }
+            }}
+          />
+          <button type="button" className="btn btn-primary" disabled={!draft.trim()} onClick={commit}>
+            Utwórz
+          </button>
+          <button type="button" className="btn" onClick={done}>
+            Anuluj
+          </button>
+        </span>
+      ) : (
+        <button type="button" className="btn tile-new-group-btn" onClick={() => setNaming(true)}>
+          + Nowa grupa
+        </button>
+      )}
+    </>
   );
 }
 
@@ -218,16 +308,22 @@ const MEASURES = [
  * kolejnosc, zestaw „proces IT", eksport i import pliku JSON (dzieki temu dzial moze wyslac swoj zestaw).
  */
 const LOOSE = '__loose';
+/* Formularz nowego kafelka: grupa nazwana, ale zalozona dopiero razem z kafelkiem (Anuluj nie zostawia pustej). */
+const NEW_GROUP = '__new';
 /* Cel upuszczenia „poza grupe": kafelek dostaje wlasna grupe bez podpisu (`detachTile`). */
 const OUT = '__out';
 
 /** Co jest zaznaczone w pasku kafelkow: kafelek, grupa albo formularz nowego kafelka. */
 type Sel = { k: 'tile'; id: string } | { k: 'group'; id: string } | { k: 'new' } | null;
 
-export function TilesModal({
+/** Edytor kafelkow — zakladka „Kafelki" okna „Ustawienia" (SettingsModal). */
+export function TilesPane({
   cfg,
   current,
-  startNew,
+  active,
+  bar,
+  barOptions,
+  onBar,
   views,
   onSaveAsView,
   describeFilter,
@@ -237,8 +333,13 @@ export function TilesModal({
   cfg: TilesConfig;
   /** Widok na liscie w tej chwili — z niego powstaje nowy kafelek albo nim zastepujemy stary. */
   current: TileView;
-  /** Otwarte przyciskiem „＋ Kafelek": od razu formularz nowego kafelka. */
-  startNew: boolean;
+  /** Zakladka na wierzchu — tylko wtedy dziala klawiatura edytora (schowana zostaje zamontowana). */
+  active: boolean;
+  /** Pasek na liscie: schowany, jeden rzad przewijany w poziomie albo zawijany w kolejne rzedy. */
+  bar: string;
+  /** Te same opcje co w zakladce „Wyglad" (App) — jedna lista, jeden stan. */
+  barOptions: { value: string; label: string }[];
+  onBar: (bar: string) => void;
   /** Zapisane widoki — kafelek moze powstac z kazdego z nich, nie tylko z biezacego. */
   views: { id: string; name: string; view: TileView }[];
   /** Kafelek → zapisany widok (z biezacym grupowaniem i sortowaniem, zakres i filtry z kafelka). */
@@ -246,9 +347,10 @@ export function TilesModal({
   /** Warunek po ludzku, jak na chipie paska filtrow („Tag dowolny z BUG"). */
   describeFilter: (c: TileCondition) => string;
   onChange: (next: TilesConfig) => void;
+  /** Drugi Esc (bez zaznaczenia) zamyka cale okno ustawien. */
   onClose: () => void;
 }) {
-  const [sel, setSel] = useState<Sel>(startNew ? { k: 'new' } : null);
+  const [sel, setSel] = useState<Sel>(null);
   const [name, setName] = useState('');
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [icon, setIcon] = useState(DEFAULT_ICON);
@@ -278,19 +380,22 @@ export function TilesModal({
   };
   const fileRef = useRef<HTMLInputElement>(null);
   // Wybrana grupa mogla zniknac (usunieta, „Wyczysc wszystko") — wtedy pierwsza istniejaca.
-  const pickedGroup = groupId === LOOSE || cfg.groups.some((g) => g.id === groupId) ? groupId : (cfg.groups[0]?.id ?? LOOSE);
+  const pickedGroup =
+    groupId === LOOSE || (groupId === NEW_GROUP && newGroup) || cfg.groups.some((g) => g.id === groupId) ? groupId : (cfg.groups[0]?.id ?? LOOSE);
 
   const create = () => {
     if (!name.trim()) return;
     let next = cfg;
     let g = pickedGroup;
-    if (g === LOOSE && !newGroup.trim()) {
+    if (g === LOOSE) {
       const loose = ensureLooseGroup(next);
       next = loose.cfg;
       g = loose.id;
-    } else if (newGroup.trim() || !cfg.groups.length) {
-      next = addGroup(next, newGroup.trim() || 'Moje kafelki');
-      g = next.groups[next.groups.length - 1].id;
+    } else if (g === NEW_GROUP) {
+      const made = createGroup(next, newGroup);
+      next = made.cfg;
+      g = made.id;
+      setGroupId(made.id);
     }
     const id = newId('t');
     next = addTile(next, { id, name: name.trim().slice(0, 40), ...sourceView, measure, color, icon, group: g });
@@ -377,6 +482,25 @@ export function TilesModal({
   const selTile = sel?.k === 'tile' ? cfg.tiles.find((t) => t.id === sel.id) : undefined;
   const selGroup = sel?.k === 'group' ? cfg.groups.find((g) => g.id === sel.id) : undefined;
 
+  /** Grupe z kafelkami mozna usunac na dwa sposoby: razem z nimi albo zostawiajac je osobno. */
+  const askRemoveGroup = (g: TileGroup) => {
+    const n = cfg.tiles.filter((t) => t.group === g.id).length;
+    const drop = (next: TilesConfig) => {
+      onChange(next);
+      setSel(null);
+    };
+    setAsk({
+      title: `Usunąć grupę „${g.name}"?`,
+      body: n ? `W grupie są kafelki (${n}). Mogą zostać na pasku osobno albo zniknąć razem z grupą.` : 'Grupa jest pusta.',
+      actions: n
+        ? [
+            { label: 'Usuń grupę, kafelki zostaw', kind: 'primary', run: () => drop(ungroup(cfg, g.id)) },
+            { label: `Usuń razem z kafelkami (${n})`, kind: 'danger', run: () => drop(removeGroup(cfg, g.id)) },
+          ]
+        : [{ label: 'Usuń grupę', kind: 'danger', run: () => drop(removeGroup(cfg, g.id)) }],
+    });
+  };
+
   /** Usuwa zaznaczony kafelek albo grupe — po pytaniu, bo Delete z klawiatury latwo wcisnac przypadkiem. */
   const removeSelected = () => {
     if (selTile) {
@@ -387,13 +511,7 @@ export function TilesModal({
         actions: [{ label: 'Usuń', kind: 'danger', run: () => (onChange(removeTile(cfg, t.id)), setSel(null)) }],
       });
     } else if (selGroup) {
-      const g = selGroup;
-      const n = cfg.tiles.filter((t) => t.group === g.id).length;
-      setAsk({
-        title: `Usunąć grupę „${g.name}"?`,
-        body: n ? `Razem z nią znikną jej kafelki (${n}).` : 'Grupa jest pusta.',
-        actions: [{ label: 'Usuń grupę', kind: 'danger', run: () => (onChange(removeGroup(cfg, g.id)), setSel(null)) }],
-      });
+      askRemoveGroup(selGroup);
     }
   };
 
@@ -404,6 +522,7 @@ export function TilesModal({
    * sa w tym czasie wylaczone (App nie reaguje, gdy okno kafelkow jest otwarte).
    */
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       // Otwarte pytanie: Esc je zamyka, reszte klawiszy (Enter, Tab) obsluguja jego przyciski.
       if (ask) {
@@ -458,12 +577,19 @@ export function TilesModal({
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  /* Grupy bez podpisu nazywamy po pierwszym kafelku — kilka „Bez podpisu" obok siebie nie dawalo sie odroznic. */
-  const groupOptions = cfg.groups.map((g) => {
-    if (!g.hideCaption) return { value: g.id, label: g.name };
-    const first = cfg.tiles.find((t) => t.group === g.id)?.name;
-    return { value: g.id, label: first ? `Bez podpisu (${first})` : 'Bez podpisu' };
-  });
+  /*
+   * Kafelek sam w grupie bez podpisu stoi „osobno" — to nie grupa do wyboru, tylko opcja „Osobno". Pozostale grupy
+   * bez podpisu (kilka kafelkow) nazywamy po pierwszym kafelku — kilka „Bez podpisu" obok siebie nie dawalo sie odroznic.
+   */
+  const alone = (groupId: string) =>
+    Boolean(cfg.groups.find((g) => g.id === groupId)?.hideCaption) && cfg.tiles.filter((t) => t.group === groupId).length <= 1;
+  const groupOptions = cfg.groups
+    .filter((g) => !alone(g.id))
+    .map((g) => {
+      if (!g.hideCaption) return { value: g.id, label: g.name };
+      const first = cfg.tiles.find((t) => t.group === g.id)?.name;
+      return { value: g.id, label: first ? `Bez podpisu (${first})` : 'Bez podpisu' };
+    });
 
   const newForm = (
     <section className="tile-form">
@@ -515,20 +641,18 @@ export function TilesModal({
         <Segments value={measure} options={MEASURES} onPick={(v) => setMeasure(v as TileMeasure)} />
       </Field>
       <Field label="Grupa">
-        <Segments
+        <GroupPicker
           value={pickedGroup}
-          options={[...groupOptions, { value: LOOSE, label: 'Osobno' }]}
+          options={groupOptions}
+          pending={newGroup || undefined}
           onPick={(v) => {
             setGroupId(v);
-            setNewGroup('');
+            if (v !== NEW_GROUP) setNewGroup('');
           }}
-        />
-        <input
-          className="picker-input tile-new-group"
-          placeholder={cfg.groups.length ? 'albo nowa grupa' : 'nazwa grupy'}
-          value={newGroup}
-          maxLength={40}
-          onChange={(e) => setNewGroup(e.target.value)}
+          onCreate={(n) => {
+            setNewGroup(n);
+            setGroupId(NEW_GROUP);
+          }}
         />
       </Field>
     </section>
@@ -575,10 +699,14 @@ export function TilesModal({
         <Segments value={t.measure} options={MEASURES} onPick={(v) => onChange(updateTile(cfg, t.id, { measure: v as TileMeasure }))} />
       </Field>
       <Field label="Grupa">
-        <Segments
-          value={t.group}
-          options={[...groupOptions, { value: LOOSE, label: 'Osobno' }]}
+        <GroupPicker
+          value={alone(t.group) ? LOOSE : t.group}
+          options={groupOptions}
           onPick={(v) => onChange(v === LOOSE ? detachTile(cfg, t.id) : moveToGroup(cfg, t.id, v))}
+          onCreate={(n) => {
+            const made = createGroup(cfg, n);
+            onChange(moveToGroup(made.cfg, t.id, made.id));
+          }}
         />
       </Field>
       <Field label="Filtry">
@@ -619,9 +747,11 @@ export function TilesModal({
       {head('Grupa', (d) => onChange(moveGroup(cfg, g.id, d)), () => removeSelected(), 'Usuń grupę')}
       <Field label="Nazwa">
         <input
+          key={g.id}
           className="picker-input tile-name"
           value={g.name}
           maxLength={40}
+          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
           aria-label="Nazwa grupy"
           onChange={(e) => onChange({ ...cfg, groups: cfg.groups.map((x) => (x.id === g.id ? { ...x, name: e.target.value } : x)) })}
           onBlur={(e) => onChange(renameGroup(cfg, g.id, e.target.value.trim() || 'Grupa'))}
@@ -665,6 +795,20 @@ export function TilesModal({
           >
             <span className="counters-cap-text">{g.name}</span>
             {g.hideCaption && <span className="counters-cap-sp">bez podpisu</span>}
+            {/* Usuwanie widac przy samej grupie (na najechanie i po zaznaczeniu) — wczesniej tylko w jej edytorze. */}
+            <span
+              role="button"
+              tabIndex={-1}
+              className="tiles-strip-cap-x"
+              title="Usuń grupę"
+              aria-label={`Usuń grupę ${g.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                askRemoveGroup(g);
+              }}
+            >
+              ×
+            </span>
           </button>
           <div
             className={`counters-group-row${dragId && drop?.group === g.id && drop.before === null ? ' tile-drop-end' : ''}`}
@@ -719,6 +863,8 @@ export function TilesModal({
                   </span>
                 </button>
               ))}
+            {/* Pusta grupa (np. swiezo dodana): miejsce, w ktore widac, ze mozna wrzucic kafelek. */}
+            {!cfg.tiles.some((t) => t.group === g.id) && <span className="counter tile-group-empty">Przeciągnij tu kafelek</span>}
           </div>
         </div>
       ))}
@@ -757,63 +903,59 @@ export function TilesModal({
     </div>
   );
 
-  return createPortal(
+  return (
     <>
-      <div className="picker-backdrop modal-scrim" onClick={(e) => e.detail < 2 && onClose()} />
-      <div className="team-modal tiles-modal" role="dialog" aria-label="Kafelki">
-        <header className="team-head">
-          <h2>Kafelki</h2>
-          <button className="btn" onClick={onClose}>
-            Zamknij
-          </button>
-        </header>
+      {strip}
 
-        {strip}
-
-        {selTile && tileEditor(selTile)}
-        {selGroup && groupEditor(selGroup)}
-        {sel?.k === 'new' && newForm}
-        {!sel && (
-          <p className="team-empty">
-            {cfg.tiles.length
-              ? 'Kliknij kafelek albo nazwę grupy, żeby je edytować. Kafelek przeciągnij, żeby zmienić kolejność — także do innej grupy albo na plus, żeby stał osobno.'
-              : 'Nie ma jeszcze kafelków. Wczytaj domyślne albo ustaw filtry na liście i dodaj kafelek plusem.'}
-          </p>
-        )}
-
-        <footer className="tile-io">
-          <button className="btn" onClick={() => void loadDefaults()} title="Zestaw procesu IT zapisany w repo (binear-kafelki-IT.json)">
-            Wczytaj domyślne kafelki
-          </button>
-          <button className="btn" onClick={download} disabled={!cfg.tiles.length}>
-            Eksportuj do pliku
-          </button>
-          <button className="btn" onClick={() => fileRef.current?.click()}>
-            Importuj z pliku
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json,.json"
-            hidden
-            onChange={(e) => {
-              void onFile(e.target.files?.[0]);
-              e.target.value = '';
-            }}
-          />
-          <button className="tile-tool tile-tool-danger" onClick={clearAll} disabled={!cfg.tiles.length && !cfg.groups.length}>
-            Wyczyść wszystko
-          </button>
-          {importMsg && <span className="team-hint">{importMsg}</span>}
-        </footer>
-        <p className="team-hint tile-keys">
-          <kbd>←</kbd> <kbd>→</kbd> wybór · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> przesuń · <kbd>↑</kbd> grupa ·{' '}
-          <kbd>↓</kbd> kafelek · <kbd>Del</kbd> usuń · <kbd>N</kbd> nowy · <kbd>Esc</kbd> zamknij. Konfiguracja jest zapisana
-          tylko w tej przeglądarce — plik pozwala przenieść ją do innych.
+      {selTile && tileEditor(selTile)}
+      {selGroup && groupEditor(selGroup)}
+      {sel?.k === 'new' && newForm}
+      {!sel && (
+        <p className="team-empty">
+          {cfg.tiles.length
+            ? 'Kliknij kafelek albo nazwę grupy, żeby je edytować; × przy nazwie usuwa grupę. Kafelek przeciągnij, żeby zmienić kolejność — także do innej grupy albo na plus, żeby stał osobno.'
+            : 'Nie ma jeszcze kafelków. Wczytaj domyślne albo ustaw filtry na liście i dodaj kafelek plusem.'}
         </p>
+      )}
+
+      <div className="tile-form tile-bar-layout">
+        <Field label="Pasek">
+          <Segments value={bar} options={barOptions} onPick={onBar} />
+        </Field>
       </div>
-      {ask && <AskDialog ask={ask} onClose={() => setAsk(null)} />}
-    </>,
-    document.body,
+
+      <footer className="tile-io">
+        <button className="btn" onClick={() => void loadDefaults()} title="Zestaw procesu IT zapisany w repo (binear-kafelki-IT.json)">
+          Wczytaj domyślne kafelki
+        </button>
+        <button className="btn" onClick={download} disabled={!cfg.tiles.length}>
+          Eksportuj do pliku
+        </button>
+        <button className="btn" onClick={() => fileRef.current?.click()}>
+          Importuj z pliku
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          hidden
+          onChange={(e) => {
+            void onFile(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+        <button className="tile-tool tile-tool-danger" onClick={clearAll} disabled={!cfg.tiles.length && !cfg.groups.length}>
+          Wyczyść wszystko
+        </button>
+        {importMsg && <span className="team-hint">{importMsg}</span>}
+      </footer>
+      <p className="team-hint tile-keys">
+        <kbd>←</kbd> <kbd>→</kbd> wybór · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> przesuń · <kbd>↑</kbd> grupa ·{' '}
+        <kbd>↓</kbd> kafelek · <kbd>Del</kbd> usuń · <kbd>N</kbd> nowy · <kbd>Esc</kbd> odznacz, drugi zamyka okno. Konfiguracja jest zapisana
+        tylko w tej przeglądarce — plik pozwala przenieść ją do innych.
+      </p>
+      {/* Okno ustawien ma transform — dialog z position: fixed musi wyjsc do body. */}
+      {ask && createPortal(<AskDialog ask={ask} onClose={() => setAsk(null)} />, document.body)}
+    </>
   );
 }
