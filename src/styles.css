@@ -3620,11 +3620,12 @@ img.avatar {
 
 /* ── Warstwy pływające: menu, popover, paleta ───────────────────────────── */
 
+/* Nad szuflada zadania (`.detail-drawer`, 30) — inaczej menu z panelu otwiera sie pod nia. */
 .picker-backdrop,
 .palette-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 32;
 }
 
 .palette-backdrop {
@@ -3635,7 +3636,7 @@ img.avatar {
 .menu,
 .picker {
   position: fixed;
-  z-index: 21;
+  z-index: 33;
   display: flex;
   flex-direction: column;
   padding: var(--s1);
