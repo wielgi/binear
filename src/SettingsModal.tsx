@@ -4,8 +4,8 @@ import { createPortal } from 'react-dom';
 export type SettingsTab = 'tiles' | 'look' | 'env' | 'team' | 'manage' | 'perms';
 
 export const SETTINGS_TABS: { key: SettingsTab; label: string; hint: string }[] = [
+  { key: 'look', label: 'Wygląd', hint: 'Motyw, czcionka, panel zadania, karta zadania na liście' },
   { key: 'tiles', label: 'Kafelki', hint: 'Grupy, kolejność, kolory; tylko w tej przeglądarce' },
-  { key: 'look', label: 'Wygląd', hint: 'Motyw, czcionka, kolor grup, termin' },
   { key: 'env', label: 'Środowisko', hint: 'Projekt domyślny, działy i konta IT, moc bez zespołu' },
   { key: 'team', label: 'Zespół i grafik', hint: 'Role, etaty, budżet SP, urlopy' },
   { key: 'manage', label: 'Tagi i epiki', hint: 'Zmiana nazwy, scalanie, usuwanie' },

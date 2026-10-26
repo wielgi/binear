@@ -36,6 +36,11 @@ import { teamHoursBetween, type TeamConfig } from './team';
 import { BarsIcon, CheckIcon, ChevronIcon, GripIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { tagsForWidth } from './taskView';
+import { compareDeadlines, deadlineLevel, deadlineVerdict, LEVEL_COLOR, type DeadlineVerdict } from './deadlines';
+import { TAG_DO_STARTU } from './counters';
+
+/** Termin, ktory nie moze czekac do nastepnej rady, i taki, ktory nie moze czekac do kolejnej. */
+type PoziomTerminu = 'teraz' | 'nastepny';
 
 /*
  * Ile wysokosci prawej kolumny bierze sprint AKTYWNY. Reszta idzie do kolejnego.
@@ -324,8 +329,17 @@ function Pane({
   grow,
   zwiniety = false,
   onZwin,
+  tabs,
+  podpis,
+  pusty,
 }: {
   title: string;
+  /** Zakladki w miejscu tytulu (rejestr / terminy). Gdy ich nie ma, stoi sam tytul. */
+  tabs?: React.ReactNode;
+  /** Dopisek pod wierszem — lista „Terminy" mowi nim, dlaczego zadanie tam jest. */
+  podpis?: (t: Task) => React.ReactNode;
+  /** Tekst pustej listy. */
+  pusty?: string;
   subtitle?: string;
   /** `null` = rejestr (backlog). */
   sprintId: number | null;
@@ -510,7 +524,7 @@ function Pane({
             <ChevronIcon open={open} />
           </button>
         )}
-        <h2>{title}</h2>
+        {tabs ?? <h2>{title}</h2>}
         {subtitle && <span className="plan-sub">{subtitle}</span>}
 
         {/*
@@ -626,7 +640,7 @@ function Pane({
         <div className="plan-list">
           {tasks.length === 0 ? (
             <div className="plan-empty">
-              {sprintId === null ? 'Rejestr jest pusty.' : 'Przeciągnij tutaj zadania z rejestru.'}
+              {pusty ?? (sprintId === null ? 'Rejestr jest pusty.' : 'Przeciągnij tutaj zadania z rejestru.')}
             </div>
           ) : (
             tasks.map((t, i) => {
@@ -652,6 +666,7 @@ function Pane({
                   )}
                   <div className={za ? 'plan-row-ponad' : undefined}>
                     {renderRow(t, tagsForWidth(szerokosc))}
+                    {podpis?.(t)}
                   </div>
                 </Fragment>
               );
@@ -980,6 +995,88 @@ export function Planning({
     const ponad = (t: Task) => (!pozaLimitem(t, pozaBudzetem) && (t.storyPoints ?? 0) > zostalo ? 1 : 0);
     return [...backlog].sort((a, b) => ponad(a) - ponad(b));
   }, [backlog, zostalo, pozaBudzetem]);
+
+  /*
+   * TERMINY: zadania, ktore nie moga czekac do nastepnej rady. Lista nie zalezy od kolejki dzialow
+   * ani od filtrow rejestru — przegapiony termin to zadanie, ktorego juz nie dowieziemy, wiec
+   * wszystkie takie zadania maja byc w jednym miejscu, niezaleznie od tego, czyja jest tura.
+   * Liczymy z `tasks` (wszystkie), a nie z `rejestrTasks`.
+   */
+  const [zakladka, setZakladka] = useState<'rejestr' | 'terminy'>('rejestr');
+  const terminy = useMemo(() => {
+    const rada = sprintDeadline(cel?.dateEnd ?? null);
+    const werdykty = new Map<number, DeadlineVerdict>();
+    const poziomy = new Map<number, PoziomTerminu>();
+    if (!cel || !rada) return { lista: [] as Task[], werdykty, poziomy, wSprincie: 0, pilne: 0 };
+    const teraz_ = new Date();
+    const wybrane: { task: Task; v: DeadlineVerdict; p: PoziomTerminu }[] = [];
+    let wSprincie = 0;
+    for (const t of tasks) {
+      /* Tylko to, co da sie wziac do sprintu: zadanie bez DO-STARTU nie jest gotowe i na liscie by tylko lezalo. */
+      if (!plannable(t) || !t.tags.some((g) => g.trim().toUpperCase() === TAG_DO_STARTU)) continue;
+      const v = deadlineVerdict(t, rada, teraz_);
+      if (!v) continue;
+      /* Ta sama regula co kolor paska w wierszu (deadlineLevel) — jedno zrodlo czerwonego i zoltego. */
+      const level = deadlineLevel(t, rada, teraz_);
+      const p: PoziomTerminu | null = level === 'red' ? 'teraz' : level === 'yellow' ? 'nastepny' : null;
+      if (!p) continue;
+      if (t.sprintId === cel.id || (activeSprint && t.sprintId === activeSprint.id)) {
+        if (p === 'teraz') wSprincie++;
+        continue;
+      }
+      wybrane.push({ task: t, v, p });
+    }
+    /* Najpierw to, co musi wejsc teraz, potem to, co w nastepnym; w grupie najblizszy termin. */
+    wybrane.sort((a, b) => Number(a.p === 'nastepny') - Number(b.p === 'nastepny') || compareDeadlines(a.v, b.v));
+    for (const { task, v, p } of wybrane) {
+      werdykty.set(task.id, v);
+      poziomy.set(task.id, p);
+    }
+    return {
+      lista: wybrane.map((w) => w.task),
+      werdykty,
+      poziomy,
+      wSprincie,
+      pilne: wybrane.filter((w) => w.p === 'teraz').length,
+    };
+  }, [tasks, cel, activeSprint, plannable]);
+
+  const podpisTerminu = useCallback(
+    (t: Task) => {
+      const v = terminy.werdykty.get(t.id);
+      if (!v) return null;
+      return (
+        <div className="plan-termin-note">
+          <span
+            className="plan-termin-chip is-level"
+            style={{ ['--level' as string]: LEVEL_COLOR[terminy.poziomy.get(t.id) === 'teraz' ? 'red' : 'yellow'] } as React.CSSProperties}
+          >
+            {terminy.poziomy.get(t.id) === 'teraz' ? 'musi wejść w obecnym sprincie' : 'musi wejść w następnym sprincie'}
+          </span>
+          <span
+            className={`plan-termin-chip ${v.hard ? 'is-hard' : 'is-soft'}`}
+            title={
+              v.hard
+                ? 'Termin potwierdzony jako nieprzekraczalny (tag TERMIN-TWARDY)'
+                : 'Termin jeszcze nie zweryfikowany w audycie — twardy czy „chcę do piątku"? Potwierdzony dostaje tag TERMIN-TWARDY.'
+            }
+          >
+            {v.hard ? 'termin twardy' : 'termin niezweryfikowany'}
+          </span>
+          {v.bezWyceny && <span className="plan-termin-chip is-warn">bez wyceny</span>}
+          {v.longTask && <span className="plan-termin-chip is-warn">ponad 40 h — rozbić</span>}
+          <span className="plan-termin-hours">
+            {v.days < 0
+              ? 'po terminie'
+              : v.bezWyceny
+                ? 'nie wiadomo, ile potrzeba'
+                : `po następnej radzie zostanie ${Math.round(v.hoursLeft)} h, wycena ${t.storyPoints} h`}
+          </span>
+        </div>
+      );
+    },
+    [terminy],
+  );
 
   const compare =
     limit > 0
@@ -1531,10 +1628,44 @@ export function Planning({
 
       <div className="plan-cols" ref={colsRef}>
       <Pane
-        title="Rejestr"
+        title={zakladka === 'terminy' ? 'Terminy' : 'Rejestr'}
+        tabs={
+          <div className="plan-tabs" role="tablist">
+            <button
+              role="tab"
+              aria-selected={zakladka === 'rejestr'}
+              className={`plan-tab${zakladka === 'rejestr' ? ' is-on' : ''}`}
+              onClick={() => setZakladka('rejestr')}
+            >
+              Rejestr
+            </button>
+            <button
+              role="tab"
+              aria-selected={zakladka === 'terminy'}
+              className={`plan-tab${zakladka === 'terminy' ? ' is-on' : ''}${terminy.pilne > 0 ? ' is-alarm' : ''}`}
+              onClick={() => setZakladka('terminy')}
+              title="Zadania z terminem, które nie mogą czekać do następnej rady — niezależnie od kolejki działów"
+            >
+              Terminy
+              {terminy.pilne > 0 && <span className="plan-tab-n">{terminy.pilne}</span>}
+            </button>
+          </div>
+        }
         sprintId={null}
-        tasks={backlogUlozony}
-        ponad={(t) => zostalo > 0 && !pozaLimitem(t, pozaBudzetem) && (t.storyPoints ?? 0) > zostalo}
+        tasks={zakladka === 'terminy' ? terminy.lista : backlogUlozony}
+        ponad={
+          zakladka === 'terminy'
+            ? undefined
+            : (t) => zostalo > 0 && !pozaLimitem(t, pozaBudzetem) && (t.storyPoints ?? 0) > zostalo
+        }
+        podpis={zakladka === 'terminy' ? podpisTerminu : undefined}
+        pusty={
+          zakladka === 'terminy'
+            ? terminy.wSprincie > 0
+              ? `Wszystkie zadania, które nie mogą czekać (${terminy.wSprincie}), są już w sprincie.`
+              : 'Żadne zadanie gotowe do startu (DO-STARTU) nie musi wejść teraz.'
+            : undefined
+        }
         people={people}
         renderRow={renderRow}
         grow="var(--plan-cols)"

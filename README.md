@@ -560,8 +560,10 @@ the same axis again, like a table header.
 ### Settings
 
 All configuration lives in one **Ustawienia** window — the *Ustawienia* button in the header, or the bottom of
-the view panel. Tabs on the left: **Kafelki** (see *Tiles*; stored in this browser only), **Wygląd** (theme, font, group
-colouring, deadline look — this browser only; the view panel keeps only what shapes the current view), **Środowisko**, **Zespół i grafik** (see *Team*), **Tagi i epiki** (see
+the view panel. Tabs on the left: **Wygląd** (theme, font, group
+colouring, deadline look, task panel as a drawer or a column, and the *Karta zadania* section: which elements a
+list row shows, left or right, in how many lines — this browser only; the view panel keeps only what shapes the
+current view), **Kafelki** (see *Tiles*; stored in this browser only), **Środowisko**, **Zespół i grafik** (see *Team*), **Tagi i epiki** (see
 *Tags & epics*) and **Uprawnienia webhooka** (what the token can do — read-only probes). A tab, once opened,
 stays mounted while the window is open, so switching tabs doesn't lose an unsaved form or the chosen week.
 
@@ -602,7 +604,7 @@ Also: `@media (hover: none)` pins `⋯` (no hover on touch), and
 
 ## Colors and themes
 
-The theme (and the font, group colouring and deadline look) is picked in **Ustawienia → Wygląd** or the command
+The theme (and the font, group colouring, deadline look and task panel) is picked in **Ustawienia → Wygląd** or the command
 palette. The color layer is CSS variables in `styles.css`; a theme overrides **only those** —
 spacing, weights and sizes are shared, so switching themes moves neither layout nor
 density. The choice lands on `<html>` as `data-theme`; "System" mirrors
