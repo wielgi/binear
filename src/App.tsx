@@ -3555,6 +3555,19 @@ function useDeadlineLevel(task: Pick<Task, 'deadline' | 'storyPoints' | 'tags' |
  * z tym samym terminem moga miec rozny (patrz `deadlineLevel`). Obwodka ma kolor wypelnienia, dzieki
  * czemu pusty pasek tez swieci. Praca oddana nie ma czego odliczac — tam paska nie rysujemy.
  */
+/**
+ * Data ostatniej zmiany w miejscu terminu. Olowek mowi „zmieniono" — bez niego „26 paz" latwo wziac za
+ * termin (tylko ikona kalendarza je rozroznia). Przygaszony i bez reakcji na kursor: to podpis, nie przycisk.
+ */
+function ChangedDate({ date }: { date: string | null }) {
+  return (
+    <span className="row-meta row-changed" title="Ostatnia zmiana">
+      {shortDate(date) && <PenIcon />}
+      {shortDate(date)}
+    </span>
+  );
+}
+
 function DueBar({ level, days }: { level: DeadlineLevel; days: number }) {
   const { fill } = deadlineBar(days);
   /* Bez `title`: co znaczy kolor, mowi karta terminu pod kursorem (DueHover) — dwa dymki naraz to szum. */
@@ -3803,9 +3816,7 @@ function TaskRow({
               </DueHover>
             );
           })()}
-          <span className="row-meta" title="Ostatnia zmiana">
-            {shortDate(task.changedDate)}
-          </span>
+          <ChangedDate date={task.changedDate} />
         </>
       ) : deadlineLook === 'off' ? (
         /* Bez wyroznienia: jedna data, bez ikony i bez koloru — dokladnie to, co
@@ -3831,9 +3842,7 @@ function TaskRow({
           {shortDate(task.deadline)}
         </DueHover>
       ) : (
-        <span className="row-meta" title="Ostatnia zmiana">
-          {shortDate(task.changedDate)}
-        </span>
+        <ChangedDate date={task.changedDate} />
       )}
     </>,
     more: <>

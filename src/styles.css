@@ -2856,6 +2856,21 @@ input[type='search']::-webkit-search-decoration {
   height: 12px;
 }
 
+/* Data zmiany z olowkiem: ten sam rozmiar ikony co kalendarz terminu, kolor tekstu (przygaszony). */
+.row-changed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.row-changed > svg {
+  flex: 0 0 11px;
+  width: 11px;
+  height: 11px;
+  opacity: 0.7;
+}
+
 /*
  * Wariant `chip`: osobny slot o STALEJ szerokosci — rowniez pusty, gdy zadanie
  * terminu nie ma. Tytul jest jedynym elementem wiersza, ktory sie kurczy, wiec
@@ -3244,6 +3259,12 @@ input[type='search']::-webkit-search-decoration {
   flex: 0 1 auto;
   /* Ponizej tego z pigulki zostawalo „D…" — nieczytelne; wtedy reszte i tak chowa „+N". */
   min-width: 72px;
+}
+
+/* Litera macierzy A–D nie ma czego ucinac — pigulka na miare litery, bez minimum dla dlugich tagow. */
+.tag-strip > .tag-matrix {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .tag-strip > .tag-more {
