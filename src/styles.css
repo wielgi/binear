@@ -1858,10 +1858,11 @@ input[type='search']::-webkit-search-decoration {
   color: var(--fg-dim);
 }
 
-/* Przycisk zostaje na wierzchu tla, gdy lista otwarta. */
+/* Przycisk i lista nad tlem `.picker-backdrop` (32) — inaczej tlo przykrywa opcje
+   i kazdy klik w nie tylko zamyka liste. */
 .scope-picker-wrap.scope-open .scope-picker {
   position: relative;
-  z-index: 31;
+  z-index: 33;
 }
 
 /* Lista zakresow pod przyciskiem. */
@@ -1869,7 +1870,7 @@ input[type='search']::-webkit-search-decoration {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  z-index: 30;
+  z-index: 33;
   min-width: 100%;
   width: max-content;
   display: flex;
